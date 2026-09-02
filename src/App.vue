@@ -10,11 +10,11 @@
         <div class="status-bar">
           <div class="status-left">
             <span class="status-item">{{ store.cursorPos.x }}, {{ store.cursorPos.y }}</span>
-            <span class="status-item">{{ zoomPercent }}</span>
           </div>
           <div class="status-right">
             <span class="status-item">{{ currentToolName }}</span>
             <span v-if="store.statusMessage" class="status-item status-msg">{{ store.statusMessage }}</span>
+            <span class="status-item zoom-display" :title="'滚轮缩放 / 点击重置为 100%'" @click="resetZoom">{{ zoomPercent }}</span>
           </div>
         </div>
       </div>
@@ -45,6 +45,13 @@ const engineRef = ref<EditorEngine | null>(null)
 provide('engine', engineRef)
 
 const zoomPercent = computed(() => `${Math.round(store.view.zoom * 100)}%`)
+
+/** Reset the view zoom back to 100%. */
+function resetZoom() {
+  const e = engineRef.value
+  if (!e) return
+  e.zoomAt(1 / (e.scope.view.zoom || 1))
+}
 
 const currentToolName = computed(() => {
   const names: Record<string, string> = {
@@ -119,6 +126,14 @@ html, body, #app { height: 100%; width: 100%; overflow: hidden; }
 
 .status-msg {
   color: #8db4e3;
+}
+
+.zoom-display {
+  cursor: pointer;
+  user-select: none;
+}
+.zoom-display:hover {
+  color: #fff;
 }
 
 .right-panels {

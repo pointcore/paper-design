@@ -492,11 +492,50 @@ export class EditorEngine {
     v.center = center
   }
 
-  zoomAt(scale: number, canvasX: number, canvasY: number) {
-    this.zoom = Math.max(0.01, Math.min(64, this.zoom * scale))
-    this.scope.view.zoom = this.zoom
-    this.scope.view.update()
+  /**
+   * Zoom by a factor around the screen point (canvasX, canvasY) given in
+   * canvas pixel coordinates. When no reference point is provided the view
+   * zooms about its center. The resulting zoom is synced back to the store
+   * so the status-bar percentage stays accurate.
+   */
+  zoomAt(scale: number, canvasX?: number, canvasY?: number) {
+    const v = this.scope.view
+    const oldZoom = v.zoom || 1
+    const newZoom = Math.max(0.01, Math.min(64, oldZoom * scale))
+    if (newZoom === oldZoom) return
+
+    const W = this.canvas.width
+    const H = this.canvas.height
+    const zoomAtCenter = typeof canvasX !== 'number' || typeof canvasY !== 'number'
+
+    // Document point that sits under the reference screen point (before zooming).
+    let anchorX = v.center.x
+    let anchorY = v.center.y
+    if (!zoomAtCenter) {
+      anchorX = v.center.x + (canvasX - W / 2) / oldZoom
+      anchorY = v.center.y + (canvasY - H / 2) / oldZoom
+    }
+
+    v.zoom = newZoom
+    if (!zoomAtCenter) {
+      // Keep the anchor's document point fixed on screen while zooming.
+      v.center = new this.scope.Point(
+        anchorX - (canvasX - W / 2) / newZoom,
+        anchorY - (canvasY - H / 2) / newZoom
+      )
+    }
+
+    this.zoom = newZoom
+    // Sync this.center (view top-left in document coords) with view.center.
+    const bounds = v.bounds
+    this.center = {
+      x: v.center.x - bounds.width / 2 / newZoom,
+      y: v.center.y - bounds.height / 2 / newZoom,
+    }
+
+    v.update()
     this.refreshGrid()
+    this.store.updateView({ zoom: newZoom })
     this.emitViewChange()
   }
 
@@ -519,6 +558,7 @@ export class EditorEngine {
       this.center = { x: -bounds.center.x * zoom + this.canvas.width / 2, y: -bounds.center.y * zoom + this.canvas.height / 2 }
       this.scope.view.update()
       this.refreshGrid()
+      this.store.updateView({ zoom: this.zoom })
       this.emitViewChange()
     }
   }

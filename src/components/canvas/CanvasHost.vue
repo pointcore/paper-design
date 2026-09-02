@@ -16,7 +16,7 @@
     <div v-if="store.view.rulersVisible" class="ruler-corner"></div>
 
     <!-- Main drawing canvas -->
-    <canvas ref="canvasRef" class="main-canvas" @contextmenu.prevent="onContextMenu"></canvas>
+    <canvas ref="canvasRef" class="main-canvas" @contextmenu.prevent="onContextMenu" @wheel.prevent="onWheel"></canvas>
 
     <div v-if="contextMenu.visible" class="context-menu"
          :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
@@ -170,6 +170,20 @@ function setupRulerCanvases() {
     rulerVCanvasRef.value.width = RULER_SIZE
     rulerVCanvasRef.value.height = Math.max(1, rect.height)
   }
+}
+
+
+/**
+ * Mouse-wheel zoom on the drawing canvas. Scroll up zooms in, scroll down
+ * zooms out, keeping the point under the cursor stationary.
+ */
+function onWheel(e: WheelEvent) {
+  if (!engine || !canvasRef.value) return
+  const rect = canvasRef.value.getBoundingClientRect()
+  const sx = e.clientX - rect.left
+  const sy = e.clientY - rect.top
+  const factor = e.deltaY < 0 ? 1.1 : 0.9
+  engine.zoomAt(factor, sx, sy)
 }
 
 function onResize() {
