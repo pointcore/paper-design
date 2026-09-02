@@ -4,6 +4,8 @@
 import { EditorEngine } from './engine'
 import { SelectController } from './selection/select-controller'
 import { PenController } from './path-drawing/pen-controller'
+import { CurvatureController } from './path-drawing/curvature-controller'
+import { AnchorController } from './path-drawing/anchor-controller'
 import { ShapeController } from './shapes/shape-controller'
 import { CalloutController } from './annotation/callout-controller'
 import { ViewController } from './view-controller'
@@ -15,9 +17,16 @@ export function registerAllControllers(engine: EditorEngine) {
   engine.registerController('direct-select', selectCtrl)
 
   // Pen tool
-  const penCtrl = new PenController()
-  engine.registerController('pen', penCtrl)
-  engine.registerController('curvature', penCtrl)
+  engine.registerController('pen', new PenController())
+
+  // Curvature tool (independent of the pen tool)
+  engine.registerController('curvature', new CurvatureController())
+
+  // Anchor point tools (add / delete / convert)
+  const anchorCtrl = new AnchorController()
+  engine.registerController('add-anchor', anchorCtrl)
+  engine.registerController('delete-anchor', anchorCtrl)
+  engine.registerController('convert-anchor', anchorCtrl)
 
   // Shape tools
   const shapeCtrl = new ShapeController()

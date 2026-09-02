@@ -88,9 +88,21 @@ export class EditorEngine {
 
   setTool(tool: ToolName) {
     this.toolName = tool
+    // Remove any transient editing chrome (e.g. anchor overlays) left over
+    // by the previously active tool so it does not linger after switching.
+    this.clearTransientChrome()
     const controller = this.controllers.get(tool)
     if (controller) {
       controller.activate?.()
+    }
+  }
+
+  /** Remove temporary overlay layers used for editing feedback. */
+  clearTransientChrome() {
+    for (const layer of this.project.layers) {
+      if ((layer.data as any)?.isChromeRoot) {
+        layer.remove()
+      }
     }
   }
 

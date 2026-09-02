@@ -248,7 +248,7 @@ function onViewCmd(cmd: string) {
 }
 
 function onHelp() {
-  store.setStatusMessage('Shortcuts: V Select / P Pen / T Text / R Rectangle / Esc Cancel')
+  store.setStatusMessage('Shortcuts: V Select | A Direct Select | P Pen | Curvature | +/- & C Anchor Tools | Esc Cancel')
 }
 </script>
 

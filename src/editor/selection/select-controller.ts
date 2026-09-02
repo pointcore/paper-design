@@ -1,10 +1,21 @@
 /**
- * Selection controller
+ * Selection controller.
+ *
+ * Select tool: click / marquee select and move whole objects.
+ *
+ * Direct-select tool: refines the selection at the sub-object level. When a
+ * path is selected its anchors and handles are drawn and can be dragged to
+ * reshape the path (handle > anchor > segment > object hit priority).
  */
 import { EditorEngine } from '../engine'
+import { AnchorChrome } from '../path-drawing/anchor-chrome'
+
+type EditMode = 'select' | 'direct-select'
 
 export class SelectController {
   engine: EditorEngine | null = null
+  chrome: AnchorChrome = new AnchorChrome()
+
   private isDragging = false
   private isMarquee = false
   private dragStart: { x: number; y: number } = { x: 0, y: 0 }
@@ -12,13 +23,32 @@ export class SelectController {
   private marqueeRect: paper.Path | null = null
   private marqueeLayer: paper.Layer | null = null
 
+  // Direct-select anchor editing state.
+  private mode: EditMode = 'select'
+  private grab: 'none' | 'anchor' | 'handle' | 'object' = 'none'
+  private grabSegmentIndex = -1
+  private grabIsIn = false
+  private lastSegmentCount = -1
+
   attachEngine(engine: EditorEngine) {
     this.engine = engine
+    this.chrome.attachEngine(engine)
   }
 
   activate() {
     if (!this.engine) return
+    const store = this.engine.store
+    this.mode = store.tool === 'direct-select' ? 'direct-select' : 'select'
+    this.clearAnchorState()
+    this.chrome.clear()
     this.setupTool()
+  }
+
+  private clearAnchorState() {
+    this.grab = 'none'
+    this.grabSegmentIndex = -1
+    this.grabIsIn = false
+    this.lastSegmentCount = -1
   }
 
   private getNativeEvent(event: paper.ToolEvent): MouseEvent {
@@ -30,11 +60,21 @@ export class SelectController {
     if (!engine) return
     const scope = engine.scope
 
-    scope.tool.remove()
+    // Remove existing tool if any, then create a fresh tool.
+    if (scope.tool) {
+      scope.tool.remove()
+    }
+    // Creating a Tool automatically activates it on the scope.
+    new scope.Tool()
 
     scope.tool.onMouseDown = (event: paper.ToolEvent) => {
       const native = this.getNativeEvent(event)
       if (native.button === 1 || native.button === 2) return
+
+      if (this.mode === 'direct-select' && this.tryGrabAnchor(event)) {
+        engine.store.setDragging(true)
+        return
+      }
 
       const hitResult = this.hitTest(event.point)
 
@@ -49,6 +89,7 @@ export class SelectController {
           item.selected = false
           engine.syncSelectionToStore()
           this.isDragging = false
+          this.refreshChrome()
           return
         } else if (event.modifiers.shift) {
           engine.selectItem(item, true)
@@ -57,8 +98,11 @@ export class SelectController {
         this.isDragging = true
         this.dragItems = engine.getSelection()
         this.dragStart = { x: event.point.x, y: event.point.y }
+        this.grab = 'object'
       } else {
+        if (event.modifiers.shift) return
         engine.clearSelection()
+        this.refreshChrome()
         this.isMarquee = true
         this.dragStart = { x: event.point.x, y: event.point.y }
         this.createMarquee(event.point.x, event.point.y)
@@ -68,7 +112,11 @@ export class SelectController {
 
     scope.tool.onMouseDrag = (event: paper.ToolEvent) => {
       const store = engine.store
-      if (this.isMarquee) {
+      if (this.mode === 'direct-select' && this.grab === 'anchor') {
+        this.dragAnchor(event.point)
+      } else if (this.mode === 'direct-select' && this.grab === 'handle') {
+        this.dragHandle(event.point)
+      } else if (this.isMarquee) {
         this.updateMarquee(event.point.x, event.point.y)
       } else if (this.isDragging && this.dragItems.length > 0) {
         const delta = new scope.Point(
@@ -81,9 +129,10 @@ export class SelectController {
           }
         })
         this.dragStart = { x: event.point.x, y: event.point.y }
-        scope.view.update()
       }
       store.setCursorPos(event.point.x, event.point.y)
+      this.refreshChrome()
+      scope.view.update()
     }
 
     scope.tool.onMouseUp = () => {
@@ -91,25 +140,36 @@ export class SelectController {
         this.finishMarquee()
         this.isMarquee = false
         this.removeMarquee()
-      } else if (this.isDragging) {
+      } else if (this.isDragging && this.grab === 'object') {
         this.isDragging = false
         engine.pushHistory('Move')
+      } else if (this.grab === 'anchor' || this.grab === 'handle') {
+        engine.pushHistory('Edit Path')
       }
+      this.grab = 'none'
+      this.isDragging = false
       engine.store.setDragging(false)
+      this.refreshChrome()
     }
 
     scope.tool.onMouseMove = (event: paper.ToolEvent) => {
       engine.store.setCursorPos(event.point.x, event.point.y)
+      this.refreshChrome()
     }
 
     scope.tool.onKeyDown = (event: paper.KeyEvent) => {
       switch (event.key) {
         case 'delete':
         case 'backspace':
-          engine.deleteSelected()
+          if (this.mode === 'direct-select' && this.grabSegmentIndex >= 0) {
+            this.deleteGrabbedAnchor()
+          } else {
+            engine.deleteSelected()
+          }
           break
         case 'escape':
           engine.clearSelection()
+          this.refreshChrome()
           break
         case 'c':
           if (event.modifiers.command) engine.copySelected()
@@ -122,6 +182,204 @@ export class SelectController {
 
     scope.view.update()
   }
+
+  // ------------------------------------------------------------------
+  // Direct-select anchor / handle editing
+  // ------------------------------------------------------------------
+
+  /** In direct-select, the top selected path's anchors are grabbed first. */
+  private getEditPath(): paper.Path | null {
+    const engine = this.engine
+    if (!engine) return null
+    if (!this.mode) return null
+    // Pick the first selected path (front-most) that is editable.
+    for (let i = engine.getSelection().length - 1; i >= 0; i--) {
+      const item = engine.getSelection()[i]
+      if (item instanceof engine.scope.Path) {
+        return item as paper.Path
+      }
+    }
+    return null
+  }
+
+  private tryGrabAnchor(event: paper.ToolEvent): boolean {
+    const engine = this.engine
+    if (!engine) return false
+    const scope = engine.scope
+    const tol = 6 / scope.view.zoom
+
+    // Look at the edited path first, then at any other visible path in the
+    // active layer when nothing of interest is selected yet.
+    let candidates: paper.Path[] = []
+    const selected = this.getEditPath()
+    if (selected) candidates.push(selected)
+    for (const extra of this.userPathsAt(event.point)) {
+      if (!extra.selected && !candidates.includes(extra)) candidates.push(extra)
+    }
+
+    for (const path of candidates) {
+      // Priority: handle > anchor.
+      for (let i = 0; i < path.segments.length; i++) {
+        const seg = path.segments[i]
+        const anchor = seg.point
+        const hi = seg.handleIn as paper.Point | null
+        const ho = seg.handleOut as paper.Point | null
+        if (hi) {
+          const hp = anchor.add(hi)
+          if (hp.getDistance(event.point) <= tol) {
+            this.ensureEditedPath(path)
+            this.grab = 'handle'
+            this.grabSegmentIndex = i
+            this.grabIsIn = true
+            return true
+          }
+        }
+        if (ho) {
+          const hp = anchor.add(ho)
+          if (hp.getDistance(event.point) <= tol) {
+            this.ensureEditedPath(path)
+            this.grab = 'handle'
+            this.grabSegmentIndex = i
+            this.grabIsIn = false
+            return true
+          }
+        }
+      }
+      for (let i = 0; i < path.segments.length; i++) {
+        const seg = path.segments[i]
+        if (seg.point.getDistance(event.point) <= tol) {
+          this.ensureEditedPath(path)
+          this.grab = 'anchor'
+          this.grabSegmentIndex = i
+          return true
+        }
+      }
+    }
+    return false
+  }
+
+  /** Select a path so direct-select anchors operate on it. */
+  private ensureEditedPath(path: paper.Path) {
+    const engine = this.engine
+    if (!engine) return
+    if (!path.selected) {
+      engine.clearSelection()
+      engine.selectItem(path)
+    }
+  }
+
+  /** Collect user paths near a point (used to choose an anchor target). */
+  private userPathsAt(point: paper.Point): paper.Path[] {
+    const engine = this.engine
+    if (!engine) return []
+    const scope = engine.scope
+    const out: paper.Path[] = []
+    const tol = 6 / scope.view.zoom
+    const collect = (item: paper.Item) => {
+      if (item instanceof scope.Path) {
+        const p = item as paper.Path
+        if (p.selected) return // handled by getEditPath already
+        const segs = p.segments
+        for (let i = 0; i < segs.length; i++) {
+          const a = segs[i].point
+          const hi = segs[i].handleIn as paper.Point | null
+          const ho = segs[i].handleOut as paper.Point | null
+          if (a.getDistance(point) <= tol) { out.push(p); return }
+          if (hi && a.add(hi).getDistance(point) <= tol) { out.push(p); return }
+          if (ho && a.add(ho).getDistance(point) <= tol) { out.push(p); return }
+        }
+      }
+      if (item.children) item.children.forEach(collect)
+    }
+    for (const layer of engine.project.layers) {
+      if (!(layer.data as any)?.isUserLayer || !layer.visible || layer.locked) continue
+      layer.children.forEach(collect)
+    }
+    return out
+  }
+
+  private dragAnchor(point: paper.Point) {
+    const path = this.getEditPath()
+    const engine = this.engine
+    if (!path || !engine) return
+    const seg = path.segments[this.grabSegmentIndex]
+    if (!seg) return
+    seg.point = point
+    engine.scope.view.update()
+  }
+
+  private dragHandle(point: paper.Point) {
+    const path = this.getEditPath()
+    const engine = this.engine
+    if (!path || !engine) return
+    const seg = path.segments[this.grabSegmentIndex]
+    if (!seg) return
+    const rel = point.subtract(seg.point)
+    if (this.grabIsIn) seg.handleIn = rel
+    else seg.handleOut = rel
+    engine.scope.view.update()
+  }
+
+  private deleteGrabbedAnchor() {
+    const path = this.getEditPath()
+    const engine = this.engine
+    if (!path || !engine) return
+    const scope = engine.scope
+    const idx = this.grabSegmentIndex
+    if (idx < 0 || idx >= path.segments.length) return
+    if (path.segments.length < (path.closed ? 4 : 3)) {
+      path.remove()
+      engine.clearSelection()
+      this.clearAnchorState()
+      this.chrome.clear()
+      engine.pushHistory('Delete Anchor')
+      scope.view.update()
+      return
+    }
+    path.removeSegment(idx)
+    this.grabSegmentIndex = -1
+    engine.pushHistory('Delete Anchor')
+    scope.view.update()
+  }
+
+  /** Redraw anchor + handle chrome for the currently edited path. */
+  private refreshChrome() {
+    if (this.mode !== 'direct-select') {
+      this.chrome.clear()
+      return
+    }
+    const path = this.getEditPath()
+    const engine = this.engine
+    if (!path || !engine) {
+      this.chrome.clear()
+      return
+    }
+    const scope = engine.scope
+    this.chrome.clear()
+    const segs = path.segments
+    for (let i = 0; i < segs.length; i++) {
+      const seg = segs[i]
+      const selected = this.grabSegmentIndex === i && (this.grab === 'anchor' || this.grab === 'handle')
+      this.chrome.drawAnchor(seg.point, selected)
+    }
+    // Draw handles (two passes so handle lines are beneath the handle markers).
+    for (let i = 0; i < segs.length; i++) {
+      const seg = segs[i]
+      const hi = seg.handleIn as paper.Point | null
+      const ho = seg.handleOut as paper.Point | null
+      if (hi && !(Math.abs(hi.x) < 1e-6 && Math.abs(hi.y) < 1e-6)) {
+        this.chrome.drawHandle(seg.point, seg.point.add(hi))
+      }
+      if (ho && !(Math.abs(ho.x) < 1e-6 && Math.abs(ho.y) < 1e-6)) {
+        this.chrome.drawHandle(seg.point, seg.point.add(ho))
+      }
+    }
+    scope.view.update()
+  }
+
+  // ------------------------------------------------------------------
+  // Plain hit testing / marquee helpers (shared)
+  // ------------------------------------------------------------------
 
   private hitTest(point: paper.Point): paper.HitResult | null {
     const engine = this.engine
@@ -205,6 +463,7 @@ export class SelectController {
       })
     })
     engine.syncSelectionToStore()
+    this.refreshChrome()
   }
 
   private removeMarquee() {

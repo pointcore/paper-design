@@ -27,7 +27,12 @@ export class CalloutController {
     if (!engine) return
     const scope = engine.scope
 
-    scope.tool.remove()
+    // Remove existing tool if any, then create a fresh tool.
+    if (scope.tool) {
+      scope.tool.remove()
+    }
+    // Creating a Tool automatically activates it on the scope.
+    new scope.Tool()
 
     scope.tool.onMouseDown = (event: paper.ToolEvent) => {
       const native = this.getNativeEvent(event)
