@@ -1,0 +1,30 @@
+{
+  "name": "vue-vector-editor",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "A vector graphics editor built with Vue 3 + TypeScript + Paper.js + element-plus",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "preview": "vite preview",
+    "test": "node scripts/check-engine-size.js"
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "^2.3.1",
+    "element-plus": "^2.14.0",
+    "paper": "^0.12.17",
+    "pinia": "^2.1.7",
+    "vue": "^3.4.21"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.1",
+    "@vitejs/plugin-vue": "^5.0.4",
+    "typescript": "^5.4.5",
+    "vite": "^5.2.8",
+    "vue-tsc": "^2.0.13"
+  },
+  "engines": {
+    "node": ">=22.6.0"
+  }
+}
