@@ -115,6 +115,7 @@ export const useEditorStore = defineStore('editor', {
       showGuides: true,
       smartGuides: true,
       pixelPreview: false,
+      transparentBackground: false,
     } as ViewSettings,
     /** Snap settings */
     snap: {

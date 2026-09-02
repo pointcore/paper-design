@@ -226,6 +226,8 @@ export interface ViewSettings {
   showGuides: boolean
   smartGuides: boolean
   pixelPreview: boolean
+  /** Whether the canvas shows a transparent (checkerboard) background */
+  transparentBackground: boolean
 }
 
 /** Export format */

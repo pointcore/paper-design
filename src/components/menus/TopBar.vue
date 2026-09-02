@@ -52,9 +52,19 @@
               <el-dropdown-item command="zoomIn">Zoom In</el-dropdown-item>
               <el-dropdown-item command="zoomOut">Zoom Out</el-dropdown-item>
               <el-dropdown-item command="zoom100" divided>Actual Size</el-dropdown-item>
-              <el-dropdown-item command="rulers" divided>Rulers</el-dropdown-item>
-              <el-dropdown-item command="grid">Grid</el-dropdown-item>
-              <el-dropdown-item command="guides">Guides</el-dropdown-item>
+              <el-dropdown-item command="rulers" divided :icon="store.view.rulersVisible ? Check : undefined">
+                Rulers
+              </el-dropdown-item>
+              <el-dropdown-item command="grid" :icon="store.view.showGrid ? Check : undefined">
+                Grid
+              </el-dropdown-item>
+              <el-dropdown-item command="guides" :icon="store.view.showGuides ? Check : undefined">
+                Guides
+              </el-dropdown-item>
+              <el-dropdown-item command="transparentBg" :icon="store.view.transparentBackground ? Check : undefined">
+                Transparent Background
+              </el-dropdown-item>
+              <el-dropdown-item command="canvasSettings" divided>Canvas Settings...</el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
@@ -68,17 +78,92 @@
         </el-button>
       </el-tooltip>
     </div>
+
+    <!-- Canvas Settings Dialog -->
+    <el-dialog v-model="settingsVisible" title="Canvas Settings" width="420px" class="canvas-settings-dialog">
+      <div class="settings-body">
+        <div class="setting-section">
+          <div class="setting-title">Display</div>
+
+          <div class="setting-row">
+            <div class="setting-label">
+              <span class="setting-name">Rulers</span>
+              <span class="setting-desc">Show rulers along the canvas edges</span>
+            </div>
+            <el-switch v-model="settings.rulers" size="small" @change="onRulersToggle" />
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-label">
+              <span class="setting-name">Grid</span>
+              <span class="setting-desc">Show a grid on the canvas</span>
+            </div>
+            <el-switch v-model="settings.grid" size="small" @change="onGridToggle" />
+          </div>
+
+          <div v-if="settings.grid" class="setting-row setting-sub">
+            <div class="setting-label">
+              <span class="setting-name">Grid Size</span>
+              <span class="setting-desc">Distance between grid lines</span>
+            </div>
+            <el-input-number v-model="settings.gridSize" :min="1" :max="100" :step="1" size="small"
+              @change="onGridSizeChange" />
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-label">
+              <span class="setting-name">Transparent Background</span>
+              <span class="setting-desc">Show a checkerboard to indicate transparency</span>
+            </div>
+            <el-switch v-model="settings.transparent" size="small" @change="onTransparentToggle" />
+          </div>
+        </div>
+
+        <div class="setting-section">
+          <div class="setting-title">Units</div>
+          <div class="setting-row">
+            <div class="setting-label">
+              <span class="setting-name">Ruler Unit</span>
+            </div>
+            <el-select v-model="settings.unit" size="small" style="width: 120px" @change="onUnitChange">
+              <el-option v-for="u in units" :key="u.value" :label="u.label" :value="u.value" />
+            </el-select>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button size="small" @click="settingsVisible = false">Close</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { QuestionFilled } from '@element-plus/icons-vue'
+import { ref, reactive, inject, type Ref } from 'vue'
+import { QuestionFilled, Check } from '@element-plus/icons-vue'
 import { useEditorStore } from '../../editor/store'
-import { inject, type Ref } from 'vue'
 import type { EditorEngine } from '../../editor/engine'
+import type { RulerUnit } from '../../editor/types'
 
 const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
+
+const settingsVisible = ref(false)
+const settings = reactive({
+  rulers: store.view.rulersVisible,
+  grid: store.view.showGrid,
+  gridSize: store.snap.gridSize,
+  transparent: store.view.transparentBackground,
+  unit: store.rulerUnit as RulerUnit,
+})
+
+const units = [
+  { value: 'px', label: 'px' },
+  { value: 'pt', label: 'pt' },
+  { value: 'mm', label: 'mm' },
+  { value: 'cm', label: 'cm' },
+  { value: 'in', label: 'in' },
+]
 
 function onFileCmd(cmd: string) {
   const e = engineRef?.value
@@ -89,16 +174,35 @@ function onFileCmd(cmd: string) {
       break
     case 'export':
       if (e) {
-        const result = e.project.exportSVG({ asString: true })
-        const svgStr = typeof result === 'string' ? result : String(result)
-        const blob = new Blob([svgStr], { type: 'image/svg+xml' })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = 'export.svg'
-        a.click()
-        URL.revokeObjectURL(url)
-        store.setStatusMessage('SVG exported')
+        // Temporarily hide non-user layers (grid / overlay / annotation / guides)
+        // so they do not leak into the exported SVG.
+        const hiddenLayers: any[] = []
+        for (const layer of e.project.layers) {
+          if (!(layer as any).data?.isUserLayer && layer.visible) {
+            layer.visible = false
+            hiddenLayers.push(layer)
+          }
+        }
+        e.scope.view.update()
+
+        try {
+          const result = e.project.exportSVG({ asString: true })
+          const svgStr = typeof result === 'string' ? result : String(result)
+          const blob = new Blob([svgStr], { type: 'image/svg+xml' })
+          const url = URL.createObjectURL(blob)
+          const a = document.createElement('a')
+          a.href = url
+          a.download = 'export.svg'
+          a.click()
+          URL.revokeObjectURL(url)
+          store.setStatusMessage('SVG exported')
+        } finally {
+          // Restore layer visibility
+          hiddenLayers.forEach((layer) => {
+            layer.visible = true
+          })
+          e.scope.view.update()
+        }
       }
       break
     case 'import': {
@@ -233,18 +337,79 @@ function onViewCmd(cmd: string) {
     case 'zoom100':
       e.zoom = 1
       e.scope.view.zoom = 1
+      store.updateView({ zoom: 1 })
       e.scope.view.update()
+      e.refreshGrid()
+      e.emitViewChange()
       break
     case 'rulers':
-      store.updateView({ rulersVisible: !store.view.rulersVisible })
+      toggleRulers()
       break
     case 'grid':
-      store.updateView({ showGrid: !store.view.showGrid })
+      toggleGrid()
       break
     case 'guides':
       store.updateView({ showGuides: !store.view.showGuides })
       break
+    case 'transparentBg':
+      toggleTransparent()
+      break
+    case 'canvasSettings':
+      settingsVisible.value = true
+      syncSettingsFromStore()
+      break
   }
+}
+
+function toggleRulers() {
+  store.updateView({ rulersVisible: !store.view.rulersVisible })
+  settings.rulers = store.view.rulersVisible
+}
+
+function toggleGrid() {
+  store.updateView({ showGrid: !store.view.showGrid })
+  settings.grid = store.view.showGrid
+  const e = engineRef?.value
+  if (e) e.refreshGrid()
+}
+
+function toggleTransparent() {
+  store.updateView({ transparentBackground: !store.view.transparentBackground })
+  settings.transparent = store.view.transparentBackground
+}
+
+function syncSettingsFromStore() {
+  settings.rulers = store.view.rulersVisible
+  settings.grid = store.view.showGrid
+  settings.gridSize = store.snap.gridSize
+  settings.transparent = store.view.transparentBackground
+  settings.unit = store.rulerUnit as RulerUnit
+}
+
+function onRulersToggle(val: boolean) {
+  store.updateView({ rulersVisible: val })
+}
+
+function onGridToggle(val: boolean) {
+  store.updateView({ showGrid: val })
+  const e = engineRef?.value
+  if (e) e.refreshGrid()
+}
+
+function onGridSizeChange(val: number | undefined) {
+  if (!val) return
+  store.updateSnap({ gridSize: val })
+  const e = engineRef?.value
+  if (e) e.refreshGrid()
+}
+
+function onTransparentToggle(val: boolean) {
+  store.updateView({ transparentBackground: val })
+}
+
+function onUnitChange(val: string) {
+  store.setRulerUnit(val as RulerUnit)
+  store.setStatusMessage(`Ruler unit: ${val}`)
 }
 
 function onHelp() {
@@ -302,5 +467,75 @@ function onHelp() {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+.settings-body {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.setting-section {
+  padding: 8px 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.setting-section:last-child {
+  border-bottom: none;
+}
+
+.setting-title {
+  font-size: 13px;
+  font-weight: bold;
+  color: #4a90d9;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+  gap: 12px;
+}
+
+.setting-row.setting-sub {
+  padding-left: 24px;
+  border-left: 2px solid #e0e0e0;
+  margin-left: 8px;
+}
+
+.setting-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.setting-name {
+  display: block;
+  font-size: 13px;
+  color: #333;
+  font-weight: 500;
+}
+
+.setting-desc {
+  display: block;
+  font-size: 11px;
+  color: #888;
+  margin-top: 2px;
+}
+
+:deep(.el-dialog) {
+  border-radius: 8px;
+}
+
+:deep(.el-dialog__header) {
+  padding: 14px 16px;
+  border-bottom: 1px solid #eee;
+}
+
+:deep(.el-dialog__title) {
+  font-size: 14px;
+  font-weight: bold;
 }
 </style>

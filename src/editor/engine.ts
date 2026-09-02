@@ -17,11 +17,15 @@ export class EditorEngine {
   private overlayLayer: paper.Layer | null = null
   private annotationLayer: paper.Layer | null = null
   private guideLayer: paper.Layer | null = null
+  private gridLayer: paper.Layer | null = null
 
   zoom = 1
   center = { x: 0, y: 0 }
 
   private controllers: Map<ToolName, any> = new Map()
+
+  /** Callback invoked whenever view changes (zoom, pan, etc). */
+  onViewChange: (() => void) | null = null
 
   history: HistoryEntry[] = []
   historyIndex = -1
@@ -40,6 +44,14 @@ export class EditorEngine {
   }
 
   private setupProject() {
+    // Grid layer sits at the very bottom (behind user content).
+    this.gridLayer = new this.scope.Layer()
+    this.gridLayer.name = 'grid'
+    this.gridLayer.locked = true
+    this.gridLayer.data.isUserLayer = false
+    this.gridLayer.data.isGridLayer = true
+    this.gridLayer.visible = false
+
     const userLayer = new this.scope.Layer()
     userLayer.name = 'Layer 1'
     userLayer.data.isUserLayer = true
@@ -61,6 +73,10 @@ export class EditorEngine {
     this.guideLayer.locked = true
     this.guideLayer.data.isUserLayer = false
 
+    // Keep the grid layer at the very bottom of the stacking order
+    if (this.gridLayer) {
+      this.gridLayer.sendToBack()
+    }
     userLayer.activate()
   }
 
@@ -91,6 +107,9 @@ export class EditorEngine {
     // Remove any transient editing chrome (e.g. anchor overlays) left over
     // by the previously active tool so it does not linger after switching.
     this.clearTransientChrome()
+    // Reset an inline cursor left by the previous tool so the canvas returns
+    // to its default (CSS-driven) cursor for the newly activated tool.
+    this.canvas.style.cursor = ''
     const controller = this.controllers.get(tool)
     if (controller) {
       controller.activate?.()
@@ -208,6 +227,96 @@ export class EditorEngine {
     return this.guideLayer
   }
 
+  /**
+   * Show / hide the grid and (re)draw the grid lines if needed.
+   * The grid is drawn on a dedicated layer at the bottom of the stack
+   * so it sits behind all user artwork.
+   */
+  setGridVisible(visible: boolean, gridSize: number = 10) {
+    if (!this.gridLayer || !this.gridLayer.parent) {
+      this.gridLayer = new this.scope.Layer()
+      this.gridLayer.name = 'grid'
+      this.gridLayer.locked = true
+      this.gridLayer.data.isUserLayer = false
+      this.gridLayer.data.isGridLayer = true
+      // Ensure the grid layer sits at the very bottom of the stack
+      this.gridLayer.sendToBack()
+    }
+
+    this.gridLayer.visible = visible
+    if (visible) {
+      this.drawGrid(gridSize)
+    } else {
+      this.gridLayer.removeChildren()
+    }
+    this.scope.view.update()
+  }
+
+  /** Draw a dot or line grid using gridSize pixels (in document units). */
+  private drawGrid(gridSize: number) {
+    if (!this.gridLayer) return
+    this.gridLayer.removeChildren()
+
+    const v = this.scope.view
+    const viewBounds = v.bounds
+    // Extend drawing area so the grid covers the entire viewport regardless of pan
+    const margin = 100
+    const left = viewBounds.x - margin
+    const top = viewBounds.y - margin
+    const right = viewBounds.x + viewBounds.width + margin
+    const bottom = viewBounds.y + viewBounds.height + margin
+
+    // Convert viewBounds to project coordinates
+    const p1 = v.viewToProject(new this.scope.Point(left, top))
+    const p2 = v.viewToProject(new this.scope.Point(right, bottom))
+
+    const gridColor = new this.scope.Color('#555555')
+    gridColor.alpha = 0.25
+    const style = {
+      strokeColor: gridColor,
+      strokeWidth: 1 / this.zoom,
+      strokeCap: 'round' as 'round' | 'square' | 'butt',
+    }
+
+    // Draw vertical grid lines
+    const startX = Math.floor(p1.x / gridSize) * gridSize
+    for (let x = startX; x <= p2.x; x += gridSize) {
+      const line = new this.scope.Path.Line(
+        new this.scope.Point(x, p1.y),
+        new this.scope.Point(x, p2.y)
+      )
+      line.set(style)
+      line.data.isGridItem = true
+      this.gridLayer.addChild(line)
+    }
+
+    // Draw horizontal grid lines
+    const startY = Math.floor(p1.y / gridSize) * gridSize
+    for (let y = startY; y <= p2.y; y += gridSize) {
+      const line = new this.scope.Path.Line(
+        new this.scope.Point(p1.x, y),
+        new this.scope.Point(p2.x, y)
+      )
+      line.set(style)
+      line.data.isGridItem = true
+      this.gridLayer.addChild(line)
+    }
+
+    this.gridLayer.locked = true
+  }
+
+  /** Redraw the grid based on current zoom and view settings. */
+  refreshGrid() {
+    const visible = this.store.view.showGrid
+    const gridSize = this.store.snap.gridSize || 10
+    this.setGridVisible(visible, gridSize)
+  }
+
+  /** Notify listeners that the view has changed (zoom / pan). */
+  emitViewChange() {
+    this.onViewChange?.()
+  }
+
   screenToCanvas(point: paper.Point): paper.Point {
     return new this.scope.Point(
       point.x - this.center.x,
@@ -226,6 +335,8 @@ export class EditorEngine {
     this.center.x -= dx / this.zoom
     this.center.y -= dy / this.zoom
     this.updateViewCenter()
+    this.refreshGrid()
+    this.emitViewChange()
   }
 
   private updateViewCenter() {
@@ -243,6 +354,8 @@ export class EditorEngine {
     this.zoom = Math.max(0.01, Math.min(64, this.zoom * scale))
     this.scope.view.zoom = this.zoom
     this.scope.view.update()
+    this.refreshGrid()
+    this.emitViewChange()
   }
 
   fitToContent() {
@@ -263,6 +376,8 @@ export class EditorEngine {
       this.scope.view.zoom = zoom
       this.center = { x: -bounds.center.x * zoom + this.canvas.width / 2, y: -bounds.center.y * zoom + this.canvas.height / 2 }
       this.scope.view.update()
+      this.refreshGrid()
+      this.emitViewChange()
     }
   }
 
