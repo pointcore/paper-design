@@ -1,12 +1,14 @@
 <template>
   <div class="canvas-host" ref="containerRef" :class="{ 'transparent-bg': store.view.transparentBackground }">
     <!-- Horizontal ruler bar -->
-    <div v-if="store.view.rulersVisible" class="ruler ruler-h" ref="rulerHRef">
+    <div v-if="store.view.rulersVisible" class="ruler ruler-h" ref="rulerHRef"
+         @mousedown.left="onRulerMouseDown($event, 'horizontal')">
       <canvas ref="rulerHCanvasRef" class="ruler-canvas"></canvas>
     </div>
 
     <!-- Vertical ruler bar -->
-    <div v-if="store.view.rulersVisible" class="ruler ruler-v" ref="rulerVRef">
+    <div v-if="store.view.rulersVisible" class="ruler ruler-v" ref="rulerVRef"
+         @mousedown.left="onRulerMouseDown($event, 'vertical')">
       <canvas ref="rulerVCanvasRef" class="ruler-canvas"></canvas>
     </div>
 
@@ -48,6 +50,13 @@ const RULER_SIZE = 20 // px height/width of rulers
 
 let engine: EditorEngine | null = null
 let animationFrameId = 0
+
+// Guide-drag state
+let guideDragActive = false
+let guideDragOrientation: 'horizontal' | 'vertical' = 'horizontal'
+let guideDragGhost: paper.Path | null = null
+let guideDragGhostLayer: paper.Layer | null = null
+let guideDragStartClient = { x: 0, y: 0 }
 
 onMounted(() => {
   if (!canvasRef.value || !containerRef.value) return
@@ -116,6 +125,15 @@ onMounted(() => {
       })
     }
   )
+  watch(
+    () => store.view.showGuides,
+    () => {
+      engine?.refreshGuides()
+    }
+  )
+
+  // Ensure guide visibility matches the store on startup.
+  engine?.refreshGuides()
 })
 
 onBeforeUnmount(() => {
@@ -127,6 +145,9 @@ onBeforeUnmount(() => {
 onUnmounted(() => {
   window.removeEventListener('resize', onResize)
   document.removeEventListener('click', onDocumentClick)
+  window.removeEventListener('mousemove', onGuideDragMove)
+  window.removeEventListener('mouseup', onGuideDragEnd)
+  guideDragActive = false
   if (engine) {
     if (engine.onViewChange) {
       engine.onViewChange = null
@@ -323,6 +344,134 @@ function ctxSendToBack() {
 function hideMenu() {
   contextMenu.value.visible = false
 }
+
+// ------------------------------------------------------------------
+// Ruler guide drag-out support
+// ------------------------------------------------------------------
+
+/**
+ * User pressed the mouse down on a ruler - begin dragging out a new guide.
+ * The guide follows the cursor until mouse up; if released over the canvas
+ * a permanent guide line is created at that document position.
+ */
+function onRulerMouseDown(e: MouseEvent, orientation: 'horizontal' | 'vertical') {
+  if (!engine) return
+  guideDragActive = true
+  guideDragOrientation = orientation
+  guideDragStartClient = { x: e.clientX, y: e.clientY }
+  e.preventDefault()
+  e.stopPropagation()
+  // Prevent the canvas from receiving events while the user drags out a guide.
+  if (canvasRef.value) {
+    canvasRef.value.style.pointerEvents = 'none'
+  }
+
+  // Show a ghost guide line immediately.
+  updateGuideDrag(e)
+
+  // Listen on window so the drag can continue outside the ruler element.
+  window.addEventListener('mousemove', onGuideDragMove)
+  window.addEventListener('mouseup', onGuideDragEnd)
+}
+
+function onGuideDragMove(e: MouseEvent) {
+  if (!guideDragActive || !engine) return
+  updateGuideDrag(e)
+}
+
+function onGuideDragEnd(e: MouseEvent) {
+  if (!guideDragActive || !engine) return
+
+  guideDragActive = false
+  window.removeEventListener('mousemove', onGuideDragMove)
+  window.removeEventListener('mouseup', onGuideDragEnd)
+  if (canvasRef.value) {
+    canvasRef.value.style.pointerEvents = ''
+  }
+
+  removeGuideGhost()
+
+  // Determine if released over the canvas region.
+  const rect = containerRef.value?.getBoundingClientRect()
+  if (!rect) return
+  const mouseX = e.clientX - rect.left
+  const mouseY = e.clientY - rect.top
+  if (mouseX < RULER_SIZE || mouseY < RULER_SIZE) return // released on a ruler
+  if (mouseX > rect.width || mouseY > rect.height) return // outside container
+
+  // Convert to document coordinates.
+  const viewPt = engine.scope.view.viewToProject(
+    new engine.scope.Point(mouseX - RULER_SIZE, mouseY - RULER_SIZE)
+  )
+
+  const pos = guideDragOrientation === 'horizontal' ? viewPt.y : viewPt.x
+  engine.createGuide(pos, guideDragOrientation)
+  engine.scope.view.update()
+  engine.pushHistory('Add Guide')
+}
+
+/**
+ * While dragging out a guide from a ruler, show a ghost line preview.
+ */
+function updateGuideDrag(e: MouseEvent) {
+  if (!engine || !containerRef.value) return
+  const scope = engine.scope
+  const rect = containerRef.value.getBoundingClientRect()
+  const mouseX = e.clientX - rect.left
+  const mouseY = e.clientY - rect.top
+
+  // Convert container position to document space.
+  const viewPt = scope.view.viewToProject(
+    new scope.Point(mouseX - RULER_SIZE, mouseY - RULER_SIZE)
+  )
+
+  // Remove previous ghost line.
+  removeGuideGhost()
+
+  // Only draw the ghost when the cursor is inside the canvas area.
+  if (mouseX < RULER_SIZE || mouseY < RULER_SIZE) return
+  if (mouseX > rect.width || mouseY > rect.height) return
+
+  // Create a temporary chrome layer for the ghost.
+  if (!guideDragGhostLayer || !guideDragGhostLayer.parent) {
+    guideDragGhostLayer = new scope.Layer()
+    guideDragGhostLayer.name = 'guide-drag-ghost'
+    guideDragGhostLayer.locked = true
+    guideDragGhostLayer.data.isUserLayer = false
+    guideDragGhostLayer.data.isChromeRoot = true
+    guideDragGhostLayer.bringToFront()
+  }
+
+  const span = 1e6
+  let p1: paper.Point, p2: paper.Point
+  if (guideDragOrientation === 'horizontal') {
+    p1 = new scope.Point(-span, viewPt.y)
+    p2 = new scope.Point(span, viewPt.y)
+  } else {
+    p1 = new scope.Point(viewPt.x, -span)
+    p2 = new scope.Point(viewPt.x, span)
+  }
+
+  const line = new scope.Path.Line(p1, p2) as paper.Path
+  line.strokeColor = new scope.Color('#00bcd4')
+  line.strokeWidth = 1 / engine.zoom
+  line.dashArray = [4 / engine.zoom, 3 / engine.zoom]
+  guideDragGhostLayer.addChild(line)
+  guideDragGhost = line
+  scope.view.update()
+}
+
+function removeGuideGhost() {
+  if (guideDragGhost) {
+    guideDragGhost.remove()
+    guideDragGhost = null
+  }
+  if (guideDragGhostLayer && guideDragGhostLayer.parent) {
+    guideDragGhostLayer.remove()
+    guideDragGhostLayer = null
+  }
+  engine?.scope.view.update()
+}
 </script>
 
 <style scoped>
@@ -357,7 +506,12 @@ function hideMenu() {
   background: #2b2b2b;
   z-index: 10;
   overflow: hidden;
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: default;
+}
+
+.ruler:hover {
+  cursor: crosshair;
 }
 
 .ruler-h {

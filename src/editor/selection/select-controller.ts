@@ -9,12 +9,14 @@
  */
 import { EditorEngine } from '../engine'
 import { AnchorChrome } from '../path-drawing/anchor-chrome'
+import { GuideController } from '../guides/guide-controller'
 
 type EditMode = 'select' | 'direct-select'
 
 export class SelectController {
   engine: EditorEngine | null = null
   chrome: AnchorChrome = new AnchorChrome()
+  guides: GuideController = new GuideController()
 
   private isDragging = false
   private isMarquee = false
@@ -25,14 +27,17 @@ export class SelectController {
 
   // Direct-select anchor editing state.
   private mode: EditMode = 'select'
-  private grab: 'none' | 'anchor' | 'handle' | 'object' = 'none'
+  private grab: 'none' | 'anchor' | 'handle' | 'object' | 'guide' = 'none'
   private grabSegmentIndex = -1
   private grabIsIn = false
   private lastSegmentCount = -1
+  private grabGuide: paper.Path | null = null
+  private guideOriginalPos = 0
 
   attachEngine(engine: EditorEngine) {
     this.engine = engine
     this.chrome.attachEngine(engine)
+    this.guides.attachEngine(engine)
   }
 
   activate() {
@@ -40,6 +45,9 @@ export class SelectController {
     const store = this.engine.store
     this.mode = store.tool === 'direct-select' ? 'direct-select' : 'select'
     this.clearAnchorState()
+    this.grabGuide = null
+    this.guideOriginalPos = 0
+    this.guides.clearSelection()
     this.chrome.clear()
     this.setupTool()
   }
@@ -71,10 +79,58 @@ export class SelectController {
       const native = this.getNativeEvent(event)
       if (native.button === 1 || native.button === 2) return
 
+      // In direct-select mode, anchor/handle grabbing takes priority over
+      // guide interaction so users can fine-tune anchors near guides.
       if (this.mode === 'direct-select' && this.tryGrabAnchor(event)) {
+        this.guides.clearSelection()
         engine.store.setDragging(true)
         return
       }
+
+      // ---- Guide interaction ----
+      if (engine.store.view.showGuides) {
+        const guideHit = this.guides.hitTest(event.point)
+        if (guideHit) {
+          engine.store.setDragging(true)
+          const wasSelected = this.guides.getSelectedGuides().includes(guideHit)
+
+          if (!wasSelected && !event.modifiers.shift) {
+            // Select only this guide
+            this.guides.selectGuide(guideHit, false)
+          } else if (event.modifiers.shift && wasSelected) {
+            // Toggle guide off
+            this.guides.deselectGuide(guideHit)
+            this.grab = 'none'
+            this.grabGuide = null
+            this.isDragging = false
+            engine.store.setDragging(false)
+            engine.clearSelection()
+            engine.syncSelectionToStore()
+            return
+          } else if (event.modifiers.shift) {
+            // Add to existing guide selection
+            this.guides.selectGuide(guideHit, true)
+          } else {
+            // was already selected, keep the group
+            this.guides.selectGuide(guideHit, false)
+          }
+
+          // Clear regular artwork selection.
+          engine.clearSelection()
+          engine.syncSelectionToStore()
+
+          this.grabGuide = guideHit
+          this.grab = 'guide'
+          this.isDragging = true
+          this.dragStart = { x: event.point.x, y: event.point.y }
+          this.guideOriginalPos = engine.getGuidePosition(guideHit)
+          this.refreshChrome()
+          engine.scope.view.update()
+          return
+        }
+      }
+      // Not clicking a guide -> clear guide selection.
+      this.guides.clearSelection()
 
       const hitResult = this.hitTest(event.point)
 
@@ -112,7 +168,9 @@ export class SelectController {
 
     scope.tool.onMouseDrag = (event: paper.ToolEvent) => {
       const store = engine.store
-      if (this.mode === 'direct-select' && this.grab === 'anchor') {
+      if (this.grab === 'guide' && this.grabGuide) {
+        this.dragGuide(event.point)
+      } else if (this.mode === 'direct-select' && this.grab === 'anchor') {
         this.dragAnchor(event.point)
       } else if (this.mode === 'direct-select' && this.grab === 'handle') {
         this.dragHandle(event.point)
@@ -135,8 +193,10 @@ export class SelectController {
       scope.view.update()
     }
 
-    scope.tool.onMouseUp = () => {
-      if (this.isMarquee) {
+    scope.tool.onMouseUp = (event: paper.ToolEvent) => {
+      if (this.grab === 'guide' && this.grabGuide) {
+        this.finishGuideDrag(event)
+      } else if (this.isMarquee) {
         this.finishMarquee()
         this.isMarquee = false
         this.removeMarquee()
@@ -148,12 +208,16 @@ export class SelectController {
       }
       this.grab = 'none'
       this.isDragging = false
+      this.grabGuide = null
       engine.store.setDragging(false)
       this.refreshChrome()
     }
 
     scope.tool.onMouseMove = (event: paper.ToolEvent) => {
       engine.store.setCursorPos(event.point.x, event.point.y)
+      // Show a move cursor when hovering over a guide.
+      const guide = engine.store.view.showGuides ? this.guides.hitTest(event.point) : null
+      engine.canvas.style.cursor = guide ? 'move' : ''
       this.refreshChrome()
     }
 
@@ -161,13 +225,16 @@ export class SelectController {
       switch (event.key) {
         case 'delete':
         case 'backspace':
-          if (this.mode === 'direct-select' && this.grabSegmentIndex >= 0) {
+          if (this.guides.hasSelection()) {
+            this.guides.deleteSelectedGuides()
+          } else if (this.mode === 'direct-select' && this.grabSegmentIndex >= 0) {
             this.deleteGrabbedAnchor()
           } else {
             engine.deleteSelected()
           }
           break
         case 'escape':
+          this.guides.clearSelection()
           engine.clearSelection()
           this.refreshChrome()
           break
@@ -476,5 +543,56 @@ export class SelectController {
       this.marqueeLayer = null
     }
     this.engine?.scope.view.update()
+  }
+
+  // ------------------------------------------------------------------
+  // Guide dragging / deletion
+  // ------------------------------------------------------------------
+
+  /** Drag the grabbed guide to the given document point. */
+  private dragGuide(point: paper.Point) {
+    const engine = this.engine
+    if (!engine || !this.grabGuide) return
+
+    // If the cursor enters the ruler strip (top/left edge), delete the guide.
+    const viewPoint = engine.scope.view.projectToView(point)
+    if (viewPoint.x <= 0 || viewPoint.y <= 0) {
+      const dragged = this.grabGuide
+      engine.deleteGuide(dragged)
+      this.guides.deselectGuide(dragged)
+      engine.pushHistory('Delete Guide')
+      this.grabGuide = null
+      this.grab = 'none'
+      this.isDragging = false
+      engine.scope.view.update()
+      return
+    }
+
+    const orientation = engine.getGuideOrientation(this.grabGuide)
+    if (!orientation) return
+    const position = orientation === 'horizontal' ? point.y : point.x
+    engine.moveGuide(this.grabGuide, position)
+    engine.scope.view.update()
+  }
+
+  /**
+   * Finish dragging a guide. Pushes a history snapshot for the move if the
+   * guide is still present (deletion already happens inside dragGuide when the
+   * cursor reaches the ruler strip). Only pushes history if the guide was
+   * actually moved from its original position.
+   */
+  private finishGuideDrag(event: paper.ToolEvent) {
+    const engine = this.engine
+    if (!engine || !this.grabGuide) return
+    // Determine if the guide was moved from its original position.
+    const orientation = engine.getGuideOrientation(this.grabGuide)
+    const curPos = orientation ? engine.getGuidePosition(this.grabGuide) : 0
+
+    this.isDragging = false
+    this.grabGuide = null
+    if (Math.abs(curPos - this.guideOriginalPos) > 1e-6) {
+      engine.pushHistory('Move Guide')
+    }
+    engine.scope.view.update()
   }
 }

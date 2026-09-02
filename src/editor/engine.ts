@@ -2,7 +2,7 @@
  * EditorEngine - Vue/Pinia ↔ Paper.js bridge hub
  */
 import paper from 'paper'
-import type { ToolName, StyleState, LayerMeta, HistoryEntry } from './types'
+import type { ToolName, StyleState, LayerMeta, HistoryEntry, GuideOrientation } from './types'
 import { createDefaultStyle } from './store'
 import type { EditorStore } from './store-types'
 
@@ -72,6 +72,7 @@ export class EditorEngine {
     this.guideLayer.name = 'guides'
     this.guideLayer.locked = true
     this.guideLayer.data.isUserLayer = false
+    this.guideLayer.visible = this.store.view.showGuides
 
     // Keep the grid layer at the very bottom of the stacking order
     if (this.gridLayer) {
@@ -220,11 +221,152 @@ export class EditorEngine {
 
   getGuideLayer(): paper.Layer {
     if (!this.guideLayer || !this.guideLayer.parent) {
-      this.guideLayer = new this.scope.Layer()
+      // After an import/undo the layer object may have been replaced;
+      // locate the existing guides layer by name if present.
+      const existing = this.project.layers.find(
+        (l) => l.name === 'guides' && !(l.data as any)?.isUserLayer
+      ) as paper.Layer | undefined
+      this.guideLayer = existing ?? new this.scope.Layer()
       this.guideLayer.name = 'guides'
       this.guideLayer.locked = true
+      this.guideLayer.data.isUserLayer = false
+      this.guideLayer.visible = this.store.view.showGuides
+      // Keep guides above artwork but below overlay/anchor chrome
+      this.guideLayer.bringToFront()
+      const userLayers = this.project.layers.filter((l) => (l.data as any)?.isUserLayer)
+      const lastUser = userLayers[userLayers.length - 1]
+      if (lastUser) {
+        this.guideLayer.insertAbove(lastUser)
+      }
     }
     return this.guideLayer
+  }
+
+  /** Whether an item is a guide line. */
+  isGuide(item: paper.Item): boolean {
+    return !!(item && (item.data as any)?.isGuide)
+  }
+
+  /** All guide items currently on the guide layer. */
+  getGuides(): paper.Path[] {
+    const layer = this.getGuideLayer()
+    const out: paper.Path[] = []
+    if (!layer) return out
+    layer.children.forEach((child: any) => {
+      if ((child as any).data?.isGuide) out.push(child as paper.Path)
+    })
+    return out
+  }
+
+  /** Guide orientation of a guide item, or null if it is not a guide. */
+  getGuideOrientation(item: paper.Item): GuideOrientation | null {
+    if (!this.isGuide(item)) return null
+    return (item.data as any)?.guideOrientation as GuideOrientation
+  }
+
+  /** Document coordinate along the guide's free axis. */
+  getGuidePosition(item: paper.Item): number {
+    const orientation = this.getGuideOrientation(item)
+    if (!orientation) return 0
+    if (orientation === 'vertical') {
+      return ((item as paper.Path).segments[0] as any).point.x
+    }
+    return ((item as paper.Path).segments[0] as any).point.y
+  }
+
+  /** Move a guide to a new document position along its free axis. */
+  moveGuide(item: paper.Item, position: number) {
+    if (!this.isGuide(item) || !(item instanceof this.scope.Path)) return
+    const path = item as paper.Path
+    const orientation = this.getGuideOrientation(item)
+    const s0 = path.segments[0]
+    const s1 = path.segments[path.segments.length - 1]
+    if (!s0 || !s1) return
+
+    const layer = this.getGuideLayer()
+    const wasLocked = layer ? layer.locked : false
+    if (layer) layer.locked = false
+
+    if (orientation === 'horizontal') {
+      // Horizontal guide: line is (a, y) - (b, y); update y.
+      ;(s0 as any).point.y = position
+      ;(s1 as any).point.y = position
+    } else if (orientation === 'vertical') {
+      ;(s0 as any).point.x = position
+      ;(s1 as any).point.x = position
+    }
+
+    if (layer) layer.locked = wasLocked
+    this.scope.view.update()
+  }
+
+  /**
+   * Create a guide line on the guide layer.
+   * Vertical guides sit at a document X and run vertically;
+   * horizontal guides sit at a document Y and run horizontally.
+   * Guides span a huge document range so they stay visible through
+   * pan/zoom operations.
+   */
+  createGuide(position: number, orientation: GuideOrientation): paper.Path | null {
+    const scope = this.scope
+    const layer = this.getGuideLayer()
+    if (!layer) return null
+
+    const span = 1e6 // document units on each side
+    const p1 = new scope.Point(-span, position)
+    const p2 = new scope.Point(span, position)
+    if (orientation === 'vertical') {
+      p1.x = position
+      p1.y = -span
+      p2.x = position
+      p2.y = span
+    }
+
+    const line = new scope.Path.Line(p1, p2) as paper.Path
+    line.data.isGuide = true
+    line.data.guideId = this.genId()
+    line.data.guideOrientation = orientation
+    line.strokeColor = new scope.Color('#00bcd4') // cyan
+    line.strokeWidth = 1 / this.zoom
+    line.strokeCap = 'butt'
+    line.locked = false
+    line.data.isUserLayer = false
+
+    // Unlock temporarily so we can add to the locked guide layer
+    layer.locked = false
+    layer.addChild(line)
+    layer.locked = true
+
+    this.scope.view.update()
+    return line
+  }
+
+  /** Delete a guide item from the guide layer. */
+  deleteGuide(guide: paper.Path) {
+    const layer = this.getGuideLayer()
+    if (!layer) return
+    layer.locked = false
+    guide.remove()
+    layer.locked = true
+    this.scope.view.update()
+  }
+
+  /** Remove all guides from the guide layer. */
+  clearGuides() {
+    const layer = this.getGuideLayer()
+    if (!layer) return
+    layer.locked = false
+    layer.removeChildren()
+    layer.locked = true
+    this.scope.view.update()
+  }
+
+  /** Set guide-layer visibility according to the current store setting. */
+  refreshGuides() {
+    const layer = this.getGuideLayer()
+    if (!layer) return
+    layer.visible = this.store.view.showGuides
+    this.scope.view.update()
   }
 
   /**

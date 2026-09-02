@@ -208,6 +208,18 @@ export interface CalloutModel {
 /** Path edit operation type */
 export type PathEditOperation = 'move' | 'add-anchor' | 'delete-anchor' | 'convert-anchor' | 'adjust-handle'
 
+/** Guide orientation */
+export type GuideOrientation = 'horizontal' | 'vertical'
+
+/** Guide definition (persisted on the guide layer) */
+export interface GuideData {
+  id: string
+  /** Vertical guides run vertically at a fixed document X; horizontal guides run horizontally at a fixed document Y. */
+  orientation: GuideOrientation
+  /** Document coordinate — x for vertical guides, y for horizontal guides. */
+  position: number
+}
+
 /** Snap settings */
 export interface SnapSettings {
   enable: boolean
