@@ -35,6 +35,7 @@ import { ref, onMounted, onUnmounted, onBeforeUnmount, watch, inject, type Ref }
 import { useEditorStore } from '../../editor/store'
 import { EditorEngine } from '../../editor/engine'
 import { registerAllControllers } from '../../editor/register-controllers'
+import { handleGlobalKeydown } from '../../editor/shortcuts'
 
 const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
@@ -101,6 +102,7 @@ onMounted(() => {
   }
 
   window.addEventListener('resize', onResize)
+  window.addEventListener('keydown', onGlobalKeydown)
   document.addEventListener('click', onDocumentClick)
 
   // Watch for view setting changes
@@ -144,6 +146,7 @@ onBeforeUnmount(() => {
 
 onUnmounted(() => {
   window.removeEventListener('resize', onResize)
+  window.removeEventListener('keydown', onGlobalKeydown)
   document.removeEventListener('click', onDocumentClick)
   window.removeEventListener('mousemove', onGuideDragMove)
   window.removeEventListener('mouseup', onGuideDragEnd)
@@ -184,6 +187,11 @@ function onWheel(e: WheelEvent) {
   const sy = e.clientY - rect.top
   const factor = e.deltaY < 0 ? 1.1 : 0.9
   engine.zoomAt(factor, sx, sy)
+}
+
+/** Global tool-switch keyboard shortcut handler. */
+function onGlobalKeydown(e: KeyboardEvent) {
+  handleGlobalKeydown(e, store, engine)
 }
 
 function onResize() {

@@ -73,7 +73,7 @@ const selectTools: ToolDef[] = [
 
 const drawTools: ToolDef[] = [
   { name: 'pen', tip: 'Pen Tool (P)', icon: EditPen },
-  { name: 'curvature', tip: 'Curvature Tool', icon: Operation },
+  { name: 'curvature', tip: 'Curvature Tool (Shift+~)', icon: Operation },
   { name: 'add-anchor', tip: 'Add Anchor Point Tool (+)', icon: CirclePlus },
   { name: 'delete-anchor', tip: 'Delete Anchor Point Tool (-)', icon: Remove },
   { name: 'convert-anchor', tip: 'Convert Anchor Point Tool (Shift+C)', icon: MagicStick },
