@@ -643,21 +643,16 @@ export class AnchorController {
       rel = snap45(rel, scope)
     }
 
-    // If starting from a corner anchor, create symmetric handles that
-    // follow the cursor. If starting from a smooth anchor (already converted
-    // to corner on mouseDown), the drag pulls out a single handle (the other
-    // side stays cornered).
-    if (this.pressWasSmooth) {
-      // Smooth → corner → drag out a single outgoing handle.
-      seg.handleOut = rel.clone()
-      seg.handleIn = null as any
-    } else {
-      // Corner → smooth: symmetric handles follow the drag.
-      seg.handleOut = rel.clone()
-      seg.handleIn = rel.multiply(-1)
-    }
+    // Dragging an anchor always pulls out a mirror-symmetric pair of
+    // control handles: the outgoing handle points at the cursor while the
+    // incoming handle mirrors it exactly. This keeps both curves leaving the
+    // anchor tangent-smooth, matching Illustrator's convert-anchor drag.
+    // It applies whether the anchor started as a plain corner or was an
+    // already-smooth point (which was reduced to a corner on mouse-down).
+    seg.handleOut = rel.clone()
+    seg.handleIn = rel.multiply(-1)
 
-    // Alt always makes it single-sided.
+    // Holding Alt makes it a single-sided corner handle.
     if (modifiers && modifiers.alt) {
       seg.handleIn = null as any
     }
