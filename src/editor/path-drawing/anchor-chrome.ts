@@ -32,22 +32,40 @@ export class AnchorChrome {
     const engine = this.engine
     if (!engine) return null
     const scope = engine.scope
-    if (!this.layer || !this.layer.parent) {
-      const layer = new scope.Layer()
+    // Reuse an existing chrome layer when possible. Repeatedly creating fresh
+    // layers while a control handle is dragged (clear + redraw on every mouse
+    // move) otherwise leaves orphaned layers behind, which then pile up on the
+    // canvas as spurious anchor squares / handle markers.
+    let layer = this.layer && this.layer.parent
+      ? this.layer
+      : (scope.project.layers.find((l) => (l as any).name === 'anchor-chrome') as paper.Layer | undefined)
+    if (!layer) {
+      layer = new scope.Layer()
       layer.name = 'anchor-chrome'
       layer.locked = true
       layer.data.isUserLayer = false
       layer.data.isChromeRoot = true
-      this.layer = layer
     }
-    return this.layer
+    this.layer = layer
+    return layer
   }
 
   /** Remove all rendered chrome visuals. */
   clear() {
+    const engine = this.engine
+    if (!engine) return
+    const scope = engine.scope
+    // Detach the tracked chrome layer first.
     if (this.layer && this.layer.parent) {
       this.layer.remove()
       this.layer = null
+    }
+    // Purge any orphaned chrome visuals that were created while another layer
+    // was active and could not be attached to the (locked) chrome layer. Left
+    // unchecked these accumulate on screen as unwanted anchor squares while a
+    // handle is being dragged out, exactly as if many extra anchors appeared.
+    for (const it of scope.project.getItems({ class: scope.Path })) {
+      if ((it.data as any)?.isChrome) it.remove()
     }
   }
 
