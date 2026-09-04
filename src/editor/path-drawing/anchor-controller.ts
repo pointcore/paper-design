@@ -7,9 +7,10 @@
  *  - 'delete-anchor'  : clicking an anchor removes it while trying to preserve
  *                       the surrounding shape (neighbouring handles are
  *                       adjusted to approximate the original curve).
- *  - 'convert-anchor' : clicking toggles an anchor between a smooth curve
- *                       point and a corner; dragging from an anchor allows the
- *                       user to interactively shape the handles (as in AI).
+ *  - 'convert-anchor' : hover shows the anchor and its handles; dragging from
+ *                       an anchor pulls out symmetric control handles; dragging
+ *                       a handle endpoint adjusts that handle individually;
+ *                       clicking a handle endpoint deletes that handle.
  *
  * Which tool is running is read from the current Pinia store tool name.
  */
@@ -44,7 +45,17 @@ export class AnchorController {
   private dragAnchorIndex = -1
   private pressPoint: paper.Point | null = null
   private lastDragPoint: paper.Point | null = null
-  private pressWasSmooth = false
+  // Whether the mouse-down was on a handle endpoint rather than the anchor
+  // point itself. When true, dragging adjusts only the grabbed handle
+  // instead of the symmetric pair (mirror of pen-tool handle editing).
+  private pressOnHandle = false
+  // When pressOnHandle is true, whether the grabbed handle is the "in" side.
+  private pressHandleIsIn = false
+
+  // After a convert-anchor drag drafts a handle, keep the handle chrome on
+  // screen until the next mouse-down, even if the cursor moves away, so the
+  // user can still inspect the just-pulled handle without clicking elsewhere.
+  private keepHandleVisible = false
 
   // Tolerance for anchor / segment hit-testing (document units).
   private static readonly HIT_TOL = 6
@@ -82,7 +93,7 @@ export class AnchorController {
 
     scope.tool.onMouseMove = (event: paper.ToolEvent) => {
       engine.store.setCursorPos(event.point.x, event.point.y)
-      if (!this.isDragging) {
+      if (!this.isDragging && !this.keepHandleVisible) {
         this.updateHover(event.point)
       }
     }
@@ -91,6 +102,7 @@ export class AnchorController {
       const native = this.getNativeEvent(event)
       if (native && native.button !== 0) return
       this.isDragging = true
+      this.keepHandleVisible = false
       this.pressPoint = event.point
       this.lastDragPoint = event.point
       this.applyAt(event.point, event.modifiers)
@@ -108,26 +120,55 @@ export class AnchorController {
     }
 
     scope.tool.onMouseUp = () => {
+      // Whether the segment's chrome should be redrawn / kept visible.
+      let showSegmentChrome = false
+      let chromePath: paper.Path | null = null
+      let chromeIdx = -1
       if (this.mode === 'convert-anchor' &&
           this.dragAnchorPath && this.dragAnchorIndex >= 0 &&
           this.pressPoint && this.lastDragPoint) {
         const moved = this.pressPoint.getDistance(this.lastDragPoint) > 1e-4
-        if (!moved) {
-          // A simple click (no drag): toggle corner → smooth (if starting
-          // from a corner anchor).
-          const path = this.dragAnchorPath
-          const idx = this.dragAnchorIndex
-          if (path && idx >= 0 && idx < path.segments.length &&
-              !this.pressWasSmooth) {
-            this.convertCornerToSmooth(path, idx)
-            engine.pushHistory('Convert Anchor')
+        const path = this.dragAnchorPath
+        const idx = this.dragAnchorIndex
+        const seg = (path && idx >= 0 && idx < path.segments.length)
+          ? path.segments[idx]
+          : null
+        if (!moved && seg) {
+          // A simple click (no drag).
+          if (this.pressOnHandle) {
+            // Clicking directly on a handle endpoint deletes that single
+            // handle. Dragging from a handle endpoint adjusts it instead.
+            if (this.pressHandleIsIn) {
+              ;(seg.handleIn as any) = null
+            } else {
+              ;(seg.handleOut as any) = null
+            }
+            engine.pushHistory('Delete Handle')
           }
-        } else {
+          // Note: clicking on the anchor body itself does NOT toggle between
+          // corner and smooth. A corner stays corner; a smooth point stays
+          // smooth. Handles are created by dragging from the anchor and are
+          // removed by clicking their endpoints — no implicit conversion.
+        } else if (moved) {
           // A drag already set symmetric handles via dragConvertHandle.
           engine.pushHistory('Convert Anchor')
         }
+        // Always redraw the segment's chrome after the interaction so the
+        // anchor marker and any remaining handles stay visible and stable.
+        if (seg) {
+          showSegmentChrome = true
+          chromePath = path
+          chromeIdx = idx
+        }
       }
       this.endDrag()
+      // Keep the segment's chrome on screen until the next mouse interaction,
+      // so the anchor / handle state stays visually consistent.
+      if (showSegmentChrome && chromePath && chromeIdx >= 0) {
+        this.drawSegmentChrome(chromePath, chromeIdx)
+        this.keepHandleVisible = true
+      }
+      scope.view.update()
     }
 
     scope.tool.onKeyDown = (event: paper.KeyEvent) => {
@@ -143,11 +184,13 @@ export class AnchorController {
 
   private endDrag() {
     this.isDragging = false
+    this.keepHandleVisible = false
     this.dragAnchorPath = null
     this.dragAnchorIndex = -1
     this.pressPoint = null
     this.lastDragPoint = null
-    this.pressWasSmooth = false
+    this.pressOnHandle = false
+    this.pressHandleIsIn = false
     this.clearHover()
   }
 
@@ -205,16 +248,14 @@ export class AnchorController {
     scope.view.update()
   }
 
-  /** Redraw hover chrome after a convert-drag updates the geometry. */
-  private refreshHoverChrome(point: paper.Point) {
-    if (this.mode !== 'convert-anchor') return
-    this.chrome.clear()
-    const path = this.dragAnchorPath
-    if (!path) return
-    const idx = this.dragAnchorIndex
+  /** Redraw the chrome for the given path segment (anchor + its handles). */
+  private drawSegmentChrome(path: paper.Path, idx: number) {
+    const engine = this.engine
+    if (!engine || !path) return
     if (idx < 0 || idx >= path.segments.length) return
     const seg = path.segments[idx]
     if (!seg) return
+    this.chrome.clear()
     this.chrome.drawAnchor(seg.point, true)
     const anchor = seg.point
     const hi = seg.handleIn as paper.Point | null
@@ -225,6 +266,14 @@ export class AnchorController {
     if (ho && !(Math.abs(ho.x) < 1e-6 && Math.abs(ho.y) < 1e-6)) {
       this.chrome.drawHandle(anchor, anchor.add(ho))
     }
+  }
+
+  /** Redraw the dragged segment's chrome after a convert-drag geometry update. */
+  private refreshHoverChrome(point: paper.Point) {
+    if (this.mode !== 'convert-anchor') return
+    const path = this.dragAnchorPath
+    if (!path) return
+    this.drawSegmentChrome(path, this.dragAnchorIndex)
   }
 
   private applyAt(point: paper.Point, modifiers: any) {
@@ -251,24 +300,41 @@ export class AnchorController {
         this.ensurePathSelected(target.path)
       }
     } else if (this.mode === 'convert-anchor') {
-      const target = this.findAnchorTarget(point)
-      if (target && target.path && target.segment) {
-        this.dragAnchorPath = target.path
-        this.dragAnchorIndex = target.index
-        // Track whether the anchor was smooth when the press began.
-        // A simple click toggles smooth↔corner; a drag allows interactive
-        // handle positioning (AI convert-anchor behaviour).
-        this.pressWasSmooth = this.hasHandles(target.segment)
-        // If the user is starting from a smooth anchor, immediately convert
-        // it to a corner on mouse-down. If they later drag, the corner stays
-        // corner (no extra handles appear unless dragged with Alt).
-        if (this.pressWasSmooth) {
-          this.convertSmoothToCorner(target.path, target.index)
+      // First, check for handle endpoints. This takes priority so users can
+      // grab and drag an individual handle to fine-tune it without the
+      // smooth→corner toggle erasing the handle on mouse-down.
+      const handleHit = this.findHandleTarget(point)
+      if (handleHit) {
+        this.dragAnchorPath = handleHit.path
+        this.dragAnchorIndex = handleHit.index
+        // A handle endpoint exists ⇒ the segment is smooth.
+        this.pressOnHandle = true
+        this.pressHandleIsIn = handleHit.isIn
+        this.ensurePathSelected(handleHit.path)
+      } else {
+        const target = this.findAnchorTarget(point)
+        if (target && target.path && target.segment) {
+          this.dragAnchorPath = target.path
+          this.dragAnchorIndex = target.index
+          this.pressOnHandle = false
+          this.pressHandleIsIn = false
+          this.ensurePathSelected(target.path)
         }
-        this.ensurePathSelected(target.path)
       }
     }
-    this.clearHover()
+    // In convert-anchor mode the hover chrome (anchor + handles) should stay
+    // visible through mouse-down when an anchor or handle is hit, so clicking
+    // does not cause a visible flicker. Chrome is redrawn on mouse-up /
+    // drag as needed. For add / delete modes (and when the click missed any
+    // anchor / handle in convert mode) clear the stale hover preview.
+    if (this.mode !== 'convert-anchor' ||
+        (!this.dragAnchorPath && !this.pressOnHandle)) {
+      this.clearHover()
+    } else {
+      // Just reset hover bookkeeping without clearing the drawn visuals.
+      this.hoverPath = null
+      this.hoverTarget = null
+    }
     scope.view.update()
   }
 
@@ -470,6 +536,53 @@ export class AnchorController {
   }
 
   /**
+   * Find a handle endpoint (the round marker at the free end of a control
+   * handle) near the given point. Used by the convert-anchor tool so the
+   * user can grab an individual handle to adjust it.
+   */
+  private findHandleTarget(point: paper.Point): { path: paper.Path; index: number; isIn: boolean } | null {
+    const engine = this.engine
+    if (!engine) return null
+    const scope = engine.scope
+    const tol = AnchorController.HIT_TOL / scope.view.zoom
+
+    const allPaths = this.editablePaths()
+    const selectedPaths = allPaths.filter((p) => p.selected)
+    const searchOrder = selectedPaths.length > 0
+      ? [...selectedPaths, ...allPaths.filter((p) => !p.selected)]
+      : allPaths
+
+    let best: { path: paper.Path; index: number; isIn: boolean } | null = null
+    let bestDist = Infinity
+    for (const path of searchOrder) {
+      for (let i = 0; i < path.segments.length; i++) {
+        const seg = path.segments[i]
+        const hi = seg.handleIn as paper.Point | null
+        const ho = seg.handleOut as paper.Point | null
+        // Check handle-in endpoint.
+        if (hi && !(Math.abs(hi.x) < 1e-6 && Math.abs(hi.y) < 1e-6)) {
+          const hp = seg.point.add(hi)
+          const d = hp.getDistance(point)
+          if (d <= tol && d < bestDist) {
+            bestDist = d
+            best = { path, index: i, isIn: true }
+          }
+        }
+        // Check handle-out endpoint.
+        if (ho && !(Math.abs(ho.x) < 1e-6 && Math.abs(ho.y) < 1e-6)) {
+          const hp = seg.point.add(ho)
+          const d = hp.getDistance(point)
+          if (d <= tol && d < bestDist) {
+            bestDist = d
+            best = { path, index: i, isIn: false }
+          }
+        }
+      }
+    }
+    return best
+  }
+
+  /**
    * Delete an anchor while trying to preserve the path's visual shape.
    * When the deleted anchor is smooth and both neighbours also have handles,
    * the neighbouring handle lengths / directions are adjusted to approximate
@@ -574,53 +687,6 @@ export class AnchorController {
     return !nearZero(hi) || !nearZero(ho)
   }
 
-  /** Convert a smooth anchor into a corner by removing both handles. */
-  private convertSmoothToCorner(path: paper.Path, index: number) {
-    const engine = this.engine
-    if (!engine) return
-    const scope = engine.scope
-    const seg = path.segments[index]
-    if (!seg) return
-    ;(seg.handleIn as any) = null
-    ;(seg.handleOut as any) = null
-    scope.view.update()
-  }
-
-  /** Convert a corner anchor into a smooth one with symmetric handles. */
-  private convertCornerToSmooth(path: paper.Path, index: number) {
-    const engine = this.engine
-    if (!engine) return
-    const scope = engine.scope
-    const seg = path.segments[index]
-    if (!seg) return
-
-    const n = path.segments.length
-    const closed = path.closed
-    const prev = closed
-      ? path.segments[(index - 1 + n) % n]
-      : (index > 0 ? path.segments[index - 1] : null)
-    const next = closed
-      ? path.segments[(index + 1) % n]
-      : (index < n - 1 ? path.segments[index + 1] : null)
-
-    let dir: paper.Point
-    if (prev && next) {
-      dir = next.point.subtract(prev.point)
-    } else if (next) {
-      dir = next.point.subtract(seg.point)
-    } else if (prev) {
-      dir = seg.point.subtract(prev.point)
-    } else {
-      dir = new scope.Point(10, 0)
-    }
-    let len = dir.length / 4
-    if (len < 1) len = 10
-    const tangent = dir.normalize(len)
-    seg.handleIn = tangent.multiply(-1)
-    seg.handleOut = tangent
-    scope.view.update()
-  }
-
   /**
    * Called while dragging with convert-anchor: moves the control handle so
    * the user can interactively set the handle direction and length.
@@ -643,18 +709,35 @@ export class AnchorController {
       rel = snap45(rel, scope)
     }
 
-    // Dragging an anchor always pulls out a mirror-symmetric pair of
-    // control handles: the outgoing handle points at the cursor while the
-    // incoming handle mirrors it exactly. This keeps both curves leaving the
-    // anchor tangent-smooth, matching Illustrator's convert-anchor drag.
-    // It applies whether the anchor started as a plain corner or was an
-    // already-smooth point (which was reduced to a corner on mouse-down).
-    seg.handleOut = rel.clone()
-    seg.handleIn = rel.multiply(-1)
+    // When the mouse-down landed on a handle endpoint, adjust only that
+    // handle. This lets the user fine-tune one side of a smooth anchor
+    // without erasing the opposite handle (mirror of pen-tool behaviour).
+    if (this.pressOnHandle) {
+      if (this.pressHandleIsIn) {
+        seg.handleIn = rel.clone()
+        // Alt breaks the smooth link and converts to a corner keeping
+        // only the dragged side.
+        if (modifiers && modifiers.alt) {
+          seg.handleOut = null as any
+        }
+      } else {
+        seg.handleOut = rel.clone()
+        if (modifiers && modifiers.alt) {
+          seg.handleIn = null as any
+        }
+      }
+    } else {
+      // Dragging from the anchor point itself always pulls out a
+      // mirror-symmetric pair of handles: the outgoing handle points at
+      // the cursor while the incoming handle mirrors it exactly. This keeps
+      // both curves leaving the anchor tangent-smooth, matching Illustrator.
+      seg.handleOut = rel.clone()
+      seg.handleIn = rel.multiply(-1)
 
-    // Holding Alt makes it a single-sided corner handle.
-    if (modifiers && modifiers.alt) {
-      seg.handleIn = null as any
+      // Holding Alt makes it a single-sided corner handle.
+      if (modifiers && modifiers.alt) {
+        seg.handleIn = null as any
+      }
     }
     scope.view.update()
   }
