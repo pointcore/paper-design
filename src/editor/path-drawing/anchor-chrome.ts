@@ -70,7 +70,9 @@ export class AnchorChrome {
   }
 
   /**
-   * Draw one anchor marker. Filled when selected, hollow when not.
+   * Draw one anchor marker. Unselected anchors are filled, selected ones
+   * become hollow — matching Illustrator so selected anchors read as
+   * "picked up" regardless of how many anchors are selected at once.
    */
   drawAnchor(point: paper.Point, selected = false): AnchorVisual | null {
     const engine = this.engine
@@ -82,9 +84,9 @@ export class AnchorChrome {
       new scope.Rectangle(point.x - size, point.y - size, size * 2, size * 2)
     ) as paper.Path
     if (selected) {
-      rect.fillColor = new scope.Color('#4a90d9')
-      rect.strokeColor = new scope.Color('#ffffff')
-      rect.strokeWidth = 1 / scope.view.zoom
+      rect.fillColor = null
+      rect.strokeColor = new scope.Color('#4a90d9')
+      rect.strokeWidth = 1.2 / scope.view.zoom
     } else {
       rect.fillColor = new scope.Color('#ffffff')
       rect.strokeColor = new scope.Color('#4a90d9')

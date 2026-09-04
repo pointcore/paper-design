@@ -27,12 +27,51 @@ export class SelectController {
 
   // Direct-select anchor editing state.
   private mode: EditMode = 'select'
-  private grab: 'none' | 'anchor' | 'handle' | 'object' | 'guide' = 'none'
+  private grab: 'none' | 'anchor' | 'anchor-group' | 'handle' | 'object' | 'guide' = 'none'
   private grabSegmentIndex = -1
   private grabIsIn = false
   private lastSegmentCount = -1
   private grabGuide: paper.Path | null = null
   private guideOriginalPos = 0
+  // Path currently grabbed for anchor / handle editing (identity-safe, the
+  // front-most selected path may differ from the grabbed one).
+  private grabPath: paper.Path | null = null
+  // Anchor sub-selection built by direct-select marquee / shift-click.
+  private selectedSegments: { path: paper.Path; index: number }[] = []
+  // Whether the active marquee selects anchors (direct-select) or objects.
+  private anchorMarquee = false
+  // Whether the active marquee is additive (shift held on mouse-down).
+  private marqueeShift = false
+  // Reference point for group anchor translation.
+  private dragStartPoint: { x: number; y: number } | null = null
+
+  // Paths whose native paper.js selected-item decoration (the blue bounding
+  // box + solid corner/segment squares) we suppress while they are shown via
+  // the direct-select AnchorChrome. The app draws its own hollow / filled
+  // anchor markers, so paper's native squares would otherwise render on top of
+  // (or through) them and look like stray solid-blue boxes.
+  private chromeSuppressed = new Set<paper.Path>()
+
+  /** Disable paper.js's native selected decoration on one path. */
+  private suppressNativeSelection(path: paper.Path) {
+    if (!path.selected || (path as any)._drawSelected === false) return
+    ;(path as any)._drawSelected = false
+    this.chromeSuppressed.add(path)
+  }
+
+  /** Re-enable paper.js's native selected decoration on one path. */
+  private restoreNativeSelection(path: paper.Path) {
+    if (!this.chromeSuppressed.has(path)) return
+    delete (path as any)._drawSelected
+    this.chromeSuppressed.delete(path)
+  }
+
+  /** Re-enable native selection decoration for every suppressed path. */
+  private restoreAllNativeSelections() {
+    for (const path of Array.from(this.chromeSuppressed)) {
+      this.restoreNativeSelection(path)
+    }
+  }
 
   attachEngine(engine: EditorEngine) {
     this.engine = engine
@@ -43,10 +82,18 @@ export class SelectController {
   activate() {
     if (!this.engine) return
     const store = this.engine.store
+    // Whenever this controller is (re)activated, give paper.js back control of
+    // the native selected-item decoration. The direct-select refreshChrome()
+    // re-suppresses it for the paths it is actually rendering as we edit.
+    this.restoreAllNativeSelections()
     this.mode = store.tool === 'direct-select' ? 'direct-select' : 'select'
     this.clearAnchorState()
     this.grabGuide = null
     this.guideOriginalPos = 0
+    this.grabPath = null
+    this.dragStartPoint = null
+    this.anchorMarquee = false
+    this.clearAnchorSelection()
     this.guides.clearSelection()
     this.chrome.clear()
     this.setupTool()
@@ -57,6 +104,8 @@ export class SelectController {
     this.grabSegmentIndex = -1
     this.grabIsIn = false
     this.lastSegmentCount = -1
+    this.grabPath = null
+    this.dragStartPoint = null
   }
 
   private getNativeEvent(event: paper.ToolEvent): MouseEvent {
@@ -84,6 +133,7 @@ export class SelectController {
       if (this.mode === 'direct-select' && this.tryGrabAnchor(event)) {
         this.guides.clearSelection()
         engine.store.setDragging(true)
+        this.refreshChrome()
         return
       }
 
@@ -91,6 +141,7 @@ export class SelectController {
       if (engine.store.view.showGuides) {
         const guideHit = this.guides.hitTest(event.point)
         if (guideHit) {
+          this.clearAnchorSelection()
           engine.store.setDragging(true)
           const wasSelected = this.guides.getSelectedGuides().includes(guideHit)
 
@@ -136,6 +187,7 @@ export class SelectController {
 
       if (hitResult) {
         const item = hitResult.item
+        this.clearAnchorSelection()
         engine.store.setDragging(true)
 
         if (!item.selected && !event.modifiers.shift) {
@@ -158,8 +210,13 @@ export class SelectController {
       } else {
         if (event.modifiers.shift) return
         engine.clearSelection()
+        this.clearAnchorSelection()
         this.refreshChrome()
         this.isMarquee = true
+        // Direct-select marquee sub-selects anchors; the select tool marquee
+        // selects whole objects.
+        this.anchorMarquee = this.mode === 'direct-select'
+        this.marqueeShift = !!event.modifiers.shift
         this.dragStart = { x: event.point.x, y: event.point.y }
         this.createMarquee(event.point.x, event.point.y)
         engine.store.setDragging(true)
@@ -170,7 +227,7 @@ export class SelectController {
       const store = engine.store
       if (this.grab === 'guide' && this.grabGuide) {
         this.dragGuide(event.point)
-      } else if (this.mode === 'direct-select' && this.grab === 'anchor') {
+      } else if (this.mode === 'direct-select' && (this.grab === 'anchor' || this.grab === 'anchor-group')) {
         this.dragAnchor(event.point)
       } else if (this.mode === 'direct-select' && this.grab === 'handle') {
         this.dragHandle(event.point)
@@ -197,18 +254,22 @@ export class SelectController {
       if (this.grab === 'guide' && this.grabGuide) {
         this.finishGuideDrag(event)
       } else if (this.isMarquee) {
-        this.finishMarquee()
+        if (this.anchorMarquee) this.finishAnchorMarquee()
+        else this.finishMarquee()
         this.isMarquee = false
+        this.anchorMarquee = false
         this.removeMarquee()
       } else if (this.isDragging && this.grab === 'object') {
         this.isDragging = false
         engine.pushHistory('Move')
-      } else if (this.grab === 'anchor' || this.grab === 'handle') {
+      } else if (this.grab === 'anchor' || this.grab === 'anchor-group' || this.grab === 'handle') {
         engine.pushHistory('Edit Path')
       }
       this.grab = 'none'
       this.isDragging = false
       this.grabGuide = null
+      this.grabPath = null
+      this.dragStartPoint = null
       engine.store.setDragging(false)
       this.refreshChrome()
     }
@@ -227,6 +288,8 @@ export class SelectController {
         case 'backspace':
           if (this.guides.hasSelection()) {
             this.guides.deleteSelectedGuides()
+          } else if (this.mode === 'direct-select' && this.hasAnchorSelection()) {
+            this.deleteSelectedAnchors()
           } else if (this.mode === 'direct-select' && this.grabSegmentIndex >= 0) {
             this.deleteGrabbedAnchor()
           } else {
@@ -235,6 +298,7 @@ export class SelectController {
           break
         case 'escape':
           this.guides.clearSelection()
+          this.clearAnchorSelection()
           engine.clearSelection()
           this.refreshChrome()
           break
@@ -274,14 +338,31 @@ export class SelectController {
     if (!engine) return false
     const scope = engine.scope
     const tol = 6 / scope.view.zoom
+    const modifiers = event.modifiers
 
-    // Look at the edited path first, then at any other visible path in the
-    // active layer when nothing of interest is selected yet.
+    // 1) An anchor that already belongs to the sub-selection wins: the whole
+    //    selection is then dragged as one group.
+    const hit = this.anchorHitAt(event.point, tol)
+    if (hit && this.hasAnchorSelection()) {
+      const member = this.selectedSegments.some(
+        (s) => s.path === hit.path && s.index === hit.index
+      )
+      if (member) {
+        this.grab = 'anchor-group'
+        this.grabPath = hit.path
+        this.grabSegmentIndex = hit.index
+        this.grabIsIn = false
+        this.dragStartPoint = { x: event.point.x, y: event.point.y }
+        return true
+      }
+    }
+
+    // 2) Handle endpoints keep the highest priority for reshaping curves.
     let candidates: paper.Path[] = []
     const selected = this.getEditPath()
     if (selected) candidates.push(selected)
     for (const extra of this.userPathsAt(event.point)) {
-      if (!extra.selected && !candidates.includes(extra)) candidates.push(extra)
+      if (!candidates.includes(extra)) candidates.push(extra)
     }
 
     for (const path of candidates) {
@@ -295,7 +376,9 @@ export class SelectController {
           const hp = anchor.add(hi)
           if (hp.getDistance(event.point) <= tol) {
             this.ensureEditedPath(path)
+            this.clearAnchorSelection()
             this.grab = 'handle'
+            this.grabPath = path
             this.grabSegmentIndex = i
             this.grabIsIn = true
             return true
@@ -305,24 +388,55 @@ export class SelectController {
           const hp = anchor.add(ho)
           if (hp.getDistance(event.point) <= tol) {
             this.ensureEditedPath(path)
+            this.clearAnchorSelection()
             this.grab = 'handle'
+            this.grabPath = path
             this.grabSegmentIndex = i
             this.grabIsIn = false
             return true
           }
         }
       }
+    }
+
+    // 3) Plain anchor grab. Shift-click toggles the anchor's membership in
+    //    the sub-selection; a plain click replaces it with just this anchor.
+    if (hit) {
+      this.ensureEditedPath(hit.path)
+      if (modifiers.shift) {
+        this.toggleAnchorSelection(hit.path, hit.index)
+      } else if (!this.isAnchorSelected(hit.path, hit.index)) {
+        this.clearAnchorSelection()
+        this.addAnchorToSelection(hit.path, hit.index)
+      }
+      this.grab = this.hasAnchorSelection() ? 'anchor-group' : 'anchor'
+      this.grabPath = hit.path
+      this.grabSegmentIndex = hit.index
+      this.grabIsIn = false
+      this.dragStartPoint = { x: event.point.x, y: event.point.y }
+      return true
+    }
+    return false
+  }
+
+  /**
+   * Find the anchor nearest the given point within tolerance. Anchors that
+   * already belong to the sub-selection are preferred so grabbing a selected
+   * anchor wins over picking an unselected one from an overlapping path.
+   */
+  private anchorHitAt(point: paper.Point, tol: number): { path: paper.Path; index: number } | null {
+    let best: { path: paper.Path; index: number; dist: number; sel: boolean } | null = null
+    for (const path of this.userPathsAt(point)) {
       for (let i = 0; i < path.segments.length; i++) {
-        const seg = path.segments[i]
-        if (seg.point.getDistance(event.point) <= tol) {
-          this.ensureEditedPath(path)
-          this.grab = 'anchor'
-          this.grabSegmentIndex = i
-          return true
+        const d = path.segments[i].point.getDistance(point)
+        if (d > tol) continue
+        const sel = this.isAnchorSelected(path, i)
+        if (!best || (sel && !best.sel) || (sel === best.sel && d < best.dist)) {
+          best = { path, index: i, dist: d, sel }
         }
       }
     }
-    return false
+    return best ? { path: best.path, index: best.index } : null
   }
 
   /** Select a path so direct-select anchors operate on it. */
@@ -345,7 +459,6 @@ export class SelectController {
     const collect = (item: paper.Item) => {
       if (item instanceof scope.Path) {
         const p = item as paper.Path
-        if (p.selected) return // handled by getEditPath already
         const segs = p.segments
         for (let i = 0; i < segs.length; i++) {
           const a = segs[i].point
@@ -366,9 +479,25 @@ export class SelectController {
   }
 
   private dragAnchor(point: paper.Point) {
-    const path = this.getEditPath()
     const engine = this.engine
-    if (!path || !engine) return
+    if (!engine) return
+    if (this.grab === 'anchor-group' && this.hasAnchorSelection()) {
+      // Translate every sub-selected anchor as one rigid group.
+      if (!this.dragStartPoint) return
+      const dx = point.x - this.dragStartPoint.x
+      const dy = point.y - this.dragStartPoint.y
+      if (Math.abs(dx) < 1e-9 && Math.abs(dy) < 1e-9) return
+      for (const entry of this.selectedSegments) {
+        const seg = entry.path.segments[entry.index]
+        if (!seg) continue
+        seg.point = seg.point.add(new engine.scope.Point(dx, dy))
+      }
+      this.dragStartPoint = { x: point.x, y: point.y }
+      engine.scope.view.update()
+      return
+    }
+    const path = this.grabPath ?? this.getEditPath()
+    if (!path) return
     const seg = path.segments[this.grabSegmentIndex]
     if (!seg) return
     seg.point = point
@@ -409,36 +538,202 @@ export class SelectController {
     scope.view.update()
   }
 
+  // ------------------------------------------------------------------
+  // Anchor sub-selection (direct-select)
+  // ------------------------------------------------------------------
+
+  private isAnchorSelected(path: paper.Path, index: number): boolean {
+    return this.selectedSegments.some((s) => s.path === path && s.index === index)
+  }
+
+  private addAnchorToSelection(path: paper.Path, index: number) {
+    if (!this.isAnchorSelected(path, index)) {
+      this.selectedSegments.push({ path, index })
+    }
+  }
+
+  private toggleAnchorSelection(path: paper.Path, index: number) {
+    const at = this.selectedSegments.findIndex((s) => s.path === path && s.index === index)
+    if (at >= 0) this.selectedSegments.splice(at, 1)
+    else this.selectedSegments.push({ path, index })
+  }
+
+  private clearAnchorSelection() {
+    this.selectedSegments = []
+  }
+
+  private hasAnchorSelection(): boolean {
+    return this.selectedSegments.length > 0
+  }
+
+  /** Drop sub-selection entries whose path or segment no longer exists. */
+  private pruneAnchorSelection() {
+    this.selectedSegments = this.selectedSegments.filter(
+      (s) => s.path.parent && s.index >= 0 && s.index < s.path.segments.length
+    )
+  }
+
+  /**
+   * Collect the paths involved in the anchor sub-selection so their handles
+   * can be drawn together with the selected anchors.
+   */
+  private anchorSelectionPaths(): paper.Path[] {
+    const out: paper.Path[] = []
+    for (const s of this.selectedSegments) {
+      if (!out.includes(s.path)) out.push(s.path)
+    }
+    return out
+  }
+
+  /**
+   * Finish an anchor marquee: every anchor inside the rubber band joins the
+   * sub-selection. Shift extends the existing sub-selection, otherwise the
+   * rubber band defines the whole sub-selection.
+   */
+  private finishAnchorMarquee() {
+    const engine = this.engine
+    if (!engine || !this.marqueeRect) return
+    const scope = engine.scope
+    // The rubber band is built from tool event points, which live in project
+    // space — the same space as segment points — so it can be used as-is.
+    const rectInProject = this.marqueeRect.bounds
+
+    const additive = this.marqueeShift
+    if (!additive) this.selectedSegments = []
+
+    const touchedPaths: paper.Path[] = []
+    for (const layer of engine.project.layers) {
+      if (!(layer.data as any)?.isUserLayer || !layer.visible || layer.locked) continue
+      this.collectAnchorsInRect(layer as unknown as paper.Item, rectInProject, touchedPaths)
+    }
+    for (const path of touchedPaths) {
+      for (let i = 0; i < path.segments.length; i++) {
+        const pt = path.segments[i].point
+        if (rectInProject.contains(pt)) this.addAnchorToSelection(path, i)
+      }
+    }
+    if (this.selectedSegments.length > 0) {
+      // Keep the owning paths highlighted (AI shows the path outline too).
+      for (const path of this.anchorSelectionPaths()) path.selected = true
+      engine.syncSelectionToStore()
+    } else {
+      engine.clearSelection()
+    }
+    this.refreshChrome()
+  }
+
+  /** Collect editable leaf paths under the item (paths themselves included). */
+  private collectAnchorsInRect(item: paper.Item, rect: paper.Rectangle, out: paper.Path[]) {
+    const engine = this.engine
+    if (!engine) return
+    const scope = engine.scope
+    if (item instanceof scope.Path && !(item instanceof scope.CompoundPath)) {
+      // CompoundPath children are collected via the parent branch below.
+      if (rect.intersects(item.bounds)) out.push(item as paper.Path)
+      return
+    }
+    if (item.children) {
+      for (const child of item.children) {
+        this.collectAnchorsInRect(child as paper.Item, rect, out)
+      }
+    }
+  }
+
+  /** Delete every sub-selected anchor and clear the sub-selection. */
+  private deleteSelectedAnchors() {
+    const engine = this.engine
+    if (!engine) return
+    const scope = engine.scope
+    this.pruneAnchorSelection()
+    if (this.selectedSegments.length === 0) return
+
+    // Delete from the back so indices stay valid while removing.
+    const byPath = new Map<paper.Path, number[]>()
+    for (const s of this.selectedSegments) {
+      const list = byPath.get(s.path) ?? []
+      list.push(s.index)
+      byPath.set(s.path, list)
+    }
+    const removedAll: paper.Path[] = []
+    for (const [path, indices] of byPath) {
+      indices.sort((a, b) => b - a)
+      for (const idx of indices) {
+        const minSegs = path.closed ? 4 : 3
+        if (path.segments.length <= minSegs) {
+          removedAll.push(path)
+          break
+        }
+        path.removeSegment(idx)
+      }
+    }
+    for (const path of removedAll) {
+      if (path.selected) path.selected = false
+      path.remove()
+    }
+    this.clearAnchorSelection()
+    this.clearAnchorState()
+    engine.pushHistory('Delete Anchors')
+    scope.view.update()
+  }
+
   /** Redraw anchor + handle chrome for the currently edited path. */
   private refreshChrome() {
     if (this.mode !== 'direct-select') {
+      this.restoreAllNativeSelections()
       this.chrome.clear()
       return
     }
-    const path = this.getEditPath()
     const engine = this.engine
-    if (!path || !engine) {
+    if (!engine) {
+      this.restoreAllNativeSelections()
       this.chrome.clear()
       return
+    }
+    this.pruneAnchorSelection()
+    // When anchors are sub-selected, draw chrome for every involved path so
+    // multi-path anchor selections stay visible.
+    const paths = this.hasAnchorSelection() ? this.anchorSelectionPaths() : []
+    if (paths.length === 0) {
+      const path = this.getEditPath()
+      if (path) paths.push(path)
+    }
+    if (paths.length === 0) {
+      this.restoreAllNativeSelections()
+      this.chrome.clear()
+      return
+    }
+    // Only our AnchorChrome should paint the anchor markers of the paths we
+    // are editing: restore native decoration for paths no longer part of the
+    // chrome and suppress it for the ones we are about to draw.
+    for (const path of Array.from(this.chromeSuppressed)) {
+      if (!paths.includes(path)) this.restoreNativeSelection(path)
+    }
+    for (const path of paths) {
+      if (path.selected) this.suppressNativeSelection(path)
+      else this.restoreNativeSelection(path)
     }
     const scope = engine.scope
     this.chrome.clear()
-    const segs = path.segments
-    for (let i = 0; i < segs.length; i++) {
-      const seg = segs[i]
-      const selected = this.grabSegmentIndex === i && (this.grab === 'anchor' || this.grab === 'handle')
-      this.chrome.drawAnchor(seg.point, selected)
-    }
-    // Draw handles (two passes so handle lines are beneath the handle markers).
-    for (let i = 0; i < segs.length; i++) {
-      const seg = segs[i]
-      const hi = seg.handleIn as paper.Point | null
-      const ho = seg.handleOut as paper.Point | null
-      if (hi && !(Math.abs(hi.x) < 1e-6 && Math.abs(hi.y) < 1e-6)) {
-        this.chrome.drawHandle(seg.point, seg.point.add(hi))
+    for (const path of paths) {
+      const segs = path.segments
+      for (let i = 0; i < segs.length; i++) {
+        const seg = segs[i]
+        const isSelectedAnchor = this.isAnchorSelected(path, i) ||
+          (this.grabSegmentIndex === i && path === (this.grabPath ?? this.getEditPath()) &&
+            (this.grab === 'anchor' || this.grab === 'handle'))
+        this.chrome.drawAnchor(seg.point, isSelectedAnchor)
       }
-      if (ho && !(Math.abs(ho.x) < 1e-6 && Math.abs(ho.y) < 1e-6)) {
-        this.chrome.drawHandle(seg.point, seg.point.add(ho))
+      // Draw handles (two passes so handle lines are beneath the markers).
+      for (let i = 0; i < segs.length; i++) {
+        const seg = segs[i]
+        const hi = seg.handleIn as paper.Point | null
+        const ho = seg.handleOut as paper.Point | null
+        if (hi && !(Math.abs(hi.x) < 1e-6 && Math.abs(hi.y) < 1e-6)) {
+          this.chrome.drawHandle(seg.point, seg.point.add(hi))
+        }
+        if (ho && !(Math.abs(ho.x) < 1e-6 && Math.abs(ho.y) < 1e-6)) {
+          this.chrome.drawHandle(seg.point, seg.point.add(ho))
+        }
       }
     }
     scope.view.update()
@@ -510,14 +805,10 @@ export class SelectController {
     const engine = this.engine
     if (!engine || !this.marqueeRect) return
     const scope = engine.scope
-    const bounds = this.marqueeRect.bounds
-
-    const rectInProject = new scope.Rectangle(
-      bounds.x - engine.center.x,
-      bounds.y - engine.center.y,
-      bounds.width,
-      bounds.height
-    )
+    // The rubber band is built from tool event points (project space), the
+    // same space as item bounds — use it directly so selection stays correct
+    // after zooming / panning.
+    const rectInProject = this.marqueeRect.bounds
 
     const userLayers = engine.project.layers.filter((l) => (l.data as any)?.isUserLayer)
     userLayers.forEach((layer) => {
@@ -533,6 +824,7 @@ export class SelectController {
     this.refreshChrome()
   }
 
+  /** Remove the rubber band rectangle and its temporary layer. */
   private removeMarquee() {
     if (this.marqueeRect) {
       this.marqueeRect.remove()
