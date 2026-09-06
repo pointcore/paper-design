@@ -7,6 +7,7 @@ import { PenController } from './path-drawing/pen-controller'
 import { CurvatureController } from './path-drawing/curvature-controller'
 import { AnchorController } from './path-drawing/anchor-controller'
 import { ShapeController } from './shapes/shape-controller'
+import { TextController } from './text/text-controller'
 import { CalloutController } from './annotation/callout-controller'
 import { ViewController } from './view-controller'
 
@@ -36,6 +37,9 @@ export function registerAllControllers(engine: EditorEngine) {
   ] as const) {
     engine.registerController(shape, shapeCtrl)
   }
+
+  // Text tool
+  engine.registerController('type', new TextController())
 
   // Annotation tools
   engine.registerController('callout', new CalloutController())

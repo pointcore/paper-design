@@ -133,6 +133,11 @@ export class EditorEngine {
     }
   }
 
+  /** Look up the controller registered for a tool, or null. */
+  getController(toolName: ToolName): any | null {
+    return this.controllers.get(toolName) ?? null
+  }
+
   getSelection(): paper.Item[] {
     return this.project.selectedItems as paper.Item[]
   }
@@ -610,6 +615,11 @@ export class EditorEngine {
   }
 
   restoreSnapshot(snapshot: string) {
+    // Project#importJSON appends a fresh layer stack whenever it runs (its
+    // layer-merge path only triggers for an empty active layer of matching
+    // type), so the project must be cleared first or every undo/redo would
+    // duplicate the whole document.
+    this.project.clear()
     this.project.importJSON(snapshot)
     this.syncLayersToStore()
     this.syncSelectionToStore()

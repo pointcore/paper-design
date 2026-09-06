@@ -5,6 +5,29 @@
     </div>
 
     <div class="panel-body">
+      <div v-if="isTextSelected" class="prop-section">
+        <div class="prop-label">Text</div>
+        <div class="prop-row">
+          <el-select v-model="fontFamily" size="small" style="flex: 1" @change="onFontFamilyChange">
+            <el-option v-for="f in fontFamilies" :key="f" :label="f" :value="f" />
+          </el-select>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label-sm">Size</span>
+          <el-input-number v-model="fontSize" :min="1" :max="400" size="small" @change="onFontSizeChange" />
+          <el-button size="small" :type="isBold ? 'primary' : ''" @click="toggleBold">B</el-button>
+          <el-button size="small" :type="isItalic ? 'primary' : ''" @click="toggleItalic">I</el-button>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label-sm">Align</span>
+          <el-radio-group v-model="textAlign" size="small" @change="onAlignChange">
+            <el-radio-button value="left">Left</el-radio-button>
+            <el-radio-button value="center">Center</el-radio-button>
+            <el-radio-button value="right">Right</el-radio-button>
+          </el-radio-group>
+        </div>
+      </div>
+
       <div class="prop-section">
         <div class="prop-label">Fill</div>
         <div class="color-row">
@@ -51,6 +74,7 @@
 import { ref, watch, inject, type Ref } from 'vue'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
+import type { TextAlign } from '../../editor/types'
 
 const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
@@ -65,7 +89,91 @@ const posY = ref(0)
 const posW = ref(0)
 const posH = ref(0)
 
+// ---- Text properties ----
+
+const fontFamilies = [
+  'Arial', 'Verdana', 'Tahoma', 'Trebuchet MS', 'Georgia',
+  'Times New Roman', 'Courier New', 'Impact', 'sans-serif', 'serif', 'monospace',
+]
+
+const isTextSelected = ref(false)
+const fontFamily = ref('Arial')
+const fontSize = ref(12)
+const isBold = ref(false)
+const isItalic = ref(false)
+const textAlign = ref<TextAlign>('left')
+
 function getEngine() { return engineRef?.value || null }
+
+/** First selected point text (annotation labels excluded), if any. */
+function getSelectedText(): paper.PointText | null {
+  const e = getEngine()
+  if (!e) return null
+  for (const item of e.getSelection()) {
+    if (item instanceof e.scope.PointText && !(item as any).data?.annotation) {
+      return item as paper.PointText
+    }
+  }
+  return null
+}
+
+/** Read text styling from the first selected point text into the panel. */
+function syncTextFromSelection() {
+  const item = getSelectedText()
+  isTextSelected.value = !!item
+  if (!item) return
+  fontFamily.value = (item.fontFamily as string) || 'Arial'
+  fontSize.value = Number(item.fontSize) || 12
+  isBold.value = String(item.fontWeight) === 'bold' || Number(item.fontWeight) >= 600
+  isItalic.value = ((item as any).fontStyle as string) === 'italic'
+  const j = (item as any).justification as string
+  textAlign.value = j === 'center' || j === 'right' ? j : 'left'
+}
+
+/** Apply a style change to every selected point text and record history. */
+function applyTextStyle(apply: (item: paper.PointText) => void, label: string) {
+  const e = getEngine()
+  if (!e) return
+  e.getSelection().forEach((item) => {
+    if (item instanceof e.scope.PointText) apply(item as paper.PointText)
+  })
+  e.scope.view.update()
+  e.pushHistory(label)
+}
+
+function onFontFamilyChange(val: string) {
+  store.updateCharStyle({ fontFamily: val })
+  applyTextStyle((item) => { item.fontFamily = val }, 'Change Font')
+}
+
+function onFontSizeChange(val: number | undefined) {
+  if (!val) return
+  store.updateCharStyle({ fontSize: val, leading: val * 1.2 })
+  applyTextStyle((item) => {
+    item.fontSize = val
+    item.leading = val * 1.2
+  }, 'Change Font Size')
+}
+
+function toggleBold() {
+  const next = !isBold.value
+  isBold.value = next
+  store.updateCharStyle({ fontWeight: next ? 'bold' : 'normal' })
+  applyTextStyle((item) => { item.fontWeight = next ? 'bold' : 'normal' }, 'Change Font Weight')
+}
+
+function toggleItalic() {
+  const next = !isItalic.value
+  isItalic.value = next
+  store.updateCharStyle({ fontStyle: next ? 'italic' : 'normal' })
+  applyTextStyle((item) => { (item as any).fontStyle = next ? 'italic' : 'normal' }, 'Change Font Style')
+}
+
+function onAlignChange(val: TextAlign) {
+  const justification = val === 'center' ? 'center' : val === 'right' ? 'right' : 'left'
+  store.updateParagraphStyle({ align: val })
+  applyTextStyle((item) => { (item as any).justification = justification }, 'Change Text Alignment')
+}
 
 function onFillChange(val: string) {
   const e = getEngine()
@@ -159,6 +267,9 @@ function onTransformChange() {
   e.pushHistory('Transform')
 }
 
+// `immediate` covers the panel mounting after a selection already exists
+// (the panel is v-if'd on hasSelection, so its first selection change is
+// missed without it).
 watch(() => store.selectedItemIds, () => {
   const e = getEngine()
   if (!e || !store.hasSelection) return
@@ -170,7 +281,8 @@ watch(() => store.selectedItemIds, () => {
   posY.value = Math.round(b.y * 10) / 10
   posW.value = Math.round(b.width * 10) / 10
   posH.value = Math.round(b.height * 10) / 10
-})
+  syncTextFromSelection()
+}, { immediate: true })
 </script>
 
 <style scoped>

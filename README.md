@@ -10,7 +10,7 @@ A vector graphics editor built with **Vue 3 + TypeScript + Paper.js**, offering 
 
 - **Pen & Curvature tools**: Dual Pen/Curvature tools with rubber-band preview, hover states, anchor add/remove, and handle linkage.
 - **Path editing**: In Direct Select mode the hit priority is handle > anchor > segment > object; supports multi-select, marquee select, move, copy, rotate/scale (around bounds center), apply appearance, and delete.
-- **Text system**: Point text, area text, path text, and vertical text; unified character style state (tracking/kerning em/1000, horizontal/vertical scale %, baseline pt, character rotation, auto leading, underline/strikethrough, alignment).
+- **Text tool**: Click to place point text and edit it in an HTML overlay that mirrors the text's typography at the current zoom; commits on Escape, a click outside, or a tool switch; double-click a text item with a select tool to re-enter editing. Font family, size, weight, italic and alignment are styled from the properties panel and applied to all selected text items.
 - **Annotation tools**: Callout annotations with rich text rendering and persisted content/style models.
 - **Live shapes**: Rectangle, rounded rectangle, ellipse, polygon, line, arc, spiral, rectangular grid, and polar grid, with live preview (not added to history until confirmed).
 - **Transform & panels**: Rotate/mirror tools share reference points + snapping; the transform panel (X/Y/W/H/rotate/flip) is based on nine-point reference anchors.

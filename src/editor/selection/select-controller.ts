@@ -10,6 +10,7 @@
 import { EditorEngine } from '../engine'
 import { AnchorChrome } from '../path-drawing/anchor-chrome'
 import { GuideController } from '../guides/guide-controller'
+import type { TextController } from '../text/text-controller'
 
 type EditMode = 'select' | 'direct-select'
 
@@ -127,6 +128,21 @@ export class SelectController {
     scope.tool.onMouseDown = (event: paper.ToolEvent) => {
       const native = this.getNativeEvent(event)
       if (native.button === 1 || native.button === 2) return
+
+      // Double-clicking a text item hands it over to the text tool for
+      // in-place editing.
+      if (native.detail === 2) {
+        const textItem = this.userTextAt(event.point)
+        if (textItem) {
+          const textCtrl = engine.getController('type') as TextController | null
+          if (textCtrl) {
+            engine.store.setTool('type')
+            engine.setTool('type')
+            textCtrl.editItem(textItem)
+            return
+          }
+        }
+      }
 
       // In direct-select mode, anchor/handle grabbing takes priority over
       // guide interaction so users can fine-tune anchors near guides.
@@ -742,6 +758,24 @@ export class SelectController {
   // ------------------------------------------------------------------
   // Plain hit testing / marquee helpers (shared)
   // ------------------------------------------------------------------
+
+  /** Find a user point text at the given point (annotation labels excluded). */
+  private userTextAt(point: paper.Point): paper.PointText | null {
+    const engine = this.engine
+    if (!engine) return null
+    const scope = engine.scope
+    const hit = engine.project.hitTest(point, {
+      fill: true,
+      stroke: true,
+      segments: false,
+      tolerance: 3 / scope.view.zoom,
+    })
+    const item = hit?.item
+    if (item instanceof scope.PointText && !(item as any).data?.annotation) {
+      return item as paper.PointText
+    }
+    return null
+  }
 
   private hitTest(point: paper.Point): paper.HitResult | null {
     const engine = this.engine
