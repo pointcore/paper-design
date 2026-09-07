@@ -20,6 +20,11 @@
 
     <NavigatorPanel />
 
+    <div v-if="store.isolationActive" class="isolation-banner">
+      <span>Isolated editing (Esc to exit)</span>
+      <el-button size="small" @click="exitIsolation">Exit</el-button>
+    </div>
+
     <div v-if="contextMenu.visible" class="context-menu"
          :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
          @click.stop>
@@ -397,6 +402,10 @@ function onDocumentClick() {
   contextMenu.value.visible = false
 }
 
+function exitIsolation() {
+  engine?.exitIsolation()
+}
+
 function onContextMenu(e: MouseEvent) {
   contextMenu.value = { visible: true, x: e.clientX, y: e.clientY }
 }
@@ -655,6 +664,24 @@ function removeGuideGhost() {
   border-radius: 4px;
   padding: 4px;
   min-width: 160px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+}
+
+.isolation-banner {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  background: #3c3c3c;
+  border: 1px solid #4a90d9;
+  border-radius: 4px;
+  color: #ddd;
+  font-size: 12px;
   box-shadow: 0 4px 12px rgba(0,0,0,0.5);
 }
 

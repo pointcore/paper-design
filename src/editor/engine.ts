@@ -840,6 +840,7 @@ export class EditorEngine {
     // layer-merge path only triggers for an empty active layer of matching
     // type), so the project must be cleared first or every undo/redo would
     // duplicate the whole document.
+    this.clearIsolationState()
     this.project.clear()
     this.project.importJSON(snapshot)
     this.syncLayersToStore()
@@ -965,6 +966,7 @@ export class EditorEngine {
 
   /** Reset the document to an empty state with the given page size. */
   newDocument(width: number, height: number): void {
+    this.clearIsolationState()
     this.project.clear()
     this.setupProject()
     this.initLayers()
@@ -2417,6 +2419,58 @@ export class EditorEngine {
     this.pushHistory('Break Symbol Link')
     this.scope.view.update()
     return true
+  }
+
+  // ===== Isolation mode =====
+
+  /** Isolated group root (object identity; cleared on any snapshot). */
+  private isolationRoot: paper.Group | null = null
+  /** Pre-isolation visibility per hidden item. */
+  private isolationBackup = new Map<paper.Item, boolean>()
+
+  /**
+   * Isolate a group for focused editing: everything outside its subtree
+   * hides. Ephemeral UI state (like selection): no history entry, and any
+   * snapshot restore drops the mode so the two can never disagree.
+   */
+  enterIsolation(root: paper.Group): boolean {
+    if (!root.parent || !root.visible) return false
+    if (this.isolationRoot) this.exitIsolation()
+    const inside = new Set<paper.Item>()
+    const collect = (item: paper.Item): void => {
+      inside.add(item)
+      const children = (item as any).children as paper.Item[] | undefined
+      if (children) {
+        for (const child of children) collect(child)
+      }
+    }
+    collect(root)
+    this.isolationBackup.clear()
+    for (const item of this.walkUserItems()) {
+      if (inside.has(item)) continue
+      this.isolationBackup.set(item, item.visible)
+      item.visible = false
+    }
+    this.isolationRoot = root
+    this.store.setIsolationActive(true)
+    this.scope.view.update()
+    return true
+  }
+
+  /** Leave isolation, restoring pre-isolation visibility (best effort). */
+  exitIsolation(): void {
+    for (const [item, wasVisible] of this.isolationBackup) {
+      if (item.parent) item.visible = wasVisible
+    }
+    this.clearIsolationState()
+    this.scope.view.update()
+  }
+
+  /** Drop isolation state without touching visibility (snapshot truth wins). */
+  private clearIsolationState(): void {
+    this.isolationRoot = null
+    this.isolationBackup.clear()
+    this.store.setIsolationActive(false)
   }
 
   // ===== Edit operations =====

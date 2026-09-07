@@ -47,6 +47,8 @@
               <el-dropdown-item command="sendToBack" :disabled="!store.hasSelection">Send to Back</el-dropdown-item>
               <el-dropdown-item command="group" divided :disabled="!store.hasSelection">Group</el-dropdown-item>
               <el-dropdown-item command="ungroup" :disabled="!store.hasSelection">Ungroup</el-dropdown-item>
+              <el-dropdown-item command="isolate" :disabled="!store.hasSelection">Isolate</el-dropdown-item>
+              <el-dropdown-item command="exitIsolation" :disabled="!store.isolationActive">Exit Isolation</el-dropdown-item>
               <el-dropdown-item command="makeCompound" divided :disabled="!store.hasSelection">Make Compound Path</el-dropdown-item>
               <el-dropdown-item command="releaseCompound" :disabled="!store.hasSelection">Release Compound Path</el-dropdown-item>
               <el-dropdown-item command="joinPaths" :disabled="!store.hasSelection">Join Paths</el-dropdown-item>
@@ -640,6 +642,18 @@ function onObjectCmd(cmd: string) {
       e.scope.view.update()
       break
     }
+    case 'isolate': {
+      const groups = e.getSelection().filter(
+        (i) => i instanceof e.scope.Group && !(i.data as any)?.textMode
+      )
+      if (groups.length === 0 || !e.enterIsolation(groups[0] as paper.Group)) {
+        store.setStatusMessage('Select a group to isolate')
+      }
+      break
+    }
+    case 'exitIsolation':
+      e.exitIsolation()
+      break
     case 'bringForward':
       e.bringForward()
       break

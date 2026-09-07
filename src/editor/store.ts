@@ -182,6 +182,8 @@ export const useEditorStore = defineStore('editor', {
     isCutting: false,
     /** Whether previewing (during Live Shape drag) */
     isPreviewing: false,
+    /** Whether isolated group editing is active */
+    isolationActive: false,
   }),
 
   getters: {
@@ -361,6 +363,11 @@ export const useEditorStore = defineStore('editor', {
     /** Update panel UI state */
     setPanelCollapsed(val: boolean) {
       this.ui.panelCollapsed = val
+    },
+
+    /** Enter or leave isolated group editing (banner driver) */
+    setIsolationActive(val: boolean) {
+      this.isolationActive = val
     },
 
     /** Show or hide the navigator minimap */

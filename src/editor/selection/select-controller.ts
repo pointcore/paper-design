@@ -183,7 +183,7 @@ export class SelectController {
       if (native.button === 1 || native.button === 2) return
 
       // Double-clicking a text item hands it over to the text tool for
-      // in-place editing.
+      // in-place editing; double-clicking a group isolates it instead.
       if (native.detail === 2) {
         const textItem = this.userTextAt(event.point)
         if (textItem) {
@@ -194,6 +194,10 @@ export class SelectController {
             textCtrl.editItem(textItem)
             return
           }
+        }
+        if (this.mode === 'select') {
+          const group = this.groupAt(event.point)
+          if (group && engine.enterIsolation(group)) return
         }
       }
 
@@ -386,6 +390,10 @@ export class SelectController {
           }
           break
         case 'escape':
+          if (engine.store.isolationActive) {
+            engine.exitIsolation()
+            break
+          }
           this.guides.clearSelection()
           this.clearAnchorSelection()
           engine.clearSelection()
@@ -1100,6 +1108,38 @@ export class SelectController {
       return hit as paper.HitResult
     }
     return null
+  }
+
+  /**
+   * Innermost unlocked user group under a point (isolation target on
+   * double-click). Path-text runs never isolate; plain art returns null.
+   */
+  private groupAt(point: paper.Point): paper.Group | null {
+    const engine = this.engine
+    if (!engine) return null
+    const scope = engine.scope
+    const hit = engine.project.hitTest(point, {
+      fill: true,
+      stroke: true,
+      segments: false,
+      tolerance: 3 / scope.view.zoom,
+    })
+    let node: paper.Item | null = hit?.item ?? null
+    let group: paper.Group | null = null
+    while (node && !(node instanceof scope.Layer)) {
+      const data = (node.data as any) ?? {}
+      if (
+        !group &&
+        node instanceof scope.Group &&
+        !data.textMode &&
+        !(node as any).locked
+      ) {
+        group = node as paper.Group
+      }
+      node = node.parent
+    }
+    if (!(node instanceof scope.Layer) || !(node.data as any)?.isUserLayer) return null
+    return group
   }
 
   private createMarquee(x: number, y: number) {
