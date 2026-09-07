@@ -37,7 +37,7 @@
           </el-radio-group>
         </div>
         <div class="color-row" v-if="fillKind === 'solid'">
-          <el-color-picker v-model="fillColorValue" size="small" @change="onFillChange" />
+          <el-color-picker v-model="fillColorValue" size="small" show-alpha @change="onFillChange" />
           <el-button size="small" type="danger" plain @click="onClearFill">×</el-button>
         </div>
         <template v-if="fillKind === 'gradient'">
@@ -48,7 +48,7 @@
             </el-radio-group>
           </div>
           <div class="prop-row" v-for="(stop, index) in gradientStops" :key="index">
-            <el-color-picker v-model="stop.color" size="small" @change="onGradientChange" />
+            <el-color-picker v-model="stop.color" size="small" show-alpha @change="onGradientChange" />
             <el-input-number v-model="stop.offset" :min="0" :max="100" size="small" @change="onGradientChange" />
             <el-button size="small" type="danger" plain :disabled="gradientStops.length <= 2" @click="removeGradientStop(index)">×</el-button>
           </div>
@@ -61,7 +61,7 @@
       <div class="prop-section">
         <div class="prop-label">Stroke</div>
         <div class="color-row">
-          <el-color-picker v-model="strokeColorValue" size="small" @change="onStrokeChange" />
+          <el-color-picker v-model="strokeColorValue" size="small" show-alpha @change="onStrokeChange" />
           <el-button size="small" type="danger" plain @click="onClearStroke">×</el-button>
         </div>
         <div class="prop-row">

@@ -668,7 +668,7 @@ export class EditorEngine {
     if (!fill || !fill.gradient) return null
     const stops = (fill.gradient.stops as any[]).map((stop) => ({
       offset: Number(stop.offset ?? 0),
-      color: stop.color ? stop.color.toCSS(true) : '#000000',
+      color: (stop.color && this.colorToCSS(stop.color)) || '#000000',
     }))
     if (stops.length === 0) return null
     return { type: fill.highlight ? 'radial' : 'linear', stops }
@@ -682,9 +682,9 @@ export class EditorEngine {
       style.fillColor = null
       style.gradient = baked
     } else {
-      style.fillColor = s.fillColor ? s.fillColor.toCSS(true) : null
+      style.fillColor = this.colorToCSS(s.fillColor)
     }
-    style.strokeColor = s.strokeColor ? s.strokeColor.toCSS(true) : null
+    style.strokeColor = this.colorToCSS(s.strokeColor)
     style.strokeWidth = s.strokeWidth ?? style.strokeWidth
     style.lineCap = (s.strokeCap as any) ?? style.lineCap
     style.lineJoin = (s.strokeJoin as any) ?? style.lineJoin
@@ -1463,7 +1463,7 @@ export class EditorEngine {
         : (item as any).strokeColor
     ) as any
     if (color && color.gradient) return 'gradient'
-    return color ? color.toCSS(true) : 'none'
+    return this.colorToCSS(color) ?? 'none'
   }
 
   /** First style-carrying leaf under an item (itself when it is one). */
@@ -1904,6 +1904,17 @@ export class EditorEngine {
   /** Plain CSS color string, or null for empty / gradient paints. */
   private cssOrNull(color: any): string | null {
     if (!color || color.gradient) return null
+    return color.toCSS(true) as string
+  }
+
+  /**
+   * CSS for a plain color that keeps translucency: toCSS(true) drops the
+   * alpha channel, so translucent colors serialize as rgba() instead.
+   * Opaque colors keep the short hex form (stable select-same keys).
+   */
+  private colorToCSS(color: any): string | null {
+    if (!color || color.gradient) return null
+    if ((color.alpha ?? 1) < 1) return color.toCSS(false) as string
     return color.toCSS(true) as string
   }
 
