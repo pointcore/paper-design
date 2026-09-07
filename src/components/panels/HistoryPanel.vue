@@ -1,9 +1,10 @@
 <template>
-  <div class="history-panel">
-    <div class="panel-header">
-      <span>History</span>
-      <div class="header-actions">
-        <el-icon size="14" class="action-btn" title="Clear History" @click="clearHistory"><Delete /></el-icon>
+  <div class="history-panel ai-panel">
+    <div class="hs-subheader">
+      <span class="hs-title">History</span>
+      <div class="hs-actions">
+        <el-icon size="14" class="action-btn" title="Panel menu"><Operation /></el-icon>
+        <el-icon size="14" class="action-btn" title="Clear history" @click="clearHistory"><Delete /></el-icon>
       </div>
     </div>
 
@@ -13,8 +14,8 @@
            class="history-item"
            :class="{ active: index === store.historyIndex, future: index > store.historyIndex }"
            @click="jumpTo(index)">
+        <el-icon size="14" class="history-icon"><Document /></el-icon>
         <span class="history-name">{{ entry.name }}</span>
-        <span class="history-time">{{ formatTime(entry.timestamp) }}</span>
       </div>
     </div>
   </div>
@@ -22,7 +23,7 @@
 
 <script setup lang="ts">
 import { ref, watch, inject, type Ref } from 'vue'
-import { Delete } from '@element-plus/icons-vue'
+import { Delete, Document, Operation } from '@element-plus/icons-vue'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
 
@@ -41,12 +42,6 @@ function clearHistory() {
   getEngine()?.clearHistory()
 }
 
-function formatTime(timestamp: number): string {
-  const date = new Date(timestamp)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
-}
-
 // Keep the current entry visible as history grows or jumps around.
 watch(() => store.historyIndex, () => {
   requestAnimationFrame(() => {
@@ -56,76 +51,104 @@ watch(() => store.historyIndex, () => {
 </script>
 
 <style scoped>
-.history-panel {
-  flex-shrink: 0;
-  max-height: 32%;
-  display: flex;
-  flex-direction: column;
-  border-top: 1px solid #3a3a3a;
-  min-height: 80px;
+.ai-panel {
+  background: #252526;
+  color: #c9c9c9;
+  font-size: 12px;
 }
 
-.panel-header {
+.history-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.hs-subheader {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 6px 10px;
-  background: #333;
-  color: #ddd;
-  font-size: 12px;
-  font-weight: bold;
+  padding: 10px 10px 8px;
+  background: #1e1e1e;
+  border-bottom: 1px solid #161616;
   flex-shrink: 0;
 }
 
-.header-actions {
+.hs-title {
+  font-size: 12px;
+  color: #d5d5d5;
+  font-weight: 600;
+}
+
+.hs-actions {
   display: flex;
-  gap: 4px;
+  gap: 6px;
 }
 
 .action-btn {
   cursor: pointer;
-  color: #888;
+  color: #8a8a8a;
   padding: 2px;
   border-radius: 3px;
 }
 
 .action-btn:hover {
   color: #fff;
-  background: #444;
+  background: #3d3d3d;
 }
 
 .panel-body {
-  padding: 4px 0;
+  padding: 0;
   overflow-y: auto;
+  flex: 1;
+}
+
+.panel-body::-webkit-scrollbar {
+  width: 8px;
+}
+.panel-body::-webkit-scrollbar-thumb {
+  background: #4a4a4a;
+  border-radius: 4px;
+  border: 2px solid #252526;
 }
 
 .history-item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
-  padding: 5px 10px;
+  height: 30px;
+  padding: 0 10px;
   cursor: pointer;
   font-size: 12px;
-  color: #ccc;
-  border-bottom: 1px solid #2e2e2e;
+  color: #d5d5d5;
+  border-bottom: 1px solid #1e1e1e;
+  background: #2a2a2a;
 }
 
 .history-item:hover {
-  background: #333;
+  background: #333333;
 }
 
 .history-item.active {
-  background: #3a5a8c;
+  background: #2f6fbf;
+  color: #fff;
+}
+
+.history-item.active .history-icon {
   color: #fff;
 }
 
 .history-item.future {
-  color: #777;
+  color: #7a7a7a;
 }
 
 .history-item.future.active {
   color: #fff;
+}
+
+.history-icon {
+  color: #8a8a8a;
+  flex-shrink: 0;
 }
 
 .history-name {
@@ -135,18 +158,8 @@ watch(() => store.historyIndex, () => {
   white-space: nowrap;
 }
 
-.history-time {
-  color: #888;
-  font-size: 11px;
-  flex-shrink: 0;
-}
-
-.history-item.active .history-time {
-  color: #cfe0f5;
-}
-
 .history-empty {
-  padding: 8px 10px;
+  padding: 10px;
   font-size: 12px;
   color: #666;
   font-style: italic;

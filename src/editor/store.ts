@@ -9,6 +9,7 @@ import type {
   ArtboardMeta,
   CharStyle,
   ParagraphStyle,
+  RightPanelTab,
   RulerUnit,
   SnapSettings,
   ViewSettings,
@@ -109,6 +110,8 @@ export const useEditorStore = defineStore('editor', {
     lastOperation: '',
     /** Ruler unit */
     rulerUnit: 'px' as RulerUnit,
+    /** Arrow-key nudge distance in document units (Shift = x10) */
+    nudgeStep: 1,
     /** View settings */
     view: {
       zoom: 1,
@@ -169,6 +172,8 @@ export const useEditorStore = defineStore('editor', {
       showPropertyPanel: true,
       showTransformPanel: false,
       panelWidth: 240,
+      rightTab: 'property' as RightPanelTab,
+      settingsOpen: false,
     },
     /** Clipboard copy queue */
     clipboard: null as any,
@@ -357,6 +362,16 @@ export const useEditorStore = defineStore('editor', {
       this.ui.panelCollapsed = val
     },
 
+    /** Switch the right-panel tab */
+    setRightTab(tab: RightPanelTab) {
+      this.ui.rightTab = tab
+    },
+
+    /** Open/close the canvas settings dialog */
+    setSettingsOpen(val: boolean) {
+      this.ui.settingsOpen = val
+    },
+
     /** Set page size */
     setPageSize(width: number, height: number) {
       this.pageSize = { width, height }
@@ -405,6 +420,13 @@ export const useEditorStore = defineStore('editor', {
     /** Set ruler unit */
     setRulerUnit(unit: RulerUnit) {
       this.rulerUnit = unit
+    },
+
+    /** Set arrow-key nudge distance (must stay positive) */
+    setNudgeStep(step: number) {
+      if (Number.isFinite(step) && step > 0) {
+        this.nudgeStep = step
+      }
     },
 
     /** Set clipboard data */

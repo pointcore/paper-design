@@ -131,6 +131,8 @@ export function resolveToolShortcut(e: KeyboardEvent): ToolName | null {
  *   guard so the browser's own textarea editing keeps working.
  * - Space-pan: holding Space parks the current tool and pans with the hand
  *   tool until release (see handleGlobalKeyUp).
+ * - Arrow-key nudge: moves the unlocked selection by the keyboard
+ *   increment (Shift = x10).
  * - Single-key tool switching (see resolveToolShortcut).
  */
 
@@ -176,6 +178,16 @@ export function handleGlobalKeydown(
     return
   }
   if (e.altKey) return
+  if (e.key.startsWith('Arrow')) {
+    // Arrow-key nudge: move the unlocked selection by the keyboard
+    // increment (Shift = x10). Repeats are allowed so holding the key
+    // keeps nudging; rapid nudges share one history entry.
+    const step = (store.nudgeStep > 0 ? store.nudgeStep : 1) * (e.shiftKey ? 10 : 1)
+    const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0
+    const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0
+    if (engine?.nudgeSelection(dx, dy)) e.preventDefault()
+    return
+  }
   if (e.repeat) return
 
   // Hold Space to pan with the hand tool from any other tool.

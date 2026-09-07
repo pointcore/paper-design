@@ -131,10 +131,11 @@ watch(() => store.activeArtboardId, syncPositionFromStore, { immediate: true })
 <style scoped>
 .artboard-panel {
   flex-shrink: 0;
-  max-height: 30%;
   display: flex;
   flex-direction: column;
-  border-top: 1px solid #3a3a3a;
+  background: #252526;
+  color: #c9c9c9;
+  font-size: 12px;
   min-height: 80px;
 }
 
@@ -142,33 +143,34 @@ watch(() => store.activeArtboardId, syncPositionFromStore, { immediate: true })
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 6px 10px;
-  background: #333;
-  color: #ddd;
+  padding: 10px 10px 8px;
+  background: #1e1e1e;
+  border-bottom: 1px solid #161616;
+  color: #d5d5d5;
   font-size: 12px;
-  font-weight: bold;
+  font-weight: 600;
   flex-shrink: 0;
 }
 
 .header-actions {
   display: flex;
-  gap: 4px;
+  gap: 6px;
 }
 
 .action-btn {
   cursor: pointer;
-  color: #888;
+  color: #8a8a8a;
   padding: 2px;
   border-radius: 3px;
 }
 
 .action-btn:hover {
   color: #fff;
-  background: #444;
+  background: #3d3d3d;
 }
 
 .panel-body {
-  padding: 4px 0;
+  padding: 0;
   overflow-y: auto;
 }
 
@@ -176,19 +178,21 @@ watch(() => store.activeArtboardId, syncPositionFromStore, { immediate: true })
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
+  height: 30px;
+  padding: 0 10px;
   cursor: pointer;
-  font-size: 13px;
-  color: #ccc;
-  border-bottom: 1px solid #2e2e2e;
+  font-size: 12px;
+  color: #d5d5d5;
+  border-bottom: 1px solid #1e1e1e;
+  background: #2a2a2a;
 }
 
 .artboard-item:hover {
-  background: #333;
+  background: #333333;
 }
 
 .artboard-item.active {
-  background: #3a5a8c;
+  background: #2f6fbf;
   color: #fff;
 }
 
@@ -199,26 +203,52 @@ watch(() => store.activeArtboardId, syncPositionFromStore, { immediate: true })
   white-space: nowrap;
 }
 
+.artboard-name :deep(.el-input__wrapper) {
+  background: #111;
+  border: 1px solid #4a90d9;
+  box-shadow: none !important;
+  height: 22px;
+}
+
+.artboard-name :deep(.el-input__inner) {
+  color: #fff;
+  font-size: 12px;
+}
+
 .artboard-dims {
   font-size: 11px;
-  color: #888;
+  color: #8a8a8a;
   flex-shrink: 0;
 }
 
 .artboard-item.active .artboard-dims {
-  color: #cfe0f5;
+  color: #dce9fa;
 }
 
 .artboard-position {
   display: grid;
   grid-template-columns: 20px 1fr 20px 1fr;
-  gap: 4px;
+  gap: 6px;
   align-items: center;
   padding: 8px 10px;
+  background: #1e1e1e;
+}
+
+.artboard-position :deep(.el-input__wrapper) {
+  background: #111;
+  border: 1px solid #3d3d3d;
+  box-shadow: none !important;
+  height: 26px;
+  border-radius: 3px;
+}
+
+.artboard-position :deep(.el-input__inner) {
+  color: #e6e6e6;
+  font-size: 12px;
 }
 
 .pos-label {
-  font-size: 12px;
-  color: #888;
+  font-size: 11px;
+  color: #9a9a9a;
 }
 </style>

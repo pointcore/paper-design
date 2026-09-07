@@ -98,9 +98,12 @@
       </el-tooltip>
     </div>
 
-    <!-- Canvas Settings Dialog -->
-    <el-dialog v-model="settingsVisible" title="Canvas Settings" width="420px" class="canvas-settings-dialog">
-      <div class="settings-body">
+    <!-- Canvas Settings Dialog (settings apply live; footer is just Close) -->
+    <AppDialog v-model="settingsVisible" title="Canvas Settings" :width="420" :show-footer="false">
+      <template #footer>
+        <el-button size="small" @click="settingsVisible = false">Close</el-button>
+      </template>
+      <div class="settings-body app-settings">
         <div class="setting-section">
           <div class="setting-title">Display</div>
 
@@ -219,14 +222,19 @@
           </div>
         </div>
       </div>
-      <template #footer>
-        <el-button size="small" @click="settingsVisible = false">Close</el-button>
-      </template>
-    </el-dialog>
+    </AppDialog>
 
     <!-- Raster Export Dialog -->
-    <el-dialog v-model="exportVisible" title="Export Raster" width="420px" class="canvas-settings-dialog">
-      <div class="settings-body">
+    <AppDialog
+      v-model="exportVisible"
+      title="Export Raster"
+      :width="420"
+      confirm-text="Export"
+      cancel-text="Cancel"
+      @confirm="onExportRasterConfirm"
+      @cancel="exportVisible = false"
+    >
+      <div class="settings-body app-settings">
         <div class="setting-section">
           <div class="setting-row">
             <div class="setting-label">
@@ -258,17 +266,14 @@
           </div>
         </div>
       </div>
-      <template #footer>
-        <el-button size="small" @click="exportVisible = false">Cancel</el-button>
-        <el-button size="small" type="primary" @click="onExportRasterConfirm">Export</el-button>
-      </template>
-    </el-dialog>
+    </AppDialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, inject, type Ref } from 'vue'
+import { ref, reactive, computed, inject, type Ref } from 'vue'
 import { QuestionFilled, Check } from '@element-plus/icons-vue'
+import AppDialog from '../ui/AppDialog.vue'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
 import type { RulerUnit, RasterExportFormat, RasterExportArea } from '../../editor/types'
@@ -276,7 +281,10 @@ import type { RulerUnit, RasterExportFormat, RasterExportArea } from '../../edit
 const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
 
-const settingsVisible = ref(false)
+const settingsVisible = computed({
+  get: () => store.ui.settingsOpen,
+  set: (v: boolean) => store.setSettingsOpen(v),
+})
 const exportVisible = ref(false)
 const exportForm = reactive({
   format: 'png' as RasterExportFormat,
@@ -908,11 +916,27 @@ function onHelp() {
 .settings-body {
   max-height: 400px;
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #4a4a4a transparent;
+}
+
+.settings-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.settings-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.settings-body::-webkit-scrollbar-thumb {
+  background: #4a4a4a;
+  border-radius: 4px;
+  border: 2px solid #141414;
 }
 
 .setting-section {
   padding: 8px 0;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid #2a2a2a;
 }
 
 .setting-section:last-child {
@@ -938,7 +962,7 @@ function onHelp() {
 
 .setting-row.setting-sub {
   padding-left: 24px;
-  border-left: 2px solid #e0e0e0;
+  border-left: 2px solid #4a4a4a;
   margin-left: 8px;
 }
 
@@ -960,28 +984,98 @@ function onHelp() {
 .setting-name {
   display: block;
   font-size: 13px;
-  color: #333;
+  color: #d5d5d5;
   font-weight: 500;
 }
 
 .setting-desc {
   display: block;
   font-size: 11px;
-  color: #888;
+  color: #8a8a8a;
   margin-top: 2px;
 }
 
-:deep(.el-dialog) {
-  border-radius: 8px;
+/* Dark form controls inside AppDialog bodies */
+.app-settings :deep(.el-input__wrapper),
+.app-settings :deep(.el-input-number .el-input__wrapper) {
+  background: #111111;
+  border: 1px solid #3d3d3d;
+  box-shadow: none !important;
+  border-radius: 3px;
 }
 
-:deep(.el-dialog__header) {
-  padding: 14px 16px;
-  border-bottom: 1px solid #eee;
+.app-settings :deep(.el-input__wrapper:hover) {
+  border-color: #5a5a5a;
 }
 
-:deep(.el-dialog__title) {
-  font-size: 14px;
-  font-weight: bold;
+.app-settings :deep(.el-input__wrapper.is-focus) {
+  border-color: #4a90d9;
+}
+
+.app-settings :deep(.el-input__inner) {
+  color: #e6e6e6;
+}
+
+.app-settings :deep(.el-input__inner::placeholder) {
+  color: #6a6a6a;
+}
+
+.app-settings :deep(.el-select__wrapper) {
+  background: #111111;
+  border: 1px solid #3d3d3d;
+  box-shadow: none !important;
+  border-radius: 3px;
+}
+
+.app-settings :deep(.el-select__wrapper:hover) {
+  border-color: #5a5a5a;
+}
+
+.app-settings :deep(.el-select__wrapper.is-focused) {
+  border-color: #4a90d9;
+}
+
+.app-settings :deep(.el-select__placeholder) {
+  color: #6a6a6a;
+}
+
+.app-settings :deep(.el-select__selected-item) {
+  color: #e6e6e6;
+}
+
+.app-settings :deep(.el-select__suffix),
+.app-settings :deep(.el-select__caret) {
+  color: #8a8a8a;
+}
+
+.app-settings :deep(.el-radio-button__inner) {
+  background: #1a1a1a;
+  border-color: #3d3d3d;
+  color: #b5b5b5;
+  box-shadow: none !important;
+}
+
+.app-settings :deep(.el-radio-button__orig-radio:checked + .el-radio-button__inner) {
+  background: #2f6fbf;
+  border-color: #2f6fbf;
+  color: #fff;
+}
+
+.app-settings :deep(.el-radio-button__orig-radio:disabled + .el-radio-button__inner) {
+  background: #242424;
+  border-color: #333;
+  color: #5a5a5a;
+}
+
+.app-settings :deep(.el-button--small) {
+  background: #333333;
+  border-color: #4a4a4a;
+  color: #d5d5d5;
+}
+
+.app-settings :deep(.el-button--small:hover) {
+  background: #3d3d3d;
+  border-color: #5a5a5a;
+  color: #fff;
 }
 </style>

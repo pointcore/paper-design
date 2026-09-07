@@ -221,6 +221,9 @@ export type BooleanOperation = 'unite' | 'subtract' | 'intersect' | 'exclude'
 /** Ruler unit */
 export type RulerUnit = 'px' | 'pt' | 'mm' | 'cm' | 'in'
 
+/** Right-panel tab */
+export type RightPanelTab = 'property' | 'layer' | 'history'
+
 /** History entry */
 export interface HistoryEntry {
   name: string

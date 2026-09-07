@@ -476,6 +476,11 @@ export class EditorEngine {
     this.scope.view.update()
   }
 
+  /** Pending rAF grid rebuild (coalesces rapid zoom/pan ticks). */
+  private gridRaf = 0
+  /** Cache key of the last drawn grid; identical views skip the rebuild. */
+  private lastGridKey = ''
+
   /**
    * Show / hide the grid and (re)draw the grid lines if needed.
    * The grid is drawn on a dedicated layer at the bottom of the stack
@@ -494,45 +499,65 @@ export class EditorEngine {
 
     this.gridLayer.visible = visible
     if (visible) {
+      this.lastGridKey = ''
       this.drawGrid(gridSize)
     } else {
       this.gridLayer.removeChildren()
+      this.lastGridKey = ''
     }
     this.scope.view.update()
   }
 
-  /** Draw a dot or line grid using gridSize pixels (in document units). */
+  /**
+   * Draw a line grid covering exactly the visible viewport.
+   * `view.bounds` is already in project coordinates. The step grows
+   * adaptively (always a multiple of gridSize, so lines stay on the
+   * real grid) to cap the total line count when zoomed out.
+   */
   private drawGrid(gridSize: number) {
     if (!this.gridLayer) return
-    this.gridLayer.removeChildren()
 
     const v = this.scope.view
-    const viewBounds = v.bounds
-    // Extend drawing area so the grid covers the entire viewport regardless of pan
-    const margin = 100
-    const left = viewBounds.x - margin
-    const top = viewBounds.y - margin
-    const right = viewBounds.x + viewBounds.width + margin
-    const bottom = viewBounds.y + viewBounds.height + margin
+    const b = v.bounds
+    if (!(b.width > 0) || !(b.height > 0)) return
 
-    // Convert viewBounds to project coordinates
-    const p1 = v.viewToProject(new this.scope.Point(left, top))
-    const p2 = v.viewToProject(new this.scope.Point(right, bottom))
+    const base = gridSize > 0 ? gridSize : 10
+    let step = base
+    // Cap total lines so zoomed-out views stay cheap (<= ~600 Paths).
+    while ((b.width / step + b.height / step) > 600) step *= 2
+
+    // Skip the rebuild when the visible grid did not change (e.g. a zoom
+    // tick that lands on the same lines, or a redundant refresh call).
+    const key = [
+      Math.floor(b.x / step),
+      Math.floor(b.y / step),
+      Math.ceil((b.x + b.width) / step),
+      Math.ceil((b.y + b.height) / step),
+      step,
+    ].join(',')
+    if (key === this.lastGridKey) return
+    this.lastGridKey = key
+
+    this.gridLayer.removeChildren()
 
     const gridColor = new this.scope.Color('#555555')
     gridColor.alpha = 0.25
     const style = {
       strokeColor: gridColor,
-      strokeWidth: 1 / this.zoom,
+      strokeWidth: 1 / (v.zoom || 1),
       strokeCap: 'round' as 'round' | 'square' | 'butt',
     }
 
+    const left = Math.floor(b.x / step) * step
+    const right = b.x + b.width
+    const top = Math.floor(b.y / step) * step
+    const bottom = b.y + b.height
+
     // Draw vertical grid lines
-    const startX = Math.floor(p1.x / gridSize) * gridSize
-    for (let x = startX; x <= p2.x; x += gridSize) {
+    for (let x = left; x <= right; x += step) {
       const line = new this.scope.Path.Line(
-        new this.scope.Point(x, p1.y),
-        new this.scope.Point(x, p2.y)
+        new this.scope.Point(x, top),
+        new this.scope.Point(x, bottom)
       )
       line.set(style)
       line.data.isGridItem = true
@@ -540,11 +565,10 @@ export class EditorEngine {
     }
 
     // Draw horizontal grid lines
-    const startY = Math.floor(p1.y / gridSize) * gridSize
-    for (let y = startY; y <= p2.y; y += gridSize) {
+    for (let y = top; y <= bottom; y += step) {
       const line = new this.scope.Path.Line(
-        new this.scope.Point(p1.x, y),
-        new this.scope.Point(p2.x, y)
+        new this.scope.Point(left, y),
+        new this.scope.Point(right, y)
       )
       line.set(style)
       line.data.isGridItem = true
@@ -554,11 +578,42 @@ export class EditorEngine {
     this.gridLayer.locked = true
   }
 
-  /** Redraw the grid based on current zoom and view settings. */
+  /**
+   * Redraw the grid based on current zoom and view settings.
+   * Rebuilds are coalesced to one per animation frame so wheel-zoom and
+   * pan gestures (dozens of ticks per second) never rebuild the grid
+   * more than the screen can display. Hiding applies immediately.
+   */
   refreshGrid() {
-    const visible = this.store.view.showGrid
-    const gridSize = this.store.snap.gridSize || 10
-    this.setGridVisible(visible, gridSize)
+    if (!this.store.view.showGrid) {
+      if (this.gridRaf) {
+        cancelAnimationFrame(this.gridRaf)
+        this.gridRaf = 0
+      }
+      if (this.gridLayer && (this.gridLayer.visible || this.gridLayer.children.length > 0)) {
+        this.gridLayer.visible = false
+        this.gridLayer.removeChildren()
+        this.scope.view.update()
+      }
+      this.lastGridKey = ''
+      return
+    }
+    if (this.gridRaf) return
+    this.gridRaf = requestAnimationFrame(() => {
+      this.gridRaf = 0
+      if (!this.store.view.showGrid) return
+      if (!this.gridLayer || !this.gridLayer.parent) {
+        this.gridLayer = new this.scope.Layer()
+        this.gridLayer.name = 'grid'
+        this.gridLayer.locked = true
+        this.gridLayer.data.isUserLayer = false
+        this.gridLayer.data.isGridLayer = true
+        this.gridLayer.sendToBack()
+      }
+      this.gridLayer.visible = true
+      this.drawGrid(this.store.snap.gridSize || 10)
+      this.scope.view.update()
+    })
   }
 
   /** Notify listeners that the view has changed (zoom / pan). */
@@ -1236,6 +1291,34 @@ export class EditorEngine {
       this.store.updateTransform({ flipV: !this.store.transform.flipV })
     }
     this.scope.view.update()
+  }
+
+  /**
+   * Move every unlocked selected item by a document-space delta (arrow-key
+   * nudge). Returns false when there is nothing to move. Rapid consecutive
+   * nudges share one history entry so holding an arrow key does not flood
+   * the history panel.
+   */
+  nudgeSelection(dx: number, dy: number): boolean {
+    if (!Number.isFinite(dx) || !Number.isFinite(dy)) return false
+    if (dx === 0 && dy === 0) return false
+    const items = this.getSelection().filter((item) => !item.locked)
+    if (items.length === 0) return false
+    const delta = new this.scope.Point(dx, dy)
+    items.forEach((item) => {
+      item.position = item.position.add(delta)
+    })
+    this.scope.view.update()
+    const now = Date.now()
+    const last = this.history[this.historyIndex]
+    if (last && last.name === 'Nudge' && now - last.timestamp < 1200) {
+      this.historySnapshots[this.historyIndex] = this.snapshotProject()
+      last.timestamp = now
+      this.store.setHistory(this.history, this.historyIndex)
+    } else {
+      this.pushHistory('Nudge')
+    }
+    return true
   }
 
   /**

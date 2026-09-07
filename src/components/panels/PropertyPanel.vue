@@ -1,165 +1,318 @@
 <template>
-  <div class="property-panel">
-    <div class="panel-header">
-      <span>Properties</span>
+  <div class="property-panel ai-panel">
+    <div v-if="isSelectNoSelection" class="obj-label">No Selection</div>
+    <div v-else-if="!store.hasSelection" class="ai-desc">
+      No selection. Click a canvas object with the Selection tool to edit its properties.
+    </div>
+    <div v-else class="obj-label">{{ selectionLabel }}</div>
+
+    <div v-if="isSelectNoSelection" class="panel-body">
+      <div class="prop-section">
+        <div class="prop-head" @click="toggleDoc('document')">
+          <span class="prop-chevron" :class="{ closed: !openDoc.document }">›</span>
+          <span class="prop-label">Document</span>
+        </div>
+        <div v-show="openDoc.document" class="prop-body">
+          <div class="prop-row">
+            <span class="prop-label-sm">Unit</span>
+            <el-select v-model="rulerUnit" size="small" class="flex-ctl">
+              <el-option v-for="u in rulerUnits" :key="u.value" :label="u.label" :value="u.value" />
+            </el-select>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label-sm">Boards</span>
+            <el-button size="small" class="icon-btn" title="Previous artboard" @click="stepArtboard(-1)">
+              <el-icon size="12"><ArrowLeft /></el-icon>
+            </el-button>
+            <span class="board-count">{{ artboardPosition }}</span>
+            <el-button size="small" class="icon-btn" title="Next artboard" @click="stepArtboard(1)">
+              <el-icon size="12"><ArrowRight /></el-icon>
+            </el-button>
+          </div>
+          <div class="prop-row">
+            <el-button size="small" plain class="wide-btn" @click="editArtboards">Edit Artboards</el-button>
+          </div>
+        </div>
+      </div>
+
+      <div class="prop-section">
+        <div class="prop-head" @click="toggleDoc('rulers')">
+          <span class="prop-chevron" :class="{ closed: !openDoc.rulers }">›</span>
+          <span class="prop-label">Rulers &amp; Grid</span>
+        </div>
+        <div v-show="openDoc.rulers" class="prop-body">
+          <div class="icon-row">
+            <el-button
+              size="small" class="tool-btn"
+              :type="store.view.rulersVisible ? 'primary' : ''"
+              title="Show / hide rulers"
+              @click="store.updateView({ rulersVisible: !store.view.rulersVisible })"
+            >
+              <el-icon size="14"><View /></el-icon>
+            </el-button>
+            <el-button
+              size="small" class="tool-btn"
+              :type="store.view.showGrid ? 'primary' : ''"
+              title="Show / hide grid"
+              @click="toggleGrid()"
+            >
+              <el-icon size="14"><Grid /></el-icon>
+            </el-button>
+            <el-button
+              size="small" class="tool-btn"
+              :type="store.snap.grid ? 'primary' : ''"
+              title="Snap to grid"
+              @click="store.updateSnap({ grid: !store.snap.grid })"
+            >
+              <el-icon size="14"><Magnet /></el-icon>
+            </el-button>
+          </div>
+        </div>
+      </div>
+
+      <div class="prop-section">
+        <div class="prop-head" @click="toggleDoc('guides')">
+          <span class="prop-chevron" :class="{ closed: !openDoc.guides }">›</span>
+          <span class="prop-label">Guides</span>
+        </div>
+        <div v-show="openDoc.guides" class="prop-body">
+          <div class="icon-row">
+            <el-button
+              size="small" class="tool-btn"
+              :type="store.view.showGuides ? 'primary' : ''"
+              title="Show / hide guides"
+              @click="store.updateView({ showGuides: !store.view.showGuides })"
+            >
+              <el-icon size="14"><Guide /></el-icon>
+            </el-button>
+            <el-button
+              size="small" class="tool-btn"
+              :type="store.snap.guides ? 'primary' : ''"
+              title="Snap to guides"
+              @click="store.updateSnap({ guides: !store.snap.guides })"
+            >
+              <el-icon size="14"><Aim /></el-icon>
+            </el-button>
+            <el-button
+              size="small" class="tool-btn"
+              :type="store.snap.smartGuides ? 'primary' : ''"
+              title="Smart guides"
+              @click="store.updateSnap({ smartGuides: !store.snap.smartGuides })"
+            >
+              <el-icon size="14"><MagicStick /></el-icon>
+            </el-button>
+          </div>
+        </div>
+      </div>
+
+      <div class="prop-section">
+        <div class="prop-head" @click="toggleDoc('prefs')">
+          <span class="prop-chevron" :class="{ closed: !openDoc.prefs }">›</span>
+          <span class="prop-label">Preferences</span>
+        </div>
+        <div v-show="openDoc.prefs" class="prop-body">
+          <div class="prop-row">
+            <span class="prop-label-sm wide-label">Nudge</span>
+            <el-input-number v-model="nudgeStep" :min="0.1" :max="100" :precision="1" size="small" controls-position="right" @change="onNudgeStepChange" />
+            <span class="unit">px</span>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label-sm wide-label">Grid</span>
+            <el-input-number v-model="gridSize" :min="1" :max="500" size="small" controls-position="right" @change="onGridSizeChange" />
+            <span class="unit">px</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="prop-section">
+        <div class="prop-head" @click="toggleDoc('quick')">
+          <span class="prop-chevron" :class="{ closed: !openDoc.quick }">›</span>
+          <span class="prop-label">Quick Actions</span>
+        </div>
+        <div v-show="openDoc.quick" class="prop-body">
+          <div class="btn-grid-2">
+            <el-button size="small" class="grid-btn" @click="openSettings">Canvas Setup</el-button>
+            <el-button size="small" class="grid-btn" @click="fitContent">Fit to Content</el-button>
+          </div>
+        </div>
+      </div>
     </div>
 
-    <div class="panel-body">
-      <div v-if="isTextSelected" class="prop-section">
-        <div class="prop-label">Text</div>
-        <div class="prop-row">
-          <el-select v-model="fontFamily" size="small" style="flex: 1" @change="onFontFamilyChange">
-            <el-option v-for="f in fontFamilies" :key="f" :label="f" :value="f" />
-          </el-select>
+    <div v-else class="panel-body">
+      <div class="prop-section">
+        <div class="prop-head" @click="toggle('transform')">
+          <span class="prop-chevron" :class="{ closed: !open.transform }">›</span>
+          <span class="prop-label">Transform</span>
         </div>
-        <div class="prop-row">
-          <span class="prop-label-sm">Size</span>
-          <el-input-number v-model="fontSize" :min="1" :max="400" size="small" @change="onFontSizeChange" />
-          <el-button size="small" :type="isBold ? 'primary' : ''" @click="toggleBold">B</el-button>
-          <el-button size="small" :type="isItalic ? 'primary' : ''" @click="toggleItalic">I</el-button>
-        </div>
-        <div class="prop-row">
-          <span class="prop-label-sm">Align</span>
-          <el-radio-group v-model="textAlign" size="small" @change="onAlignChange">
-            <el-radio-button value="left">Left</el-radio-button>
-            <el-radio-button value="center">Center</el-radio-button>
-            <el-radio-button value="right">Right</el-radio-button>
-          </el-radio-group>
+        <div v-show="open.transform" class="prop-body">
+          <div class="tf-grid">
+            <div class="ref-grid tf-ref">
+              <div
+                v-for="rp in refPoints"
+                :key="rp"
+                class="ref-cell"
+                :class="{ active: store.referencePoint === rp }"
+                @click="onReferencePointChange(rp)"
+              />
+            </div>
+            <div class="tf-cell">
+              <span>X</span>
+              <el-input-number v-model="posX" :precision="1" size="small" controls-position="right" @change="onTransformChange" />
+            </div>
+            <div class="tf-cell">
+              <span>W</span>
+              <el-input-number v-model="posW" :precision="1" :min="0.1" size="small" controls-position="right" @change="onTransformChange" />
+            </div>
+            <div class="tf-cell">
+              <span>Y</span>
+              <el-input-number v-model="posY" :precision="1" size="small" controls-position="right" @change="onTransformChange" />
+            </div>
+            <div class="tf-cell">
+              <span>H</span>
+              <el-input-number v-model="posH" :precision="1" :min="0.1" size="small" controls-position="right" @change="onTransformChange" />
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label-sm">Rotate</span>
+            <el-input-number v-model="rotateBy" :precision="1" size="small" controls-position="right" placeholder="deg" @change="onRotateByChange" />
+            <el-button size="small" class="icon-btn" :type="store.transform.flipH ? 'primary' : ''" title="Flip Horizontal" @click="onFlipH">⇔</el-button>
+            <el-button size="small" class="icon-btn" :type="store.transform.flipV ? 'primary' : ''" title="Flip Vertical" @click="onFlipV">⇕</el-button>
+          </div>
         </div>
       </div>
 
       <div class="prop-section">
-        <div class="prop-label">Fill</div>
-        <div class="prop-row">
-          <el-radio-group v-model="fillKind" size="small" @change="onFillKindChange">
-            <el-radio-button value="solid">Solid</el-radio-button>
-            <el-radio-button value="gradient">Gradient</el-radio-button>
-          </el-radio-group>
+        <div class="prop-head" @click="toggle('fill')">
+          <span class="prop-chevron" :class="{ closed: !open.fill }">›</span>
+          <span class="prop-label">Appearance</span>
         </div>
-        <div class="color-row" v-if="fillKind === 'solid'">
-          <el-color-picker v-model="fillColorValue" size="small" show-alpha @change="onFillChange" />
-          <el-button size="small" type="danger" plain @click="onClearFill">×</el-button>
-        </div>
-        <template v-if="fillKind === 'gradient'">
+        <div v-show="open.fill" class="prop-body">
           <div class="prop-row">
-            <el-radio-group v-model="gradientType" size="small" @change="onGradientChange">
-              <el-radio-button value="linear">Linear</el-radio-button>
-              <el-radio-button value="radial">Radial</el-radio-button>
+            <el-radio-group v-model="fillKind" size="small" class="seg-full" @change="onFillKindChange">
+              <el-radio-button value="solid">Fill</el-radio-button>
+              <el-radio-button value="gradient">Gradient</el-radio-button>
+            </el-radio-group>
+            <template v-if="fillKind === 'solid'">
+              <el-color-picker v-model="fillColorValue" size="small" show-alpha @change="onFillChange" />
+              <el-button size="small" class="icon-btn" type="danger" plain title="No fill" @click="onClearFill">×</el-button>
+            </template>
+          </div>
+          <template v-if="fillKind === 'gradient'">
+            <div class="prop-row">
+              <el-radio-group v-model="gradientType" size="small" class="seg-full" @change="onGradientChange">
+                <el-radio-button value="linear">Linear</el-radio-button>
+                <el-radio-button value="radial">Radial</el-radio-button>
+              </el-radio-group>
+            </div>
+            <div class="prop-row" v-for="(stop, index) in gradientStops" :key="index">
+              <el-color-picker v-model="stop.color" size="small" show-alpha @change="onGradientChange" />
+              <el-input-number v-model="stop.offset" :min="0" :max="100" size="small" controls-position="right" @change="onGradientChange" />
+              <el-button size="small" class="icon-btn" type="danger" plain :disabled="gradientStops.length <= 2" @click="removeGradientStop(index)">×</el-button>
+            </div>
+            <div class="prop-row">
+              <el-button size="small" plain class="wide-btn" @click="addGradientStop">Add Stop</el-button>
+            </div>
+          </template>
+          <div class="prop-row">
+            <el-color-picker v-model="strokeColorValue" size="small" show-alpha @change="onStrokeChange" />
+            <span class="app-name">Stroke</span>
+            <el-input-number v-model="strokeWidth" :min="0.1" :max="100" size="small" controls-position="right" @change="onStyleChange" />
+            <span class="unit">pt</span>
+            <el-button size="small" class="icon-btn" type="danger" plain title="No stroke" @click="onClearStroke">×</el-button>
+          </div>
+          <div class="prop-row">
+            <el-select v-model="lineCap" size="small" class="flex-ctl" title="Cap" @change="onStrokeAppearanceChange">
+              <el-option v-for="c in lineCaps" :key="c.value" :label="c.label" :value="c.value" />
+            </el-select>
+            <el-select v-model="lineJoin" size="small" class="flex-ctl" title="Join" @change="onStrokeAppearanceChange">
+              <el-option v-for="j in lineJoins" :key="j.value" :label="j.label" :value="j.value" />
+            </el-select>
+          </div>
+          <div class="prop-row" v-if="lineJoin === 'miter'">
+            <span class="prop-label-sm">Miter</span>
+            <el-input-number v-model="miterLimit" :min="1" :max="100" size="small" controls-position="right" @change="onStrokeAppearanceChange" />
+            <span class="prop-label-sm">Dash</span>
+            <el-input v-model="dashPattern" size="small" placeholder="e.g. 4 2" @change="onDashChange" />
+          </div>
+          <div class="prop-row" v-else>
+            <span class="prop-label-sm">Dash</span>
+            <el-input v-model="dashPattern" size="small" placeholder="e.g. 4 2" @change="onDashChange" />
+          </div>
+          <div class="op-row">
+            <span class="app-name">Opacity</span>
+            <el-slider v-model="opacityValue" :min="0" :max="100" size="small" @change="onOpacityChange" />
+            <span class="op-val">{{ opacityValue }}%</span>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label-sm">Mode</span>
+            <el-select v-model="blendMode" size="small" class="flex-ctl" @change="onBlendChange">
+              <el-option v-for="b in blendModes" :key="b.value" :label="b.label" :value="b.value" />
+            </el-select>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="isTextSelected" class="prop-section">
+        <div class="prop-head" @click="toggle('text')">
+          <span class="prop-chevron" :class="{ closed: !open.text }">›</span>
+          <span class="prop-label">Text</span>
+        </div>
+        <div v-show="open.text" class="prop-body">
+          <div class="prop-row">
+            <el-select v-model="fontFamily" size="small" class="flex-ctl" @change="onFontFamilyChange">
+              <el-option v-for="f in fontFamilies" :key="f" :label="f" :value="f" />
+            </el-select>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label-sm">Size</span>
+            <el-input-number v-model="fontSize" :min="1" :max="400" size="small" controls-position="right" @change="onFontSizeChange" />
+            <el-button size="small" class="fmt-btn" :type="isBold ? 'primary' : ''" @click="toggleBold">B</el-button>
+            <el-button size="small" class="fmt-btn" :type="isItalic ? 'primary' : ''" @click="toggleItalic">I</el-button>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label-sm">Align</span>
+            <el-radio-group v-model="textAlign" size="small" class="seg-full" @change="onAlignChange">
+              <el-radio-button value="left">Left</el-radio-button>
+              <el-radio-button value="center">Center</el-radio-button>
+              <el-radio-button value="right">Right</el-radio-button>
             </el-radio-group>
           </div>
-          <div class="prop-row" v-for="(stop, index) in gradientStops" :key="index">
-            <el-color-picker v-model="stop.color" size="small" show-alpha @change="onGradientChange" />
-            <el-input-number v-model="stop.offset" :min="0" :max="100" size="small" @change="onGradientChange" />
-            <el-button size="small" type="danger" plain :disabled="gradientStops.length <= 2" @click="removeGradientStop(index)">×</el-button>
+        </div>
+      </div>
+
+      <div class="prop-section">
+        <div class="prop-head" @click="toggle('align')">
+          <span class="prop-chevron" :class="{ closed: !open.align }">›</span>
+          <span class="prop-label">Align</span>
+        </div>
+        <div v-show="open.align" class="prop-body">
+          <div class="btn-grid-3">
+            <el-button size="small" class="grid-btn" :disabled="store.selectedItemIds.length < 2" @click="onAlign('left', 'Align Left')">Left</el-button>
+            <el-button size="small" class="grid-btn" :disabled="store.selectedItemIds.length < 2" @click="onAlign('centerX', 'Align Center')">Center</el-button>
+            <el-button size="small" class="grid-btn" :disabled="store.selectedItemIds.length < 2" @click="onAlign('right', 'Align Right')">Right</el-button>
+            <el-button size="small" class="grid-btn" :disabled="store.selectedItemIds.length < 2" @click="onAlign('top', 'Align Top')">Top</el-button>
+            <el-button size="small" class="grid-btn" :disabled="store.selectedItemIds.length < 2" @click="onAlign('centerY', 'Align Middle')">Middle</el-button>
+            <el-button size="small" class="grid-btn" :disabled="store.selectedItemIds.length < 2" @click="onAlign('bottom', 'Align Bottom')">Bottom</el-button>
           </div>
-          <div class="prop-row">
-            <el-button size="small" plain @click="addGradientStop">Add Stop</el-button>
-          </div>
-        </template>
-      </div>
-
-      <div class="prop-section">
-        <div class="prop-label">Stroke</div>
-        <div class="color-row">
-          <el-color-picker v-model="strokeColorValue" size="small" show-alpha @change="onStrokeChange" />
-          <el-button size="small" type="danger" plain @click="onClearStroke">×</el-button>
-        </div>
-        <div class="prop-row">
-          <span class="prop-label-sm">Weight</span>
-          <el-input-number v-model="strokeWidth" :min="0.1" :max="100" size="small" @change="onStyleChange" />
-        </div>
-        <div class="prop-row">
-          <span class="prop-label-sm">Cap</span>
-          <el-select v-model="lineCap" size="small" style="flex: 1" @change="onStrokeAppearanceChange">
-            <el-option v-for="c in lineCaps" :key="c.value" :label="c.label" :value="c.value" />
-          </el-select>
-        </div>
-        <div class="prop-row">
-          <span class="prop-label-sm">Join</span>
-          <el-select v-model="lineJoin" size="small" style="flex: 1" @change="onStrokeAppearanceChange">
-            <el-option v-for="j in lineJoins" :key="j.value" :label="j.label" :value="j.value" />
-          </el-select>
-        </div>
-        <div class="prop-row" v-if="lineJoin === 'miter'">
-          <span class="prop-label-sm">Miter</span>
-          <el-input-number v-model="miterLimit" :min="1" :max="100" size="small" @change="onStrokeAppearanceChange" />
-        </div>
-        <div class="prop-row">
-          <span class="prop-label-sm">Dash</span>
-          <el-input v-model="dashPattern" size="small" placeholder="e.g. 4 2" @change="onDashChange" />
-        </div>
-      </div>
-
-      <div class="prop-section">
-        <div class="prop-label">Blending</div>
-        <div class="prop-row">
-          <span class="prop-label-sm">Mode</span>
-          <el-select v-model="blendMode" size="small" style="flex: 1" @change="onBlendChange">
-            <el-option v-for="b in blendModes" :key="b.value" :label="b.label" :value="b.value" />
-          </el-select>
-        </div>
-      </div>
-
-      <div class="prop-section">
-        <div class="prop-label">Opacity</div>
-        <el-slider v-model="opacityValue" :min="0" :max="100" size="small" @change="onOpacityChange" />
-      </div>
-
-      <div class="prop-section">
-        <div class="prop-label">Transform</div>
-        <div class="prop-row">
-          <span class="prop-label-sm">Ref</span>
-          <div class="ref-grid">
-            <div
-              v-for="rp in refPoints"
-              :key="rp"
-              class="ref-cell"
-              :class="{ active: store.referencePoint === rp }"
-              @click="onReferencePointChange(rp)"
-            />
+          <div class="btn-grid-2">
+            <el-button size="small" class="grid-btn" :disabled="store.selectedItemIds.length < 3" @click="onDistribute('horizontal')">Distr H</el-button>
+            <el-button size="small" class="grid-btn" :disabled="store.selectedItemIds.length < 3" @click="onDistribute('vertical')">Distr V</el-button>
           </div>
         </div>
-        <div class="prop-grid">
-          <span class="prop-label-sm">X</span>
-          <el-input-number v-model="posX" :precision="1" size="small" @change="onTransformChange" />
-          <span class="prop-label-sm">Y</span>
-          <el-input-number v-model="posY" :precision="1" size="small" @change="onTransformChange" />
-          <span class="prop-label-sm">W</span>
-          <el-input-number v-model="posW" :precision="1" :min="0.1" size="small" @change="onTransformChange" />
-          <span class="prop-label-sm">H</span>
-          <el-input-number v-model="posH" :precision="1" :min="0.1" size="small" @change="onTransformChange" />
-        </div>
-        <div class="prop-row">
-          <span class="prop-label-sm">Rotate</span>
-          <el-input-number v-model="rotateBy" :precision="1" size="small" placeholder="deg" @change="onRotateByChange" />
-          <el-button size="small" :type="store.transform.flipH ? 'primary' : ''" @click="onFlipH">Flip H</el-button>
-          <el-button size="small" :type="store.transform.flipV ? 'primary' : ''" @click="onFlipV">Flip V</el-button>
-        </div>
       </div>
 
       <div class="prop-section">
-        <div class="prop-label">Align</div>
-        <div class="align-row">
-          <el-button size="small" :disabled="store.selectedItemIds.length < 2" @click="onAlign('left', 'Align Left')">Left</el-button>
-          <el-button size="small" :disabled="store.selectedItemIds.length < 2" @click="onAlign('centerX', 'Align Center')">Center</el-button>
-          <el-button size="small" :disabled="store.selectedItemIds.length < 2" @click="onAlign('right', 'Align Right')">Right</el-button>
-          <el-button size="small" :disabled="store.selectedItemIds.length < 2" @click="onAlign('top', 'Align Top')">Top</el-button>
-          <el-button size="small" :disabled="store.selectedItemIds.length < 2" @click="onAlign('centerY', 'Align Middle')">Middle</el-button>
-          <el-button size="small" :disabled="store.selectedItemIds.length < 2" @click="onAlign('bottom', 'Align Bottom')">Bottom</el-button>
+        <div class="prop-head" @click="toggle('path')">
+          <span class="prop-chevron" :class="{ closed: !open.path }">›</span>
+          <span class="prop-label">Path</span>
         </div>
-        <div class="align-row">
-          <el-button size="small" :disabled="store.selectedItemIds.length < 3" @click="onDistribute('horizontal')">Distribute H</el-button>
-          <el-button size="small" :disabled="store.selectedItemIds.length < 3" @click="onDistribute('vertical')">Distribute V</el-button>
-        </div>
-      </div>
-
-      <div class="prop-section">
-        <div class="prop-label">Pathfinder</div>
-        <div class="align-row">
-          <el-button size="small" :disabled="booleanOperandCount() < 2" @click="onBoolean('unite')">Unite</el-button>
-          <el-button size="small" :disabled="booleanOperandCount() < 2" @click="onBoolean('subtract')">Subtract</el-button>
-          <el-button size="small" :disabled="booleanOperandCount() < 2" @click="onBoolean('intersect')">Intersect</el-button>
-          <el-button size="small" :disabled="booleanOperandCount() < 2" @click="onBoolean('exclude')">Exclude</el-button>
+        <div v-show="open.path" class="prop-body">
+          <div class="btn-grid-2">
+            <el-button size="small" class="grid-btn" :disabled="booleanOperandCount() < 2" @click="onBoolean('unite')">Unite</el-button>
+            <el-button size="small" class="grid-btn" :disabled="booleanOperandCount() < 2" @click="onBoolean('subtract')">Subtract</el-button>
+            <el-button size="small" class="grid-btn" :disabled="booleanOperandCount() < 2" @click="onBoolean('intersect')">Intersect</el-button>
+            <el-button size="small" class="grid-btn" :disabled="booleanOperandCount() < 2" @click="onBoolean('exclude')">Exclude</el-button>
+          </div>
         </div>
       </div>
     </div>
@@ -168,12 +321,124 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, inject, type Ref } from 'vue'
+import {
+  ArrowLeft, ArrowRight, View, Grid, Magnet, Guide, Aim, MagicStick,
+} from '@element-plus/icons-vue'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
-import type { AlignMode, BooleanOperation, DistributeAxis, GradientState, LineCap, LineJoin, ReferencePoint, TextAlign } from '../../editor/types'
+import type { AlignMode, BooleanOperation, DistributeAxis, GradientState, LineCap, LineJoin, ReferencePoint, RulerUnit, TextAlign } from '../../editor/types'
 
 const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
+
+// Collapsible sections (AI-style). Rarely used groups start collapsed
+// so the panel stays scannable in a 264px column.
+const open = ref({
+  text: true,
+  transform: true,
+  fill: true,
+  align: false,
+  path: false,
+})
+function toggle(key: keyof typeof open.value) {
+  open.value[key] = !open.value[key]
+}
+
+// ---- No-selection (document) view, AI-style ----
+
+/** True in Select mode with nothing selected: show document prefs like AI. */
+const isSelectNoSelection = computed(
+  () => !store.hasSelection && (store.tool === 'select' || store.tool === 'direct-select'),
+)
+
+const openDoc = ref({
+  document: true,
+  rulers: true,
+  guides: true,
+  prefs: true,
+  quick: true,
+})
+function toggleDoc(key: keyof typeof openDoc.value) {
+  openDoc.value[key] = !openDoc.value[key]
+}
+
+const rulerUnits: Array<{ value: RulerUnit; label: string }> = [
+  { value: 'px', label: 'Pixels' },
+  { value: 'pt', label: 'Points' },
+  { value: 'mm', label: 'Millimeters' },
+  { value: 'cm', label: 'Centimeters' },
+  { value: 'in', label: 'Inches' },
+]
+
+const rulerUnit = computed<RulerUnit>({
+  get: () => store.rulerUnit,
+  set: (v) => store.setRulerUnit(v),
+})
+
+/** "2 / 5" position readout for the artboard stepper. */
+const artboardPosition = computed(() => {
+  const boards = store.artboards
+  if (boards.length === 0) return '0 / 0'
+  const idx = boards.findIndex((b) => b.id === store.activeArtboardId)
+  return `${(idx < 0 ? 0 : idx) + 1} / ${boards.length}`
+})
+
+function activateArtboard(id: string) {
+  const e = getEngine()
+  store.setActiveArtboard(id)
+  const board = store.activeArtboard
+  if (!e || !board) return
+  e.refreshArtboards()
+  e.panViewTo(new e.scope.Point(board.x + board.width / 2, board.y + board.height / 2))
+}
+
+function stepArtboard(dir: 1 | -1) {
+  const boards = store.artboards
+  if (boards.length === 0) return
+  const idx = boards.findIndex((b) => b.id === store.activeArtboardId)
+  const next = boards[((idx < 0 ? 0 : idx) + dir + boards.length) % boards.length]
+  activateArtboard(next.id)
+}
+
+/** Jump to the Layers tab where the Artboard panel lives. */
+function editArtboards() {
+  store.setRightTab('layer')
+}
+
+function toggleGrid() {
+  store.updateView({ showGrid: !store.view.showGrid })
+  getEngine()?.refreshGrid()
+}
+
+const nudgeStep = ref(store.nudgeStep)
+function onNudgeStepChange(val: number | undefined) {
+  if (!val || val <= 0) {
+    nudgeStep.value = store.nudgeStep
+    return
+  }
+  store.setNudgeStep(val)
+}
+
+const gridSize = ref(store.snap.gridSize)
+function onGridSizeChange(val: number | undefined) {
+  if (!val) {
+    gridSize.value = store.snap.gridSize
+    return
+  }
+  store.updateSnap({ gridSize: val })
+  getEngine()?.refreshGrid()
+}
+// Other panels (TopBar) can change these too, so mirror the store.
+watch(() => store.nudgeStep, (v) => { nudgeStep.value = v })
+watch(() => store.snap.gridSize, (v) => { gridSize.value = v })
+
+function openSettings() {
+  store.setSettingsOpen(true)
+}
+
+function fitContent() {
+  getEngine()?.fitToContent()
+}
 
 const fillColorValue = ref(store.style.fillColor || '#000000')
 const strokeColorValue = ref(store.style.strokeColor || '#000000')
@@ -259,6 +524,22 @@ const fontSize = ref(12)
 const isBold = ref(false)
 const isItalic = ref(false)
 const textAlign = ref<TextAlign>('left')
+
+/** Object-type label shown under the tab, like AI ("Path", "Text", ...). */
+const selectionLabel = computed(() => {
+  const n = store.selectedItemIds.length
+  if (n === 0) return ''
+  if (n > 1) return `Mixed (${n})`
+  if (isTextSelected.value) return 'Text'
+  const item = getEngine()?.getSelection()?.[0] as any
+  const name = String(item?.className ?? item?.constructor?.name ?? '')
+  if (/pointtext/i.test(name)) return 'Text'
+  if (/compoundpath/i.test(name)) return 'Compound Path'
+  if (/group/i.test(name)) return 'Group'
+  if (/raster/i.test(name)) return 'Image'
+  if (/path/i.test(name)) return 'Path'
+  return 'Object'
+})
 
 function getEngine() { return engineRef?.value || null }
 
@@ -651,87 +932,272 @@ watch(() => store.selectedItemIds, () => {
 </script>
 
 <style scoped>
-.property-panel {
-  flex-shrink: 0;
-  border-bottom: 1px solid #3a3a3a;
-  max-height: 50%;
-  overflow-y: auto;
+.ai-panel {
+  background: #252526;
+  color: #c9c9c9;
+  font-size: 12px;
+  overflow-x: hidden;
 }
 
-.panel-header {
+/* ---- AI-style container ---- */
+.property-panel {
+  flex-shrink: 0;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 6px 10px;
-  background: #333;
-  color: #ddd;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.ai-desc {
+  padding: 10px;
+  color: #8a8a8a;
+  font-size: 11px;
+  line-height: 1.6;
+  border-bottom: 1px solid #1b1b1b;
+}
+
+/* Object-type label under the tab, like AI ("Path", "Text", ...) */
+.obj-label {
+  padding: 8px 10px 2px;
+  color: #f0f0f0;
   font-size: 12px;
-  font-weight: bold;
+  font-weight: 600;
+  letter-spacing: 0.5px;
 }
 
 .panel-body {
-  padding: 8px 10px;
-  color: #ccc;
-  font-size: 13px;
+  padding: 2px 8px 12px;
+  color: #c9c9c9;
+  font-size: 12px;
 }
 
+/* ---- Collapsible groups ---- */
 .prop-section {
-  margin-bottom: 10px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid #333;
+  margin: 0;
+  padding: 2px 0 6px;
+  border-bottom: 1px solid #1e1e1e;
 }
 
 .prop-section:last-child {
   border-bottom: none;
 }
 
+.prop-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 0;
+  cursor: pointer;
+  user-select: none;
+}
+
+.prop-head:hover .prop-label {
+  color: #fff;
+}
+
+.prop-chevron {
+  width: 12px;
+  flex-shrink: 0;
+  text-align: center;
+  font-size: 14px;
+  line-height: 1;
+  color: #8a8a8a;
+  transform: rotate(90deg);
+  transition: transform 0.12s;
+}
+
+.prop-chevron.closed {
+  transform: rotate(0deg);
+}
+
 .prop-label {
-  font-size: 12px;
-  color: #aaa;
-  margin-bottom: 4px;
-  font-weight: 500;
+  font-size: 11px;
+  color: #dcdcdc;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.prop-body {
+  padding-top: 2px;
 }
 
 .prop-label-sm {
-  font-size: 12px;
-  color: #888;
-  width: 24px;
+  font-size: 11px;
+  color: #9a9a9a;
+  width: 40px;
   flex-shrink: 0;
+  line-height: 22px;
 }
 
-.color-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.app-name {
+  font-size: 11px;
+  color: #c9c9c9;
+  white-space: nowrap;
+}
+
+.unit {
+  font-size: 11px;
+  color: #8a8a8a;
+  flex-shrink: 0;
 }
 
 .prop-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-top: 6px;
+  gap: 5px;
+  margin-top: 5px;
+  min-width: 0;
 }
 
-.prop-grid {
+.prop-row > :not(.prop-label-sm):not(.fmt-btn):not(.icon-btn):not(.app-name):not(.unit) {
+  min-width: 0;
+}
+
+/* Control that fills remaining row width */
+.flex-ctl {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+}
+
+/* Transform X/W/Y/H grid with the ref-point block on the left (AI-style) */
+.tf-grid {
   display: grid;
-  grid-template-columns: 24px 1fr;
-  gap: 4px;
+  grid-template-columns: auto 1fr 1fr;
+  gap: 5px 6px;
   align-items: center;
+  margin-top: 5px;
+}
+
+.tf-ref {
+  grid-row: span 2;
+}
+
+.tf-cell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.tf-cell > span {
+  width: 10px;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: #9a9a9a;
+}
+
+/* Opacity slider + readout */
+.op-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 5px;
+}
+
+.op-row :deep(.el-slider) {
+  flex: 1;
+  min-width: 0;
+}
+
+.op-val {
+  width: 34px;
+  flex-shrink: 0;
+  text-align: right;
+  font-size: 11px;
+  color: #9a9a9a;
+}
+
+/* Button grids that always fit the column */
+.btn-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  margin-top: 5px;
+}
+
+.btn-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.grid-btn {
+  width: 100%;
+  margin: 0 !important;
+}
+
+/* AI-style icon toggle row (Rulers & Grid, Guides) */
+.icon-row {
+  display: flex;
+  gap: 4px;
+  margin-top: 5px;
+}
+
+.tool-btn {
+  flex: 1;
+  min-width: 0;
+  margin: 0 !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.board-count {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  font-size: 11px;
+  color: #c9c9c9;
+}
+
+.wide-label {
+  width: 52px;
+}
+
+.grid-btn :deep(span) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.icon-btn {
+  width: 24px;
+  flex-shrink: 0;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+.wide-btn {
+  width: 100%;
+  margin: 0 !important;
+}
+
+.fmt-btn {
+  width: 22px;
+  flex-shrink: 0;
+  padding: 0 !important;
+  font-weight: 700;
+  margin: 0 !important;
+}
+
+.prop-row .el-button + .el-button {
+  margin-left: 0;
 }
 
 .ref-grid {
   display: grid;
-  grid-template-columns: repeat(3, 14px);
-  grid-template-rows: repeat(3, 14px);
+  grid-template-columns: repeat(3, 12px);
+  grid-template-rows: repeat(3, 12px);
   gap: 2px;
 }
 
 .ref-cell {
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   border: 1px solid #555;
   border-radius: 2px;
   cursor: pointer;
+  background: #1a1a1a;
 }
 
 .ref-cell:hover {
@@ -743,10 +1209,253 @@ watch(() => store.selectedItemIds, () => {
   border-color: #4a90d9;
 }
 
-.align-row {
+/* ---- Element Plus dark overrides: black inputs / selects / number fields ---- */
+.ai-panel :deep(.el-input) {
+  flex: 1;
+  min-width: 0;
+}
+
+.ai-panel :deep(.el-input__wrapper),
+.ai-panel :deep(.el-input-number .el-input__wrapper) {
+  background: #111111;
+  border: 1px solid #3d3d3d;
+  box-shadow: none !important;
+  border-radius: 3px;
+  height: 22px;
+  padding: 0 6px;
+}
+
+.ai-panel :deep(.el-input-number.is-controls-right .el-input__wrapper) {
+  padding-right: 20px;
+}
+
+.ai-panel :deep(.el-input__wrapper:hover) {
+  border-color: #5a5a5a;
+}
+
+.ai-panel :deep(.el-input__wrapper.is-focus) {
+  border-color: #4a90d9;
+}
+
+.ai-panel :deep(.el-input__inner) {
+  color: #e6e6e6;
+  font-size: 12px;
+  height: 20px;
+  line-height: 20px;
+  min-width: 0;
+}
+
+.ai-panel :deep(.el-input__inner::placeholder) {
+  color: #6a6a6a;
+}
+
+.ai-panel :deep(.el-input-number) {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  line-height: 22px;
+}
+
+/* Compact up/down spinners stacked on the right (AI-style) */
+.ai-panel :deep(.el-input-number.is-controls-right .el-input-number__decrease),
+.ai-panel :deep(.el-input-number.is-controls-right .el-input-number__increase) {
+  width: 18px;
+  background: #1e1e1e;
+  border-left: 1px solid #3d3d3d;
+  color: #9a9a9a;
+}
+
+.ai-panel :deep(.el-input-number.is-controls-right .el-input-number__decrease:hover),
+.ai-panel :deep(.el-input-number.is-controls-right .el-input-number__increase:hover) {
+  color: #fff;
+}
+
+/* el-select renders .el-select__wrapper (not .el-input__wrapper) */
+.ai-panel :deep(.el-select) {
+  flex: 1;
+  min-width: 0;
+}
+
+.ai-panel :deep(.el-select__wrapper) {
+  background: #111111;
+  border: 1px solid #3d3d3d;
+  box-shadow: none !important;
+  border-radius: 3px;
+  min-height: 22px;
+  font-size: 12px;
+  padding: 0 6px;
+}
+
+.ai-panel :deep(.el-select__wrapper:hover) {
+  border-color: #5a5a5a;
+}
+
+.ai-panel :deep(.el-select__wrapper.is-focused) {
+  border-color: #4a90d9;
+}
+
+.ai-panel :deep(.el-select__placeholder) {
+  color: #6a6a6a;
+  font-size: 12px;
+}
+
+.ai-panel :deep(.el-select__selected-item) {
+  color: #e6e6e6;
+  font-size: 12px;
+}
+
+.ai-panel :deep(.el-select__suffix),
+.ai-panel :deep(.el-select__caret) {
+  color: #8a8a8a;
+}
+
+.ai-panel :deep(.el-button--small) {
+  background: #333333;
+  border: 1px solid #4a4a4a;
+  color: #d5d5d5;
+  border-radius: 3px;
+  height: 22px;
+  padding: 0 6px;
+  font-size: 11px;
+}
+
+.ai-panel :deep(.el-button--small:hover) {
+  background: #3d3d3d;
+  border-color: #5a5a5a;
+  color: #fff;
+}
+
+.ai-panel :deep(.el-button--small.el-button--primary) {
+  background: #2f6fbf;
+  border-color: #2f6fbf;
+  color: #fff;
+}
+
+.ai-panel :deep(.el-button--small.is-plain) {
+  background: #2a2a2a;
+}
+
+.ai-panel :deep(.el-button--small.el-button--danger) {
+  background: transparent;
+  border-color: #4a4a4a;
+  color: #9a9a9a;
+}
+
+.ai-panel :deep(.el-button--small.is-disabled),
+.ai-panel :deep(.el-button--small.is-disabled:hover) {
+  background: #242424;
+  border-color: #333;
+  color: #5a5a5a;
+  cursor: not-allowed;
+}
+
+/* Full-width segmented control (Solid/Gradient, alignments) */
+.ai-panel :deep(.el-radio-group.seg-full) {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 6px;
+  width: 100%;
+}
+
+.ai-panel :deep(.el-radio-group.seg-full .el-radio-button) {
+  flex: 1;
+  min-width: 0;
+}
+
+.ai-panel :deep(.el-radio-button__inner) {
+  background: #1a1a1a;
+  border: 1px solid #3d3d3d;
+  color: #b5b5b5;
+  font-size: 11px;
+  padding: 4px 8px;
+  box-shadow: none;
+}
+
+.ai-panel :deep(.seg-full .el-radio-button__inner) {
+  width: 100%;
+  display: block;
+  text-align: center;
+  padding: 4px 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-panel :deep(.el-radio-button:first-child .el-radio-button__inner) {
+  border-radius: 3px 0 0 3px;
+}
+
+.ai-panel :deep(.el-radio-button:last-child .el-radio-button__inner) {
+  border-radius: 0 3px 3px 0;
+}
+
+.ai-panel :deep(.el-radio-button__orig-radio:checked + .el-radio-button__inner) {
+  background: #2f6fbf;
+  border-color: #2f6fbf;
+  color: #fff;
+}
+
+.ai-panel :deep(.el-slider__runway) {
+  background: #3d3d3d;
+  height: 4px;
+}
+
+.ai-panel :deep(.el-slider__bar) {
+  background: #4a90d9;
+  height: 4px;
+}
+
+.ai-panel :deep(.el-slider__button) {
+  width: 12px;
+  height: 12px;
+  border: 2px solid #4a90d9;
+  background: #fff;
+}
+
+.ai-panel :deep(.el-color-picker__trigger) {
+  background: #111;
+  border: 1px solid #3d3d3d;
+  border-radius: 3px;
+  width: 26px;
+  height: 22px;
+  padding: 2px;
+  flex-shrink: 0;
+}
+
+.ai-panel :deep(.el-color-picker__color) {
+  border: 1px solid #000;
+  border-radius: 2px;
+}
+</style>
+
+<!-- Teleported popups (select dropdown, color picker) live outside the
+     scoped tree, so they need global dark rules to match the AI theme. -->
+<style>
+.el-select__popper.el-popper {
+  background: #1e1e1e;
+  border: 1px solid #3d3d3d;
+}
+
+.el-select__popper .el-select-dropdown {
+  background: #1e1e1e;
+}
+
+.el-select__popper .el-select-dropdown__item {
+  color: #d5d5d5;
+  font-size: 12px;
+  height: 28px;
+  line-height: 28px;
+}
+
+.el-select__popper .el-select-dropdown__item.is-hovering {
+  background: #333333;
+}
+
+.el-select__popper .el-select-dropdown__item.is-selected {
+  color: #6aa9ec;
+  font-weight: 600;
+}
+
+.el-popper__arrow::before {
+  background: #1e1e1e !important;
+  border-color: #3d3d3d !important;
 }
 </style>

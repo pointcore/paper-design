@@ -19,12 +19,7 @@
         </div>
       </div>
 
-      <div v-if="store.ui.showPropertyPanel || store.ui.showLayerPanel" class="right-panels">
-        <PropertyPanel v-if="store.hasSelection && store.ui.showPropertyPanel" />
-        <LayerPanel v-if="store.ui.showLayerPanel" />
-        <ArtboardPanel />
-        <HistoryPanel />
-      </div>
+      <RightPanel v-if="store.ui.showPropertyPanel || store.ui.showLayerPanel" />
     </div>
   </div>
 </template>
@@ -37,10 +32,7 @@ import type { EditorEngine } from './editor/engine'
 import TopBar from './components/menus/TopBar.vue'
 import ToolRail from './components/toolbar/ToolRail.vue'
 import CanvasHost from './components/canvas/CanvasHost.vue'
-import PropertyPanel from './components/panels/PropertyPanel.vue'
-import LayerPanel from './components/panels/LayerPanel.vue'
-import ArtboardPanel from './components/panels/ArtboardPanel.vue'
-import HistoryPanel from './components/panels/HistoryPanel.vue'
+import RightPanel from './components/panels/RightPanel.vue'
 
 const store = useEditorStore()
 const { tool } = storeToRefs(store)
@@ -138,27 +130,5 @@ html, body, #app { height: 100%; width: 100%; overflow: hidden; }
 }
 .zoom-display:hover {
   color: #fff;
-}
-
-.right-panels {
-  display: flex;
-  flex-direction: column;
-  width: 240px;
-  min-width: 240px;
-  background: #2b2b2b;
-  border-left: 1px solid #3a3a3a;
-  overflow-y: auto;
-  flex-shrink: 0;
-}
-
-.right-panels::-webkit-scrollbar {
-  width: 6px;
-}
-.right-panels::-webkit-scrollbar-track {
-  background: transparent;
-}
-.right-panels::-webkit-scrollbar-thumb {
-  background: #555;
-  border-radius: 3px;
 }
 </style>

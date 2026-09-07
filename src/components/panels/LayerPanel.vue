@@ -1,12 +1,14 @@
 <template>
-  <div class="layer-panel">
-    <div class="panel-header">
-      <span>Layers</span>
-      <div class="header-actions">
-        <el-icon size="14" class="action-btn" title="New Layer" @click="addLayer"><Plus /></el-icon>
-        <el-icon size="14" class="action-btn" title="Duplicate Layer" @click="duplicateLayer"><CopyDocument /></el-icon>
-        <el-icon size="14" class="action-btn" title="Delete Layer" @click="removeLayer"><Delete /></el-icon>
-      </div>
+  <div class="layer-panel ai-panel">
+    <div class="ly-search">
+      <el-input
+        v-model="searchText"
+        placeholder="Search all layers & objects"
+        size="small"
+        :prefix-icon="Search"
+        clearable
+      />
+      <el-icon size="14" class="ly-filter" title="Filter"><Filter /></el-icon>
     </div>
 
     <div class="panel-body">
@@ -19,38 +21,42 @@
              @dragover.prevent="onDragOver($event, displayIndex)"
              @drop="onDrop($event, displayIndex)"
              @dragend="onDragEnd">
-          <span class="layer-toggle" :class="{ open: layer.expand }" @click.stop="toggleExpand(layer)"></span>
           <span class="layer-vis" @click.stop="toggleVisibility(layer)">
             <el-icon v-if="layer.visible" size="12"><View /></el-icon>
             <el-icon v-else size="12"><Hide /></el-icon>
           </span>
-          <span class="layer-lock" @click.stop="toggleLock(layer)">
+          <span class="layer-lock" :class="{ locked: layer.locked }" title="Lock layer" @click.stop="toggleLock(layer)">
             <el-icon v-if="layer.locked" size="12"><Lock /></el-icon>
             <el-icon v-else size="12"><Unlock /></el-icon>
           </span>
+          <span class="layer-color" :style="{ background: layerColor(layer.id) }"></span>
+          <span class="layer-toggle" :class="{ open: layer.expand }" @click.stop="toggleExpand(layer)"></span>
           <span class="layer-name" @dblclick="startRename(layer)">
             <template v-if="renamingId === layer.id">
-              <el-input v-model="renameValue" size="small" @blur="finishRename" @keyup.enter="finishRename" />
+              <el-input v-model="renameValue" size="small" @blur="finishRename" @keyup.enter="finishRename" @click.stop />
             </template>
             <template v-else>{{ layer.name }}</template>
           </span>
+          <span class="layer-target" :class="{ on: layer.id === store.activeLayerId }" title="Target" @click.stop="selectLayer(layer.id)"></span>
         </div>
         <div class="layer-children" v-if="layer.expand">
-          <div v-for="entry in layerItems(layer.id)" :key="entry.id"
+          <div v-for="entry in filteredLayerItems(layer.id)" :key="entry.id"
                class="tree-item" :class="{ active: store.selectedItemIds.includes(entry.id) }"
-               :style="{ paddingLeft: (10 + entry.depth * 12) + 'px' }"
                @click.stop="selectTreeItem(entry.id, $event)">
             <span class="tree-vis" @click.stop="toggleTreeVisibility(entry)">
               <el-icon v-if="entry.visible" size="12"><View /></el-icon>
               <el-icon v-else size="12"><Hide /></el-icon>
             </span>
-            <span class="tree-lock" @click.stop="toggleTreeLock(entry)">
-              <el-icon v-if="entry.locked" size="12"><Lock /></el-icon>
-              <el-icon v-else size="12"><Unlock /></el-icon>
+            <span class="tree-lock" :class="{ locked: entry.locked }" title="Lock object" @click.stop="toggleTreeLock(entry)">
+              <el-icon v-if="entry.locked" size="11"><Lock /></el-icon>
+              <el-icon v-else size="11"><Unlock /></el-icon>
             </span>
+            <span class="tree-guide" :style="{ background: layerColor(layer.id) }"></span>
+            <span v-if="entry.depth > 0" class="tree-indent" :style="{ width: (entry.depth * 12) + 'px' }"></span>
+            <span class="tree-type">{{ entryIcon(entry) }}</span>
             <span class="tree-name">{{ entry.name }}</span>
+            <span class="tree-target" :class="{ on: store.selectedItemIds.includes(entry.id) }"></span>
           </div>
-          <div v-if="layerItems(layer.id).length === 0" class="tree-empty">No objects</div>
         </div>
       </div>
       <div class="drop-end" :class="{ active: dropIndex === displayedLayers.length }"
@@ -62,12 +68,21 @@
       <span class="footer-label">Opacity</span>
       <el-slider v-model="layerOpacity" :min="0" :max="100" size="small" @change="onLayerOpacityChange" />
     </div>
+
+    <div class="ly-bottombar">
+      <span class="ly-status">{{ store.layers.length }} layer{{ store.layers.length === 1 ? '' : 's' }}</span>
+      <div class="ly-actions">
+        <el-icon size="13" class="action-btn" title="New layer" @click="addLayer"><Plus /></el-icon>
+        <el-icon size="13" class="action-btn" title="Duplicate layer" @click="duplicateLayer"><CopyDocument /></el-icon>
+        <el-icon size="13" class="action-btn" title="Delete layer" @click="removeLayer"><Delete /></el-icon>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch, inject, type Ref } from 'vue'
-import { Plus, Delete, View, Hide, Lock, Unlock, CopyDocument } from '@element-plus/icons-vue'
+import { Plus, CopyDocument, Delete, Search, Filter, View, Hide, Lock, Unlock } from '@element-plus/icons-vue'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
 import type { LayerItemNode } from '../../editor/types'
@@ -77,9 +92,15 @@ const engineRef = inject<Ref<EditorEngine | null>>('engine')
 
 const renamingId = ref('')
 const renameValue = ref('')
+const searchText = ref('')
 // Displayed top-first (Illustrator order); the store keeps bottom-first
 // project order, so display indices map in reverse.
-const displayedLayers = computed(() => [...store.layers].reverse())
+const displayedLayers = computed(() => {
+  const q = searchText.value.trim().toLowerCase()
+  const all = [...store.layers].reverse()
+  if (!q) return all
+  return all.filter((l) => l.name.toLowerCase().includes(q))
+})
 // Object-tree entries per layer, rebuilt on any document or selection
 // change (every mutation records history, so the history index is a
 // sufficient document version).
@@ -104,6 +125,28 @@ const layerTree = computed(() => {
 })
 function layerItems(id: string): LayerItemNode[] {
   return layerTree.value.get(id) ?? []
+}
+
+/** Filtered object entries for AI-style search. */
+function filteredLayerItems(id: string): LayerItemNode[] {
+  const q = searchText.value.trim().toLowerCase()
+  const items = layerItems(id)
+  if (!q) return items
+  return items.filter((it) => it.name.toLowerCase().includes(q))
+}
+
+/** Stable accent color per layer, mimicking AI's layer color strip. */
+const LAYER_COLORS = ['#e04c4c', '#4a90d9', '#7ac943', '#e6a23c', '#9b59b6', '#1abc9c']
+function layerColor(id: string): string {
+  const idx = store.layers.findIndex((l) => l.id === id)
+  return LAYER_COLORS[((idx % LAYER_COLORS.length) + LAYER_COLORS.length) % LAYER_COLORS.length]
+}
+
+/** Single-letter type glyph for the object row (A = text, ▢ = shape). */
+function entryIcon(entry: LayerItemNode): string {
+  const n = entry.name.toLowerCase()
+  if (n.includes('text') || n.startsWith('a ') || n === 'a') return 'A'
+  return '▢'
 }
 // Insert-before display index while dragging (length means the bottom end).
 const dropIndex = ref(-1)
@@ -264,62 +307,139 @@ watch(() => store.layers.map((l) => `${l.id}:${l.opacity}`).join(','), syncOpaci
 </script>
 
 <style scoped>
+.ai-panel {
+  background: #252526;
+  color: #c9c9c9;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .layer-panel {
   flex: 1;
-  overflow-y: auto;
   min-height: 100px;
 }
 
-.panel-header {
+/* Search row, like AI */
+.ly-search {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: 6px 10px;
-  background: #333;
-  color: #ddd;
-  font-size: 12px;
-  font-weight: bold;
+  gap: 8px;
+  padding: 10px 10px 6px;
+  background: #1e1e1e;
 }
 
-.header-actions {
+.ly-search :deep(.el-input) {
+  flex: 1;
+}
+
+.ly-search :deep(.el-input__wrapper) {
+  background: #111111;
+  border: 1px solid #3d3d3d;
+  box-shadow: none !important;
+  border-radius: 3px;
+  height: 26px;
+}
+
+.ly-search :deep(.el-input__inner) {
+  color: #e6e6e6;
+  font-size: 12px;
+}
+
+.ly-search :deep(.el-input__inner::placeholder) {
+  color: #6f6f6f;
+}
+
+.ly-search :deep(.el-input__prefix) {
+  color: #8a8a8a;
+}
+
+.ly-filter {
+  color: #8a8a8a;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.ly-filter:hover {
+  color: #fff;
+}
+
+/* Bottom status + action bar, like AI */
+.ly-bottombar {
   display: flex;
-  gap: 4px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 10px;
+  background: #1e1e1e;
+  border-top: 1px solid #161616;
+  flex-shrink: 0;
+}
+
+.ly-status {
+  font-size: 11px;
+  color: #8a8a8a;
+}
+
+.ly-actions {
+  display: flex;
+  gap: 8px;
 }
 
 .action-btn {
   cursor: pointer;
-  color: #888;
+  color: #9a9a9a;
   padding: 2px;
   border-radius: 3px;
 }
 
 .action-btn:hover {
   color: #fff;
-  background: #444;
+  background: #3d3d3d;
 }
 
 .panel-body {
-  padding: 4px 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.panel-body::-webkit-scrollbar {
+  width: 8px;
+}
+.panel-body::-webkit-scrollbar-thumb {
+  background: #4a4a4a;
+  border-radius: 4px;
+  border: 2px solid #252526;
 }
 
 .layer-item {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 10px;
+  padding: 0 8px 0 10px;
+  height: 30px;
   cursor: pointer;
-  font-size: 13px;
-  color: #ccc;
-  border-bottom: 1px solid #2e2e2e;
+  font-size: 12px;
+  color: #d5d5d5;
+  border-bottom: 1px solid #1e1e1e;
+  background: #2a2a2a;
 }
 
 .layer-item:hover {
-  background: #333;
+  background: #333333;
 }
 
 .layer-item.active {
-  background: #3a5a8c;
+  background: #2f6fbf;
   color: #fff;
+}
+
+.layer-item.active .layer-vis,
+.layer-item.active .layer-lock,
+.layer-item.active .layer-toggle::before {
+  color: #fff;
+  border-left-color: #fff;
 }
 
 .layer-item.drop-before {
@@ -339,7 +459,7 @@ watch(() => store.layers.map((l) => `${l.id}:${l.opacity}`).join(','), syncOpaci
   position: absolute;
   left: 4px;
   top: 3px;
-  border-left: 5px solid #888;
+  border-left: 5px solid #8a8a8a;
   border-top: 4px solid transparent;
   border-bottom: 4px solid transparent;
   transition: transform 0.12s;
@@ -349,45 +469,58 @@ watch(() => store.layers.map((l) => `${l.id}:${l.opacity}`).join(','), syncOpaci
   transform: rotate(90deg);
 }
 
+.layer-color {
+  width: 3px;
+  align-self: stretch;
+  flex-shrink: 0;
+  border-radius: 1px;
+}
+
 .tree-item {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding-top: 5px;
-  padding-bottom: 5px;
-  padding-right: 10px;
+  height: 28px;
+  padding: 0 8px 0 10px;
   cursor: pointer;
   font-size: 12px;
-  color: #bbb;
-  border-bottom: 1px solid #2a2a2a;
+  color: #bcbcbc;
+  border-bottom: 1px solid #222222;
+  background: #252526;
+  position: relative;
 }
 
 .tree-item:hover {
-  background: #333;
+  background: #333333;
 }
 
 .tree-item.active {
-  background: #3a5a8c;
+  background: #2f6fbf;
   color: #fff;
 }
 
-.tree-vis,
-.tree-lock {
-  display: flex;
-  align-items: center;
-  cursor: pointer;
-  color: #777;
-  width: 18px;
-  height: 18px;
-  justify-content: center;
-  border-radius: 3px;
+.tree-item.active .tree-vis,
+.tree-item.active .tree-type {
+  color: #fff;
+}
+
+.tree-guide {
+  width: 3px;
+  align-self: stretch;
+  flex-shrink: 0;
+  opacity: 0.9;
+}
+
+.tree-indent {
   flex-shrink: 0;
 }
 
-.tree-vis:hover,
-.tree-lock:hover {
-  color: #fff;
-  background: #444;
+.tree-type {
+  width: 14px;
+  flex-shrink: 0;
+  text-align: center;
+  font-size: 11px;
+  color: #8a8a8a;
 }
 
 .tree-name {
@@ -397,15 +530,8 @@ watch(() => store.layers.map((l) => `${l.id}:${l.opacity}`).join(','), syncOpaci
   white-space: nowrap;
 }
 
-.tree-empty {
-  padding: 4px 10px 4px 28px;
-  font-size: 11px;
-  color: #666;
-  font-style: italic;
-}
-
 .drop-end {
-  height: 8px;
+  height: 10px;
 }
 
 .drop-end.active {
@@ -417,12 +543,30 @@ watch(() => store.layers.map((l) => `${l.id}:${l.opacity}`).join(','), syncOpaci
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
-  border-top: 1px solid #3a3a3a;
+  border-top: 1px solid #161616;
+  background: #1e1e1e;
+}
+
+.layer-footer :deep(.el-slider__runway) {
+  background: #3d3d3d;
+  height: 4px;
+}
+
+.layer-footer :deep(.el-slider__bar) {
+  background: #4a90d9;
+  height: 4px;
+}
+
+.layer-footer :deep(.el-slider__button) {
+  width: 12px;
+  height: 12px;
+  border: 2px solid #4a90d9;
+  background: #fff;
 }
 
 .footer-label {
-  font-size: 12px;
-  color: #aaa;
+  font-size: 11px;
+  color: #9a9a9a;
   flex-shrink: 0;
 }
 
@@ -431,11 +575,12 @@ watch(() => store.layers.map((l) => `${l.id}:${l.opacity}`).join(','), syncOpaci
   display: flex;
   align-items: center;
   cursor: pointer;
-  color: #888;
-  width: 18px;
-  height: 18px;
+  color: #8a8a8a;
+  width: 20px;
+  height: 20px;
   justify-content: center;
   border-radius: 3px;
+  flex-shrink: 0;
 }
 
 .layer-vis:hover,
@@ -444,10 +589,109 @@ watch(() => store.layers.map((l) => `${l.id}:${l.opacity}`).join(','), syncOpaci
   background: #444;
 }
 
+/* AI-style: lock affordance stays hidden until hover, unless locked */
+.layer-lock {
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.layer-item:hover .layer-lock,
+.layer-lock.locked {
+  opacity: 1;
+}
+
+.tree-vis {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  color: #7a7a7a;
+  width: 20px;
+  height: 20px;
+  justify-content: center;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.tree-vis:hover {
+  color: #fff;
+  background: #444;
+}
+
+.tree-lock {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  color: #8a8a8a;
+  width: 20px;
+  height: 18px;
+  justify-content: center;
+  border-radius: 3px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.tree-item:hover .tree-lock,
+.tree-lock.locked {
+  opacity: 1;
+}
+
+.tree-lock:hover {
+  color: #fff;
+  background: #444;
+}
+
+.tree-item.active .tree-lock {
+  color: #fff;
+}
+
+/* Target circle column, like AI */
+.layer-target,
+.tree-target {
+  width: 12px;
+  height: 12px;
+  border: 1px solid #6a6a6a;
+  border-radius: 50%;
+  flex-shrink: 0;
+  cursor: pointer;
+  margin-left: auto;
+}
+
+.layer-item.active .layer-target,
+.tree-item.active .tree-target {
+  border-color: #fff;
+}
+
+.layer-target.on,
+.tree-target.on {
+  position: relative;
+}
+
+.layer-target.on::after,
+.tree-target.on::after {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
 .layer-name {
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.layer-name :deep(.el-input__wrapper) {
+  background: #111;
+  border: 1px solid #4a90d9;
+  box-shadow: none !important;
+  height: 22px;
+}
+
+.layer-name :deep(.el-input__inner) {
+  color: #fff;
+  font-size: 12px;
 }
 </style>
