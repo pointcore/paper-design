@@ -43,6 +43,9 @@
           <div v-for="entry in filteredLayerItems(layer.id)" :key="entry.id"
                class="tree-item" :class="{ active: store.selectedItemIds.includes(entry.id) }"
                @click.stop="selectTreeItem(entry.id, $event)">
+            <span v-if="entry.collapsible" class="tree-toggle" :class="{ open: !entry.collapsed }"
+                  title="Expand/collapse" @click.stop="toggleTreeCollapsed(entry)"></span>
+            <span v-else class="tree-toggle-spacer"></span>
             <span class="tree-vis" @click.stop="toggleTreeVisibility(entry)">
               <el-icon v-if="entry.visible" size="12"><View /></el-icon>
               <el-icon v-else size="12"><Hide /></el-icon>
@@ -104,11 +107,14 @@ const displayedLayers = computed(() => {
 })
 // Object-tree entries per layer, rebuilt on any document or selection
 // change (every mutation records history, so the history index is a
-// sufficient document version).
+// sufficient document version) plus local tree ticks for metadata-only
+// toggles such as folding.
+const treeTick = ref(0)
 const treeKey = computed(() =>
   [
     store.historyIndex,
     store.selectedItemIds.join(','),
+    treeTick.value,
     store.layers
       .map((l) => `${l.id}:${l.name}:${l.visible}:${l.locked}:${l.opacity}:${l.expand}`)
       .join(','),
@@ -205,6 +211,11 @@ function toggleTreeVisibility(entry: LayerItemNode) {
 
 function toggleTreeLock(entry: LayerItemNode) {
   getEngine()?.setItemLocked(entry.id, !entry.locked)
+}
+
+function toggleTreeCollapsed(entry: LayerItemNode) {
+  getEngine()?.setTreeCollapsed(entry.id, !entry.collapsed)
+  treeTick.value++
 }
 
 function addLayer() {
@@ -497,6 +508,34 @@ watch(() => store.layers.map((l) => `${l.id}:${l.opacity}`).join(','), syncOpaci
   border-bottom: 1px solid #222222;
   background: #252526;
   position: relative;
+}
+
+.tree-toggle {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  cursor: pointer;
+  position: relative;
+}
+
+.tree-toggle::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 3px;
+  border-left: 5px solid #888;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  transition: transform 0.12s;
+}
+
+.tree-toggle.open::before {
+  transform: rotate(90deg);
+}
+
+.tree-toggle-spacer {
+  width: 14px;
+  flex-shrink: 0;
 }
 
 .tree-item:hover {

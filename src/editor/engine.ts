@@ -1147,20 +1147,26 @@ export class EditorEngine {
             depth,
             visible: item.visible,
             locked: item.locked,
+            collapsible: false,
+            collapsed: false,
           })
         }
         return
       }
       if (item instanceof scope.Group) {
         if (data.id) {
+          const foldable = data.textMode !== 'path' && item.children.length > 0
+          const collapsed = foldable && (data.treeCollapsed as boolean | undefined) === true
           out.push({
             id: data.id as string,
             name: this.itemTreeLabel(item),
             depth,
             visible: item.visible,
             locked: item.locked,
+            collapsible: foldable,
+            collapsed,
           })
-          if (data.textMode === 'path') return
+          if (data.textMode === 'path' || collapsed) return
           for (const child of item.children) walk(child as paper.Item, depth + 1)
         } else {
           for (const child of item.children) walk(child as paper.Item, depth)
@@ -1272,6 +1278,17 @@ export class EditorEngine {
     item.locked = locked
     this.pushHistory(locked ? 'Lock' : 'Unlock')
     this.scope.view.update()
+  }
+
+  /**
+   * Fold or unfold an object-tree group entry. View-only paper metadata:
+   * no history entry, the panel refreshes itself after toggling.
+   */
+  setTreeCollapsed(id: string, collapsed: boolean): void {
+    const item = this.getItemById(id)
+    if (!item || !(item instanceof this.scope.Group)) return
+    if (collapsed) (item.data as any).treeCollapsed = true
+    else delete (item.data as any).treeCollapsed
   }
 
   // ===== Selection transform =====

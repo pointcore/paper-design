@@ -147,6 +147,10 @@ export interface LayerItemNode {
   depth: number
   visible: boolean
   locked: boolean
+  /** Whether the entry can fold its children (named groups). */
+  collapsible: boolean
+  /** Whether a foldable entry currently hides its children. */
+  collapsed: boolean
 }
 
 /** Artboard (page sheet) metadata; visuals derive from this list. */
