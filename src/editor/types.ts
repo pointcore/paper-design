@@ -126,6 +126,15 @@ export interface LayerMeta {
   expand: boolean
 }
 
+/** Object-tree entry: one selectable user item within a layer. */
+export interface LayerItemNode {
+  id: string
+  name: string
+  depth: number
+  visible: boolean
+  locked: boolean
+}
+
 /** Item metadata */
 export interface ItemMeta {
   id: string

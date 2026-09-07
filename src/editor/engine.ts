@@ -2,7 +2,7 @@
  * EditorEngine - Vue/Pinia ↔ Paper.js bridge hub
  */
 import paper from 'paper'
-import type { ToolName, StyleState, LayerMeta, HistoryEntry, GuideOrientation, ProjectFileData, ReferencePoint, AlignMode, DistributeAxis, BooleanOperation, RasterExportOptions } from './types'
+import type { ToolName, StyleState, LayerMeta, LayerItemNode, HistoryEntry, GuideOrientation, ProjectFileData, ReferencePoint, AlignMode, DistributeAxis, BooleanOperation, RasterExportOptions } from './types'
 import { createDefaultStyle } from './store'
 import type { EditorStore } from './store-types'
 
@@ -785,6 +785,131 @@ export class EditorEngine {
     layer.opacity = clamped
     const id = (layer.data as any)?.layerId as string | undefined
     if (id) this.store.updateLayer(id, { opacity: clamped })
+    this.scope.view.update()
+  }
+
+  // ===== Layer object tree =====
+
+  /**
+   * Flat depth-first object entries for one user layer. Path-text glyph
+   * runs stay whole (their group is the entry); untagged plain groups are
+   * transparent containers whose children list at the same depth.
+   */
+  listLayerItems(layerId: string): LayerItemNode[] {
+    const out: LayerItemNode[] = []
+    const scope = this.scope
+    const layer = this.project.layers.find((l) => (l.data as any)?.layerId === layerId)
+    if (!layer) return out
+    const walk = (item: paper.Item, depth: number): void => {
+      const data = (item.data as any) ?? {}
+      if (data.isChrome || data.isPreview || data.isGuide || data.annotation) return
+      if (
+        item instanceof scope.CompoundPath ||
+        item instanceof scope.Path ||
+        item instanceof scope.PointText
+      ) {
+        if (data.id) {
+          out.push({
+            id: data.id as string,
+            name: this.itemTreeLabel(item),
+            depth,
+            visible: item.visible,
+            locked: item.locked,
+          })
+        }
+        return
+      }
+      if (item instanceof scope.Group) {
+        if (data.id) {
+          out.push({
+            id: data.id as string,
+            name: this.itemTreeLabel(item),
+            depth,
+            visible: item.visible,
+            locked: item.locked,
+          })
+          if (data.textMode === 'path') return
+          for (const child of item.children) walk(child as paper.Item, depth + 1)
+        } else {
+          for (const child of item.children) walk(child as paper.Item, depth)
+        }
+        return
+      }
+      const children = (item as any).children as paper.Item[] | undefined
+      if (children) {
+        for (const child of children) walk(child, depth)
+      }
+    }
+    for (const child of layer.children) walk(child as paper.Item, 0)
+    return out
+  }
+
+  /** Display label for an object-tree entry (imported names win). */
+  private itemTreeLabel(item: paper.Item): string {
+    const scope = this.scope
+    const data = (item.data as any) ?? {}
+    const named = (item as any).name as string | undefined
+    let kind: string
+    if (data.textMode === 'path') kind = 'Path Text'
+    else if (data.textMode === 'area') kind = 'Area Text'
+    else if (data.textMode === 'vertical') kind = 'Vertical Text'
+    else if (item instanceof scope.PointText) kind = 'Text'
+    else if (item instanceof scope.CompoundPath) kind = 'Compound Path'
+    else if (item instanceof scope.Group) kind = 'Group'
+    else if (item instanceof scope.Path) kind = item.closed ? 'Closed Path' : 'Path'
+    else kind = 'Object'
+    return named ? `${named} (${kind})` : kind
+  }
+
+  /** Find any user-layer item by its document id (depth-first). */
+  getItemById(id: string): paper.Item | null {
+    if (!id) return null
+    const walk = (item: paper.Item): paper.Item | null => {
+      if ((item.data as any)?.id === id) return item
+      const children = (item as any).children as paper.Item[] | undefined
+      if (children) {
+        for (const child of children) {
+          const found = walk(child)
+          if (found) return found
+        }
+      }
+      return null
+    }
+    for (const layer of this.project.layers) {
+      if (!(layer.data as any)?.isUserLayer) continue
+      for (const child of layer.children) {
+        const found = walk(child as paper.Item)
+        if (found) return found
+      }
+    }
+    return null
+  }
+
+  /** Select one object-tree entry (shift extends the selection). */
+  selectItemById(id: string, additive = false): void {
+    const item = this.getItemById(id)
+    if (!item) return
+    if (!additive) this.project.deselectAll()
+    item.selected = true
+    this.syncSelectionToStore()
+    this.scope.view.update()
+  }
+
+  /** Toggle one object-tree entry visibility. */
+  setItemVisible(id: string, visible: boolean): void {
+    const item = this.getItemById(id)
+    if (!item) return
+    item.visible = visible
+    this.pushHistory(visible ? 'Show' : 'Hide')
+    this.scope.view.update()
+  }
+
+  /** Toggle one object-tree entry lock. */
+  setItemLocked(id: string, locked: boolean): void {
+    const item = this.getItemById(id)
+    if (!item) return
+    item.locked = locked
+    this.pushHistory(locked ? 'Lock' : 'Unlock')
     this.scope.view.update()
   }
 

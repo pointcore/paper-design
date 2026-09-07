@@ -9,28 +9,48 @@
     </div>
 
     <div class="panel-body">
-      <div class="layer-item" v-for="(layer, displayIndex) in displayedLayers" :key="layer.id"
-           :class="{ active: layer.id === store.activeLayerId, 'drop-before': dropIndex === displayIndex }"
-           draggable="true"
-           @click="selectLayer(layer.id)"
-           @dragstart="onDragStart($event, layer.id)"
-           @dragover.prevent="onDragOver($event, displayIndex)"
-           @drop="onDrop($event, displayIndex)"
-           @dragend="onDragEnd">
-        <span class="layer-vis" @click.stop="toggleVisibility(layer)">
-          <el-icon v-if="layer.visible" size="12"><View /></el-icon>
-          <el-icon v-else size="12"><Hide /></el-icon>
-        </span>
-        <span class="layer-lock" @click.stop="toggleLock(layer)">
-          <el-icon v-if="layer.locked" size="12"><Lock /></el-icon>
-          <el-icon v-else size="12"><Unlock /></el-icon>
-        </span>
-        <span class="layer-name" @dblclick="startRename(layer)">
-          <template v-if="renamingId === layer.id">
-            <el-input v-model="renameValue" size="small" @blur="finishRename" @keyup.enter="finishRename" />
-          </template>
-          <template v-else>{{ layer.name }}</template>
-        </span>
+      <div class="layer-group" v-for="(layer, displayIndex) in displayedLayers" :key="layer.id">
+        <div class="layer-item"
+             :class="{ active: layer.id === store.activeLayerId, 'drop-before': dropIndex === displayIndex }"
+             draggable="true"
+             @click="selectLayer(layer.id)"
+             @dragstart="onDragStart($event, layer.id)"
+             @dragover.prevent="onDragOver($event, displayIndex)"
+             @drop="onDrop($event, displayIndex)"
+             @dragend="onDragEnd">
+          <span class="layer-toggle" :class="{ open: layer.expand }" @click.stop="toggleExpand(layer)"></span>
+          <span class="layer-vis" @click.stop="toggleVisibility(layer)">
+            <el-icon v-if="layer.visible" size="12"><View /></el-icon>
+            <el-icon v-else size="12"><Hide /></el-icon>
+          </span>
+          <span class="layer-lock" @click.stop="toggleLock(layer)">
+            <el-icon v-if="layer.locked" size="12"><Lock /></el-icon>
+            <el-icon v-else size="12"><Unlock /></el-icon>
+          </span>
+          <span class="layer-name" @dblclick="startRename(layer)">
+            <template v-if="renamingId === layer.id">
+              <el-input v-model="renameValue" size="small" @blur="finishRename" @keyup.enter="finishRename" />
+            </template>
+            <template v-else>{{ layer.name }}</template>
+          </span>
+        </div>
+        <div class="layer-children" v-if="layer.expand">
+          <div v-for="entry in layerItems(layer.id)" :key="entry.id"
+               class="tree-item" :class="{ active: store.selectedItemIds.includes(entry.id) }"
+               :style="{ paddingLeft: (10 + entry.depth * 12) + 'px' }"
+               @click.stop="selectTreeItem(entry.id, $event)">
+            <span class="tree-vis" @click.stop="toggleTreeVisibility(entry)">
+              <el-icon v-if="entry.visible" size="12"><View /></el-icon>
+              <el-icon v-else size="12"><Hide /></el-icon>
+            </span>
+            <span class="tree-lock" @click.stop="toggleTreeLock(entry)">
+              <el-icon v-if="entry.locked" size="12"><Lock /></el-icon>
+              <el-icon v-else size="12"><Unlock /></el-icon>
+            </span>
+            <span class="tree-name">{{ entry.name }}</span>
+          </div>
+          <div v-if="layerItems(layer.id).length === 0" class="tree-empty">No objects</div>
+        </div>
       </div>
       <div class="drop-end" :class="{ active: dropIndex === displayedLayers.length }"
            @dragover.prevent="onDragOver($event, displayedLayers.length)"
@@ -49,6 +69,7 @@ import { ref, computed, watch, inject, type Ref } from 'vue'
 import { Plus, Delete, View, Hide, Lock, Unlock } from '@element-plus/icons-vue'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
+import type { LayerItemNode } from '../../editor/types'
 
 const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
@@ -58,6 +79,31 @@ const renameValue = ref('')
 // Displayed top-first (Illustrator order); the store keeps bottom-first
 // project order, so display indices map in reverse.
 const displayedLayers = computed(() => [...store.layers].reverse())
+// Object-tree entries per layer, rebuilt on any document or selection
+// change (every mutation records history, so the history index is a
+// sufficient document version).
+const treeKey = computed(() =>
+  [
+    store.historyIndex,
+    store.selectedItemIds.join(','),
+    store.layers
+      .map((l) => `${l.id}:${l.name}:${l.visible}:${l.locked}:${l.opacity}:${l.expand}`)
+      .join(','),
+  ].join('|')
+)
+const layerTree = computed(() => {
+  void treeKey.value
+  const map = new Map<string, LayerItemNode[]>()
+  const e = getEngine()
+  if (!e) return map
+  for (const layer of store.layers) {
+    map.set(layer.id, e.listLayerItems(layer.id))
+  }
+  return map
+})
+function layerItems(id: string): LayerItemNode[] {
+  return layerTree.value.get(id) ?? []
+}
 // Insert-before display index while dragging (length means the bottom end).
 const dropIndex = ref(-1)
 const draggedId = ref('')
@@ -98,6 +144,22 @@ function toggleLock(layer: any) {
   if (pLayer) {
     pLayer.locked = layer.locked
   }
+}
+
+function toggleExpand(layer: any) {
+  store.updateLayer(layer.id, { expand: !layer.expand })
+}
+
+function selectTreeItem(id: string, e: MouseEvent) {
+  getEngine()?.selectItemById(id, e.shiftKey)
+}
+
+function toggleTreeVisibility(entry: LayerItemNode) {
+  getEngine()?.setItemVisible(entry.id, !entry.visible)
+}
+
+function toggleTreeLock(entry: LayerItemNode) {
+  getEngine()?.setItemLocked(entry.id, !entry.locked)
 }
 
 function addLayer() {
@@ -257,6 +319,84 @@ watch(() => store.layers.map((l) => `${l.id}:${l.opacity}`).join(','), syncOpaci
 
 .layer-item.drop-before {
   box-shadow: inset 0 2px 0 #4a90d9;
+}
+
+.layer-toggle {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  cursor: pointer;
+  position: relative;
+}
+
+.layer-toggle::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 3px;
+  border-left: 5px solid #888;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  transition: transform 0.12s;
+}
+
+.layer-toggle.open::before {
+  transform: rotate(90deg);
+}
+
+.tree-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+  padding-right: 10px;
+  cursor: pointer;
+  font-size: 12px;
+  color: #bbb;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.tree-item:hover {
+  background: #333;
+}
+
+.tree-item.active {
+  background: #3a5a8c;
+  color: #fff;
+}
+
+.tree-vis,
+.tree-lock {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  color: #777;
+  width: 18px;
+  height: 18px;
+  justify-content: center;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.tree-vis:hover,
+.tree-lock:hover {
+  color: #fff;
+  background: #444;
+}
+
+.tree-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-empty {
+  padding: 4px 10px 4px 28px;
+  font-size: 11px;
+  color: #666;
+  font-style: italic;
 }
 
 .drop-end {
