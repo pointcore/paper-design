@@ -286,13 +286,19 @@
           <span class="prop-label">Align</span>
         </div>
         <div v-show="open.align" class="prop-body">
+          <div class="btn-row">
+            <el-radio-group v-model="alignTarget" size="small">
+              <el-radio-button value="selection">Selection</el-radio-button>
+              <el-radio-button value="board">Artboard</el-radio-button>
+            </el-radio-group>
+          </div>
           <div class="btn-grid-3">
-            <el-button size="small" class="grid-btn" :disabled="store.selectedItemIds.length < 2" @click="onAlign('left', 'Align Left')">Left</el-button>
-            <el-button size="small" class="grid-btn" :disabled="store.selectedItemIds.length < 2" @click="onAlign('centerX', 'Align Center')">Center</el-button>
-            <el-button size="small" class="grid-btn" :disabled="store.selectedItemIds.length < 2" @click="onAlign('right', 'Align Right')">Right</el-button>
-            <el-button size="small" class="grid-btn" :disabled="store.selectedItemIds.length < 2" @click="onAlign('top', 'Align Top')">Top</el-button>
-            <el-button size="small" class="grid-btn" :disabled="store.selectedItemIds.length < 2" @click="onAlign('centerY', 'Align Middle')">Middle</el-button>
-            <el-button size="small" class="grid-btn" :disabled="store.selectedItemIds.length < 2" @click="onAlign('bottom', 'Align Bottom')">Bottom</el-button>
+            <el-button size="small" class="grid-btn" :disabled="!store.hasSelection" @click="onAlign('left', 'Align Left')">Left</el-button>
+            <el-button size="small" class="grid-btn" :disabled="!store.hasSelection" @click="onAlign('centerX', 'Align Center')">Center</el-button>
+            <el-button size="small" class="grid-btn" :disabled="!store.hasSelection" @click="onAlign('right', 'Align Right')">Right</el-button>
+            <el-button size="small" class="grid-btn" :disabled="!store.hasSelection" @click="onAlign('top', 'Align Top')">Top</el-button>
+            <el-button size="small" class="grid-btn" :disabled="!store.hasSelection" @click="onAlign('centerY', 'Align Middle')">Middle</el-button>
+            <el-button size="small" class="grid-btn" :disabled="!store.hasSelection" @click="onAlign('bottom', 'Align Bottom')">Bottom</el-button>
           </div>
           <div class="btn-grid-2">
             <el-button size="small" class="grid-btn" :disabled="store.selectedItemIds.length < 3" @click="onDistribute('horizontal')">Distr H</el-button>
@@ -503,6 +509,9 @@ const posW = ref(0)
 const posH = ref(0)
 // Relative rotation in degrees applied on change, then reset to zero.
 const rotateBy = ref(0)
+
+// Align target: the selection itself or the active artboard.
+const alignTarget = ref<'selection' | 'board'>('selection')
 
 // Nine-point reference anchors in grid order.
 const refPoints: ReferencePoint[] = [
@@ -878,8 +887,10 @@ function onFlipV() {
 function onAlign(mode: AlignMode, label: string) {
   const e = getEngine()
   if (!e) return
-  e.alignSelection(mode)
-  e.pushHistory(label)
+  const target = alignTarget.value === 'board' ? e.getActiveArtboardRect() ?? undefined : undefined
+  if (e.alignSelection(mode, target)) {
+    e.pushHistory(label)
+  }
 }
 
 function onDistribute(axis: DistributeAxis) {
@@ -1112,6 +1123,12 @@ watch(() => store.selectedItemIds, () => {
 }
 
 /* Button grids that always fit the column */
+.btn-row {
+  display: flex;
+  gap: 4px;
+  margin-top: 5px;
+}
+
 .btn-grid-3 {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

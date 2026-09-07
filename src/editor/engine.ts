@@ -1339,15 +1339,16 @@ export class EditorEngine {
   }
 
   /**
-   * Align every unlocked selected item to an edge or center of the united
-   * bounds of the unlocked selection. Needs at least two unlocked items.
-   * Callers record history.
+   * Align every unlocked selected item to an edge or center of a target
+   * rectangle (explicit board target, or the united unlocked-selection
+   * bounds which needs at least two items). Returns false when there is
+   * nothing to align; callers record history only then.
    */
-  alignSelection(mode: AlignMode): void {
+  alignSelection(mode: AlignMode, target?: paper.Rectangle): boolean {
     const items = this.getSelection().filter((item) => !item.locked)
-    if (items.length < 2) return
-    const bounds = this.unitedBoundsOf(items)
-    if (!bounds) return
+    if (items.length === 0) return false
+    const bounds = target ?? (items.length >= 2 ? this.unitedBoundsOf(items) : null)
+    if (!bounds) return false
     const targetLeft = bounds.x
     const targetCenterX = bounds.x + bounds.width / 2
     const targetRight = bounds.x + bounds.width
@@ -1373,6 +1374,16 @@ export class EditorEngine {
       }
     }
     this.scope.view.update()
+    return true
+  }
+
+  /** Active artboard rectangle, or null when none is usable. */
+  getActiveArtboardRect(): paper.Rectangle | null {
+    const board =
+      this.store.artboards.find((b) => b.id === this.store.activeArtboardId) ??
+      this.store.artboards[0]
+    if (!board || !(board.width > 0) || !(board.height > 0)) return null
+    return new this.scope.Rectangle(board.x, board.y, board.width, board.height)
   }
 
   /**
