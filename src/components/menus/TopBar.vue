@@ -254,14 +254,13 @@ function onEditCmd(cmd: string) {
       e.redo()
       break
     case 'cut':
-      e.copySelected()
-      e.deleteSelected()
+      e.cutSelectedToClipboard()
       break
     case 'copy':
-      e.copySelected()
+      e.copySelectedToClipboard()
       break
     case 'paste':
-      e.copySelected()
+      e.pasteClipboard()
       break
     case 'delete':
       e.deleteSelected()

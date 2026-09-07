@@ -114,9 +114,14 @@ export function resolveToolShortcut(e: KeyboardEvent): ToolName | null {
 }
 
 /**
- * Global keydown handler for tool switching.
- * Attach to `window`; returns early when typing in a text field or when a
- * modifier (Ctrl/Meta/Alt) that should be preserved is held.
+ * Global keydown handler for editor shortcuts.
+ *
+ * Two groups live here:
+ * - Clipboard and history shortcuts (Ctrl+C / X / V / Z / Shift+Z / Y).
+ *   They work in every tool context, matching Illustrator; the text edit
+ *   overlay is exempt via the editable-target guard so the browser's own
+ *   textarea editing keeps working.
+ * - Single-key tool switching (see resolveToolShortcut).
  */
 export function handleGlobalKeydown(
   e: KeyboardEvent,
@@ -124,7 +129,28 @@ export function handleGlobalKeydown(
   engine: EditorEngine | null
 ): void {
   if (isEditableTarget(e)) return
-  if (e.ctrlKey || e.metaKey || e.altKey) return
+
+  if (e.ctrlKey || e.metaKey) {
+    const key = e.key.toLowerCase()
+    if (key === 'c') {
+      engine?.copySelectedToClipboard()
+      e.preventDefault()
+    } else if (key === 'x') {
+      engine?.cutSelectedToClipboard()
+      e.preventDefault()
+    } else if (key === 'v') {
+      engine?.pasteClipboard()
+      e.preventDefault()
+    } else if (key === 'z' && !e.shiftKey) {
+      engine?.undo()
+      e.preventDefault()
+    } else if ((key === 'z' && e.shiftKey) || key === 'y') {
+      engine?.redo()
+      e.preventDefault()
+    }
+    return
+  }
+  if (e.altKey) return
   if (e.repeat) return
 
   const tool = resolveToolShortcut(e)

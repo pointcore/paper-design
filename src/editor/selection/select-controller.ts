@@ -318,9 +318,6 @@ export class SelectController {
           engine.clearSelection()
           this.refreshChrome()
           break
-        case 'c':
-          if (event.modifiers.command) engine.copySelected()
-          break
         case 'd':
           if (event.modifiers.command) engine.duplicateSelected()
           break

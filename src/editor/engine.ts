@@ -675,6 +675,59 @@ export class EditorEngine {
     return clones
   }
 
+  // ===== Clipboard =====
+
+  /** Detached clones of the most recent copy / cut selection. */
+  private clipboardItems: paper.Item[] = []
+  /** How many pastes have been made from the current clipboard content. */
+  private pasteCount = 0
+
+  /**
+   * Copy the current selection onto the internal clipboard as detached
+   * clones. Returns how many items were copied. (Cross-application
+   * clipboard interop is not covered yet; the clipboard is scoped to this
+   * editor instance.)
+   */
+  copySelectedToClipboard(): number {
+    const items = this.getSelection().filter((item) => (item.data as any)?.isUserItem)
+    this.clipboardItems = items.map((item) => item.clone({ insert: false }))
+    this.pasteCount = 0
+    return this.clipboardItems.length
+  }
+
+  /** Cut = copy onto the clipboard, then delete the selection. */
+  cutSelectedToClipboard(): void {
+    if (this.copySelectedToClipboard() === 0) return
+    this.deleteSelected()
+  }
+
+  /**
+   * Paste the clipboard clones into the active layer. Each paste is offset
+   * by a small step so repeated pastes do not stack exactly on top of the
+   * source, and the pasted items become the new selection.
+   */
+  pasteClipboard(): void {
+    if (this.clipboardItems.length === 0) return
+    const layer = this.getActiveLayer()
+    // Each paste steps one increment further from the source position.
+    this.pasteCount++
+    const offset = new this.scope.Point(10 * this.pasteCount, 10 * this.pasteCount)
+    const pasted: paper.Item[] = []
+    for (const source of this.clipboardItems) {
+      const clone = source.clone({ insert: false })
+      layer.addChild(clone)
+      clone.data.id = this.genId()
+      clone.data.isUserItem = true
+      clone.position = (clone.position as paper.Point).add(offset)
+      pasted.push(clone)
+    }
+    this.clearSelection()
+    pasted.forEach((item) => (item.selected = true))
+    this.syncSelectionToStore()
+    this.pushHistory('Paste')
+    this.scope.view.update()
+  }
+
   deleteSelected() {
     const items = this.getSelection()
     items.forEach((i) => i.remove())

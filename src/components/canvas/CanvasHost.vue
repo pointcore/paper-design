@@ -22,6 +22,8 @@
          :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
          @click.stop>
       <div class="menu-item" @click="ctxCopy">Copy</div>
+      <div class="menu-item" @click="ctxCut">Cut</div>
+      <div class="menu-item" @click="ctxPaste">Paste</div>
       <div class="menu-item" @click="ctxDelete">Delete</div>
       <div class="menu-divider"></div>
       <div class="menu-item" @click="ctxBringToFront">Bring to Front</div>
@@ -336,7 +338,17 @@ function onContextMenu(e: MouseEvent) {
 }
 
 function ctxCopy() {
-  engine?.copySelected()
+  engine?.copySelectedToClipboard()
+  hideMenu()
+}
+
+function ctxCut() {
+  engine?.cutSelectedToClipboard()
+  hideMenu()
+}
+
+function ctxPaste() {
+  engine?.pasteClipboard()
   hideMenu()
 }
 
