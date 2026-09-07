@@ -11,6 +11,7 @@
               <el-dropdown-item command="open" divided>Open...</el-dropdown-item>
               <el-dropdown-item command="save">Save</el-dropdown-item>
               <el-dropdown-item command="export" divided>Export SVG</el-dropdown-item>
+              <el-dropdown-item command="exportRaster">Export Raster...</el-dropdown-item>
               <el-dropdown-item command="import">Import SVG...</el-dropdown-item>
             </el-dropdown-menu>
           </template>
@@ -179,6 +180,45 @@
         <el-button size="small" @click="settingsVisible = false">Close</el-button>
       </template>
     </el-dialog>
+
+    <!-- Raster Export Dialog -->
+    <el-dialog v-model="exportVisible" title="Export Raster" width="420px" class="canvas-settings-dialog">
+      <div class="settings-body">
+        <div class="setting-section">
+          <div class="setting-row">
+            <div class="setting-label">
+              <span class="setting-name">Format</span>
+            </div>
+            <el-select v-model="exportForm.format" size="small" style="width: 120px">
+              <el-option v-for="f in exportFormats" :key="f.value" :label="f.label" :value="f.value" />
+            </el-select>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-label">
+              <span class="setting-name">Scale</span>
+            </div>
+            <el-select v-model="exportForm.scale" size="small" style="width: 120px">
+              <el-option v-for="s in exportScales" :key="s.value" :label="s.label" :value="s.value" />
+            </el-select>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-label">
+              <span class="setting-name">Area</span>
+            </div>
+            <el-radio-group v-model="exportForm.area" size="small">
+              <el-radio-button value="all">All artwork</el-radio-button>
+              <el-radio-button value="selection" :disabled="!store.hasSelection">Selection</el-radio-button>
+            </el-radio-group>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button size="small" @click="exportVisible = false">Cancel</el-button>
+        <el-button size="small" type="primary" @click="onExportRasterConfirm">Export</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -187,12 +227,28 @@ import { ref, reactive, inject, type Ref } from 'vue'
 import { QuestionFilled, Check } from '@element-plus/icons-vue'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
-import type { RulerUnit } from '../../editor/types'
+import type { RulerUnit, RasterExportFormat } from '../../editor/types'
 
 const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
 
 const settingsVisible = ref(false)
+const exportVisible = ref(false)
+const exportForm = reactive({
+  format: 'png' as RasterExportFormat,
+  scale: 2,
+  area: 'all' as 'all' | 'selection',
+})
+const exportFormats = [
+  { value: 'png', label: 'PNG' },
+  { value: 'jpeg', label: 'JPEG' },
+  { value: 'webp', label: 'WebP' },
+]
+const exportScales = [
+  { value: 1, label: '1x' },
+  { value: 2, label: '2x' },
+  { value: 3, label: '3x' },
+]
 const settings = reactive({
   rulers: store.view.rulersVisible,
   grid: store.view.showGrid,
@@ -261,6 +317,12 @@ function onFileCmd(cmd: string) {
       input.click()
       break
     }
+    case 'exportRaster':
+      if (exportForm.area === 'selection' && !store.hasSelection) {
+        exportForm.area = 'all'
+      }
+      exportVisible.value = true
+      break
     case 'export':
       if (e) {
         // Temporarily hide non-user layers (grid / overlay / annotation / guides)
@@ -316,6 +378,37 @@ function onFileCmd(cmd: string) {
       input.click()
       break
     }
+  }
+}
+
+function onExportRasterConfirm() {
+  const e = engineRef?.value
+  if (!e) {
+    exportVisible.value = false
+    return
+  }
+  if (exportForm.area === 'selection' && !store.hasSelection) {
+    store.setStatusMessage('Nothing selected to export')
+    return
+  }
+  try {
+    const dataUrl = e.exportRaster({
+      format: exportForm.format,
+      scale: exportForm.scale,
+      selectionOnly: exportForm.area === 'selection',
+    })
+    if (!dataUrl) {
+      store.setStatusMessage('Raster export failed')
+      return
+    }
+    const a = document.createElement('a')
+    a.href = dataUrl
+    a.download = `export.${exportForm.format}`
+    a.click()
+    exportVisible.value = false
+    store.setStatusMessage(`Raster exported (${exportForm.format.toUpperCase()} ${exportForm.scale}x)`)
+  } catch (err) {
+    store.setStatusMessage('Raster export failed')
   }
 }
 

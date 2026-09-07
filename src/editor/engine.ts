@@ -2,7 +2,7 @@
  * EditorEngine - Vue/Pinia ↔ Paper.js bridge hub
  */
 import paper from 'paper'
-import type { ToolName, StyleState, LayerMeta, HistoryEntry, GuideOrientation, ProjectFileData, ReferencePoint, AlignMode, DistributeAxis, BooleanOperation } from './types'
+import type { ToolName, StyleState, LayerMeta, HistoryEntry, GuideOrientation, ProjectFileData, ReferencePoint, AlignMode, DistributeAxis, BooleanOperation, RasterExportOptions } from './types'
 import { createDefaultStyle } from './store'
 import type { EditorStore } from './store-types'
 
@@ -994,6 +994,74 @@ export class EditorEngine {
     if (item instanceof scope.Path) return item.segments.length === 0
     if (item instanceof scope.CompoundPath) return item.children.length === 0
     return false
+  }
+
+  // ===== Raster export =====
+
+  /**
+   * Rasterize artwork through the paper.js view into a data URL. The view
+   * is pointed at the export bounds for exactly one synchronous render and
+   * then restored, so no intermediate frame ever paints. Editor chrome
+   * layers stay hidden like in SVG export. Returns null when there is
+   * nothing to export or the output exceeds the size guard.
+   */
+  exportRaster(options: RasterExportOptions): string | null {
+    const source = options.selectionOnly ? this.getSelection() : this.getUserItems()
+    const bounds = this.unitedBoundsOf(source)
+    if (!bounds || bounds.width < 1 || bounds.height < 1) return null
+    const scale = Number.isFinite(options.scale) ? Math.min(4, Math.max(0.5, options.scale)) : 1
+    const width = Math.max(1, Math.ceil(bounds.width * scale))
+    const height = Math.max(1, Math.ceil(bounds.height * scale))
+    if (width > 16384 || height > 16384) return null
+
+    const view = this.scope.view
+    const prevSize = view.viewSize.clone()
+    const prevCenter = view.center.clone()
+    const prevZoom = view.zoom
+
+    // Temporarily hide non-user layers so editing chrome never leaks in.
+    const hiddenLayers: paper.Layer[] = []
+    for (const layer of this.project.layers) {
+      if (!(layer.data as any)?.isUserLayer && layer.visible) {
+        layer.visible = false
+        hiddenLayers.push(layer)
+      }
+    }
+
+    try {
+      view.viewSize = new this.scope.Size(width, height)
+      view.zoom = scale
+      view.center = bounds.center
+      view.update()
+
+      const mime =
+        options.format === 'jpeg' ? 'image/jpeg' :
+        options.format === 'webp' ? 'image/webp' : 'image/png'
+      if (options.format === 'png') {
+        return this.canvas.toDataURL('image/png')
+      }
+      const output = document.createElement('canvas')
+      output.width = width
+      output.height = height
+      const ctx = output.getContext('2d')
+      if (!ctx) return null
+      if (options.format === 'jpeg') {
+        ctx.fillStyle = '#ffffff'
+        ctx.fillRect(0, 0, width, height)
+      }
+      ctx.drawImage(this.canvas, 0, 0)
+      return output.toDataURL(mime, 0.92)
+    } finally {
+      hiddenLayers.forEach((layer) => {
+        layer.visible = true
+      })
+      view.viewSize = prevSize
+      view.zoom = prevZoom
+      view.center = prevCenter
+      view.update()
+      this.refreshGrid()
+      this.emitViewChange()
+    }
   }
 
   // ===== Edit operations =====

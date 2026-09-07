@@ -256,6 +256,18 @@ export interface ViewSettings {
 /** Export format */
 export type ExportFormat = 'svg' | 'png' | 'jpeg' | 'pdf' | 'webp'
 
+/** Raster export format supported by the canvas capture. */
+export type RasterExportFormat = 'png' | 'jpeg' | 'webp'
+
+/** Options for rasterizing artwork through the paper.js view. */
+export interface RasterExportOptions {
+  format: RasterExportFormat
+  /** Pixel scale multiplier (document units to output pixels). */
+  scale: number
+  /** Export only the current selection instead of all artwork. */
+  selectionOnly: boolean
+}
+
 /** Versioned project file envelope used by Save/Open. */
 export interface ProjectFileData {
   app: string
