@@ -20,6 +20,7 @@
  * it has enough segments.
  */
 import { EditorEngine } from '../engine'
+import { isEditableTarget } from '../shortcuts'
 import { AnchorChrome } from './anchor-chrome'
 import { SnapService } from '../snap/snap-service'
 
@@ -179,6 +180,8 @@ export class PenController {
     }
 
     scope.tool.onKeyDown = (event: paper.KeyEvent) => {
+      // Never steal keystrokes typed into panel inputs or dialogs.
+      if (isEditableTarget((event as any).event as KeyboardEvent)) return
       switch (event.key) {
         case 'backspace':
         case 'delete':

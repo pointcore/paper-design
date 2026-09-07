@@ -9,6 +9,7 @@
  */
 import { PaperOffset } from 'paperjs-offset'
 import { EditorEngine } from '../engine'
+import { isEditableTarget } from '../shortcuts'
 
 /** Eraser diameter in screen pixels (stays constant across zoom). */
 const ERASER_SCREEN_SIZE = 20
@@ -91,6 +92,8 @@ export class EraserController {
     }
 
     scope.tool.onKeyDown = (event: paper.KeyEvent) => {
+      // Never steal keystrokes typed into panel inputs or dialogs.
+      if (isEditableTarget((event as any).event as KeyboardEvent)) return
       if (event.key === 'escape' && this.isErasing) {
         this.cancelStroke()
         engine.store.setDragging(false)

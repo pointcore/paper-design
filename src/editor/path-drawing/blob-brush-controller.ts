@@ -9,6 +9,7 @@
  */
 import { PaperOffset } from 'paperjs-offset'
 import { EditorEngine } from '../engine'
+import { isEditableTarget } from '../shortcuts'
 
 /** Blob diameter in screen pixels (stays constant across zoom). */
 const BLOB_SCREEN_SIZE = 20
@@ -91,6 +92,8 @@ export class BlobBrushController {
     }
 
     scope.tool.onKeyDown = (event: paper.KeyEvent) => {
+      // Never steal keystrokes typed into panel inputs or dialogs.
+      if (isEditableTarget((event as any).event as KeyboardEvent)) return
       if (event.key === 'escape' && this.isPainting) {
         this.cancelStroke()
         engine.store.setDragging(false)

@@ -13,6 +13,7 @@
  *  - Enter or right-click finishes an open curve; Escape cancels.
  */
 import { EditorEngine } from '../engine'
+import { isEditableTarget } from '../shortcuts'
 
 export class CurvatureController {
   engine: EditorEngine | null = null
@@ -105,6 +106,8 @@ export class CurvatureController {
     }
 
     scope.tool.onKeyDown = (event: paper.KeyEvent) => {
+      // Never steal keystrokes typed into panel inputs or dialogs.
+      if (isEditableTarget((event as any).event as KeyboardEvent)) return
       switch (event.key) {
         case 'escape':
           if (this.isDrawing) this.cancel()

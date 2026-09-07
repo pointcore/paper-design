@@ -6,6 +6,7 @@
  * to pan; middle-drag pan lives in CanvasHost for every tool.
  */
 import { EditorEngine } from './engine'
+import { isEditableTarget } from './shortcuts'
 
 export class ViewController {
   engine: EditorEngine | null = null
@@ -95,6 +96,8 @@ export class ViewController {
     }
 
     scope.tool.onKeyDown = (event: paper.KeyEvent) => {
+      // Never steal keystrokes typed into panel inputs or dialogs.
+      if (isEditableTarget((event as any).event as KeyboardEvent)) return
       if (event.key === 'space') {
         this.mode = 'pan'
       } else if (event.key === 'escape' && this.mode === 'zoom') {

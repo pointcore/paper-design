@@ -9,6 +9,7 @@
  *   center instead of its corner.
  */
 import { EditorEngine } from '../engine'
+import { isEditableTarget } from '../shortcuts'
 import { SnapService } from '../snap/snap-service'
 import type { LiveShapeParams } from '../types'
 
@@ -93,6 +94,8 @@ export class ShapeController {
     }
 
     scope.tool.onKeyDown = (event: paper.KeyEvent) => {
+      // Never steal keystrokes typed into panel inputs or dialogs.
+      if (isEditableTarget((event as any).event as KeyboardEvent)) return
       if (event.key === 'escape' && this.isDrawing) {
         this.cancelShape()
         engine.store.setDragging(false)

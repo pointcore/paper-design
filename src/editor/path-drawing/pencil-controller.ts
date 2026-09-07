@@ -9,6 +9,7 @@
  * in-progress stroke; single clicks (dots) are discarded.
  */
 import { EditorEngine } from '../engine'
+import { isEditableTarget } from '../shortcuts'
 
 export class PencilController {
   engine: EditorEngine | null = null
@@ -78,6 +79,8 @@ export class PencilController {
     }
 
     scope.tool.onKeyDown = (event: paper.KeyEvent) => {
+      // Never steal keystrokes typed into panel inputs or dialogs.
+      if (isEditableTarget((event as any).event as KeyboardEvent)) return
       if (event.key === 'escape' && this.isDrawing) {
         this.cancelStroke()
         engine.store.setDragging(false)

@@ -15,6 +15,7 @@
  * Which tool is running is read from the current Pinia store tool name.
  */
 import { EditorEngine } from '../engine'
+import { isEditableTarget } from '../shortcuts'
 import { AnchorChrome } from './anchor-chrome'
 
 export type AnchorToolMode = 'add-anchor' | 'delete-anchor' | 'convert-anchor'
@@ -172,6 +173,8 @@ export class AnchorController {
     }
 
     scope.tool.onKeyDown = (event: paper.KeyEvent) => {
+      // Never steal keystrokes typed into panel inputs or dialogs.
+      if (isEditableTarget((event as any).event as KeyboardEvent)) return
       if (event.key === 'escape') {
         if (this.isDragging) this.endDrag()
         engine.clearSelection()

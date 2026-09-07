@@ -8,6 +8,7 @@
  * reshape the path (handle > anchor > segment > object hit priority).
  */
 import { EditorEngine } from '../engine'
+import { isEditableTarget } from '../shortcuts'
 import { AnchorChrome } from '../path-drawing/anchor-chrome'
 import { GuideController } from '../guides/guide-controller'
 import { SnapService } from '../snap/snap-service'
@@ -376,6 +377,8 @@ export class SelectController {
     }
 
     scope.tool.onKeyDown = (event: paper.KeyEvent) => {
+      // Never steal keystrokes typed into panel inputs or dialogs.
+      if (isEditableTarget((event as any).event as KeyboardEvent)) return
       switch (event.key) {
         case 'delete':
         case 'backspace':

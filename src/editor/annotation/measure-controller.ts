@@ -7,6 +7,7 @@
  * releasing keeps the last reading visible, Escape discards the preview.
  */
 import { EditorEngine } from '../engine'
+import { isEditableTarget } from '../shortcuts'
 
 /** CSS pixels per inch underpinning the ruler unit conversion. */
 const PX_PER_INCH = 96
@@ -68,6 +69,8 @@ export class MeasureController {
     }
 
     scope.tool.onKeyDown = (event: paper.KeyEvent) => {
+      // Never steal keystrokes typed into panel inputs or dialogs.
+      if (isEditableTarget((event as any).event as KeyboardEvent)) return
       if (event.key === 'escape' && this.isMeasuring) {
         this.cancelMeasure()
         engine.store.setDragging(false)

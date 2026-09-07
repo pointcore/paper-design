@@ -10,6 +10,7 @@
  * Escape cancels the preview.
  */
 import { EditorEngine } from '../engine'
+import { isEditableTarget } from '../shortcuts'
 
 /** Nib width in screen pixels (stays constant across zoom). */
 const NIB_SCREEN_SIZE = 20
@@ -105,6 +106,8 @@ export class BrushController {
     }
 
     scope.tool.onKeyDown = (event: paper.KeyEvent) => {
+      // Never steal keystrokes typed into panel inputs or dialogs.
+      if (isEditableTarget((event as any).event as KeyboardEvent)) return
       if (event.key === 'escape' && this.isPainting) {
         this.cancelStroke()
         engine.store.setDragging(false)
