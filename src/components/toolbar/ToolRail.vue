@@ -50,7 +50,7 @@
 import {
   Pointer, Aim, EditPen, Edit, MagicStick,
   Position, ZoomIn, Setting, Brush, BrushFilled, Star, Operation, ChatLineRound,
-  CirclePlus, Remove, Tickets, Link, Document, CopyDocument
+  CirclePlus, Remove, Tickets, Link, Document, CopyDocument, Delete
 } from '@element-plus/icons-vue'
 import { useEditorStore } from '../../editor/store'
 import type { ToolName } from '../../editor/types'
@@ -74,6 +74,7 @@ const selectTools: ToolDef[] = [
 const drawTools: ToolDef[] = [
   { name: 'pen', tip: 'Pen Tool (P)', icon: EditPen },
   { name: 'pencil', tip: 'Pencil Tool (N)', icon: BrushFilled },
+  { name: 'eraser', tip: 'Eraser Tool (Shift+E)', icon: Delete },
   { name: 'curvature', tip: 'Curvature Tool (Shift+~)', icon: Operation },
   { name: 'add-anchor', tip: 'Add Anchor Point Tool (+)', icon: CirclePlus },
   { name: 'delete-anchor', tip: 'Delete Anchor Point Tool (-)', icon: Remove },

@@ -799,7 +799,7 @@ function onUnitChange(val: string) {
 }
 
 function onHelp() {
-  store.setStatusMessage('Shortcuts: V Select | A Direct Select | P Pen | Curvature | +/- & C Anchor Tools | Space Pan | Ctrl+0 Fit | Esc Cancel')
+  store.setStatusMessage('Shortcuts: V Select | A Direct Select | P Pen | N Pencil | Shift+E Eraser | Curvature | +/- & C Anchor Tools | Space Pan | Ctrl+0 Fit | Esc Cancel')
 }
 </script>
 

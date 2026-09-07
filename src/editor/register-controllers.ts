@@ -5,6 +5,7 @@ import { EditorEngine } from './engine'
 import { SelectController } from './selection/select-controller'
 import { PenController } from './path-drawing/pen-controller'
 import { PencilController } from './path-drawing/pencil-controller'
+import { EraserController } from './path-drawing/eraser-controller'
 import { CurvatureController } from './path-drawing/curvature-controller'
 import { AnchorController } from './path-drawing/anchor-controller'
 import { ShapeController } from './shapes/shape-controller'
@@ -23,6 +24,9 @@ export function registerAllControllers(engine: EditorEngine) {
 
   // Pencil tool (freehand)
   engine.registerController('pencil', new PencilController())
+
+  // Eraser tool (stroke subtraction)
+  engine.registerController('eraser', new EraserController())
 
   // Curvature tool (independent of the pen tool)
   engine.registerController('curvature', new CurvatureController())
