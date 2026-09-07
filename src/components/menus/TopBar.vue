@@ -303,24 +303,11 @@ function onFileCmd(cmd: string) {
         if (file && e) {
           const text = await file.text()
           try {
-            const imported = e.project.importSVG(text)
-            const layer = e.getActiveLayer()
-            if (Array.isArray(imported)) {
-              imported.forEach((item) => {
-                item.data.id = e.genId()
-                item.data.isUserItem = true
-                layer.addChild(item)
-              })
+            if (e.importSVGText(text, 'Import SVG')) {
+              store.setStatusMessage('SVG imported')
             } else {
-              const item = imported as any
-              item.data.id = e.genId()
-              item.data.isUserItem = true
-              layer.addChild(item)
+              store.setStatusMessage('SVG import failed')
             }
-            e.syncLayersToStore()
-            e.scope.view.update()
-            e.pushHistory('Import SVG')
-            store.setStatusMessage('SVG imported')
           } catch (err) {
             store.setStatusMessage('SVG import failed')
           }
@@ -343,13 +330,16 @@ function onEditCmd(cmd: string) {
       e.redo()
       break
     case 'cut':
+      // Capture the OS copy before the cut deletes the selection.
+      e.copyToSystemClipboard().catch(() => undefined)
       e.cutSelectedToClipboard()
       break
     case 'copy':
       e.copySelectedToClipboard()
+      e.copyToSystemClipboard().catch(() => undefined)
       break
     case 'paste':
-      e.pasteClipboard()
+      e.pasteWithSystemFallback().catch(() => undefined)
       break
     case 'delete':
       e.deleteSelected()

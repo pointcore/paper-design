@@ -339,16 +339,19 @@ function onContextMenu(e: MouseEvent) {
 
 function ctxCopy() {
   engine?.copySelectedToClipboard()
+  engine?.copyToSystemClipboard()?.catch(() => undefined)
   hideMenu()
 }
 
 function ctxCut() {
+  // Capture the OS copy before the cut deletes the selection.
+  engine?.copyToSystemClipboard()?.catch(() => undefined)
   engine?.cutSelectedToClipboard()
   hideMenu()
 }
 
 function ctxPaste() {
-  engine?.pasteClipboard()
+  engine?.pasteWithSystemFallback()?.catch(() => undefined)
   hideMenu()
 }
 

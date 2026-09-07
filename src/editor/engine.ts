@@ -1022,9 +1022,9 @@ export class EditorEngine {
 
   /**
    * Copy the current selection onto the internal clipboard as detached
-   * clones. Returns how many items were copied. (Cross-application
-   * clipboard interop is not covered yet; the clipboard is scoped to this
-   * editor instance.)
+   * clones. Returns how many items were copied. This stays synchronous for
+   * instant in-app use; system clipboard exchange lives in
+   * copyToSystemClipboard / pasteWithSystemFallback.
    */
   copySelectedToClipboard(): number {
     const items = this.getSelection().filter((item) => (item.data as any)?.isUserItem)
@@ -1064,6 +1064,119 @@ export class EditorEngine {
     this.syncSelectionToStore()
     this.pushHistory('Paste')
     this.scope.view.update()
+  }
+
+  // ===== System clipboard (SVG exchange) =====
+
+  /** Serialize unlocked selected user items into a standalone SVG string. */
+  exportSelectionSVG(): string | null {
+    const items = this.getSelection().filter(
+      (item) => (item.data as any)?.isUserItem && !item.locked
+    )
+    if (items.length === 0) return null
+    const bodies = items.map((item) => {
+      const exported = item.exportSVG()
+      return typeof exported === 'string'
+        ? exported
+        : new XMLSerializer().serializeToString(exported)
+    })
+    return `<svg xmlns="http://www.w3.org/2000/svg">${bodies.join('')}</svg>`
+  }
+
+  /**
+   * Import an SVG document string into the active layer and select it.
+   * Shared by file import and system clipboard paste. Returns false when
+   * the payload holds no importable artwork; throws on malformed input.
+   */
+  importSVGText(svgText: string, historyLabel: string): boolean {
+    const imported = this.project.importSVG(svgText)
+    const layer = this.getActiveLayer()
+    const items = (Array.isArray(imported) ? imported : [imported]).filter(
+      Boolean
+    ) as paper.Item[]
+    if (items.length === 0) return false
+    for (const item of items) {
+      item.data.id = this.genId()
+      item.data.isUserItem = true
+      layer.addChild(item)
+    }
+    this.syncLayersToStore()
+    this.clearSelection()
+    items.forEach((item) => {
+      item.selected = true
+    })
+    this.syncSelectionToStore()
+    this.scope.view.update()
+    this.pushHistory(historyLabel)
+    return true
+  }
+
+  /** OS clipboard handle, or null outside secure contexts. */
+  private systemClipboard(): Clipboard | null {
+    if (typeof navigator === 'undefined') return null
+    return navigator.clipboard ?? null
+  }
+
+  /**
+   * Best-effort copy of the current selection to the OS clipboard as SVG so
+   * artwork can move to other applications. Falls back from the SVG MIME
+   * type to plain text. Resolves false when nothing is selected, the API is
+   * unavailable or the write is denied.
+   */
+  async copyToSystemClipboard(): Promise<boolean> {
+    const svg = this.exportSelectionSVG()
+    if (!svg) return false
+    const clipboard = this.systemClipboard()
+    if (!clipboard) return false
+    try {
+      if (typeof ClipboardItem !== 'undefined' && clipboard.write) {
+        const clipboardItem = new ClipboardItem({
+          'image/svg+xml': new Blob([svg], { type: 'image/svg+xml' }),
+          'text/plain': new Blob([svg], { type: 'text/plain' }),
+        })
+        await clipboard.write([clipboardItem])
+        return true
+      }
+    } catch {
+      // Fall through to the plain-text write below.
+    }
+    try {
+      await clipboard.writeText(svg)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /**
+   * Paste SVG artwork from the OS clipboard. Returns false when the
+   * clipboard is unavailable, holds no SVG or the payload is unusable, in
+   * which case callers fall back to the internal clipboard.
+   */
+  async pasteFromSystemClipboard(): Promise<boolean> {
+    const clipboard = this.systemClipboard()
+    if (!clipboard || !clipboard.readText) return false
+    const text = await clipboard.readText()
+    if (!text || !/<svg[\s>]/i.test(text.trim().slice(0, 4096))) return false
+    try {
+      return this.importSVGText(text, 'Paste')
+    } catch {
+      return false
+    }
+  }
+
+  /**
+   * Paste entry point: OS clipboard SVG first, internal clipboard fallback.
+   * Denied or unavailable OS access silently falls back so in-app
+   * copy/paste keeps working everywhere.
+   */
+  async pasteWithSystemFallback(): Promise<void> {
+    try {
+      if (await this.pasteFromSystemClipboard()) return
+    } catch {
+      // Denied or unavailable OS access -> internal fallback below.
+    }
+    this.pasteClipboard()
   }
 
   deleteSelected() {

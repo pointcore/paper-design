@@ -118,9 +118,11 @@ export function resolveToolShortcut(e: KeyboardEvent): ToolName | null {
  *
  * Two groups live here:
  * - Clipboard and history shortcuts (Ctrl+C / X / V / Z / Shift+Z / Y).
- *   They work in every tool context, matching Illustrator; the text edit
- *   overlay is exempt via the editable-target guard so the browser's own
- *   textarea editing keeps working.
+ *   Copy also mirrors the selection to the OS clipboard as SVG (best
+ *   effort); paste prefers OS clipboard SVG and falls back to the internal
+ *   clipboard. They work in every tool context, matching Illustrator; the
+ *   text edit overlay is exempt via the editable-target guard so the
+ *   browser's own textarea editing keeps working.
  * - Single-key tool switching (see resolveToolShortcut).
  */
 export function handleGlobalKeydown(
@@ -134,12 +136,15 @@ export function handleGlobalKeydown(
     const key = e.key.toLowerCase()
     if (key === 'c') {
       engine?.copySelectedToClipboard()
+      engine?.copyToSystemClipboard()?.catch(() => undefined)
       e.preventDefault()
     } else if (key === 'x') {
+      // Capture the OS copy before the cut deletes the selection.
+      engine?.copyToSystemClipboard()?.catch(() => undefined)
       engine?.cutSelectedToClipboard()
       e.preventDefault()
     } else if (key === 'v') {
-      engine?.pasteClipboard()
+      engine?.pasteWithSystemFallback()?.catch(() => undefined)
       e.preventDefault()
     } else if (key === 'z' && !e.shiftKey) {
       engine?.undo()
