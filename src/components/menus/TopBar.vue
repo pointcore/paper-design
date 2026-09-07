@@ -28,6 +28,7 @@
               <el-dropdown-item command="redo" :disabled="!store.canRedo">Redo</el-dropdown-item>
               <el-dropdown-item command="cut" divided :disabled="!store.hasSelection">Cut</el-dropdown-item>
               <el-dropdown-item command="copy" :disabled="!store.hasSelection">Copy</el-dropdown-item>
+              <el-dropdown-item command="copySVG" :disabled="!store.hasSelection">Copy as SVG</el-dropdown-item>
               <el-dropdown-item command="paste">Paste</el-dropdown-item>
               <el-dropdown-item command="pasteFront">Paste in Front</el-dropdown-item>
               <el-dropdown-item command="pasteBack">Paste in Back</el-dropdown-item>
@@ -639,6 +640,9 @@ function onEditCmd(cmd: string) {
       e.copySelectedToClipboard()
       e.copyToSystemClipboard().catch(() => undefined)
       break
+    case 'copySVG':
+      void onCopySVG()
+      break
     case 'paste':
       e.pasteWithSystemFallback().catch(() => undefined)
       break
@@ -657,6 +661,27 @@ function onEditCmd(cmd: string) {
       })
       e.syncSelectionToStore()
       break
+  }
+}
+
+/** Copy the selection as SVG source text for use in code editors. */
+async function onCopySVG() {
+  const e = engineRef?.value
+  if (!e) return
+  const svg = e.exportSelectionSVG()
+  if (!svg) {
+    store.setStatusMessage('Nothing to copy')
+    return
+  }
+  try {
+    if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
+      store.setStatusMessage('Clipboard unavailable')
+      return
+    }
+    await navigator.clipboard.writeText(svg)
+    store.setStatusMessage('SVG copied to clipboard')
+  } catch (err) {
+    store.setStatusMessage('Copy failed')
   }
 }
 
