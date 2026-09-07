@@ -309,6 +309,10 @@
             <el-button size="small" class="grid-btn" :disabled="store.selectedItemIds.length < 3" @click="onDistribute('horizontal')">Distr H</el-button>
             <el-button size="small" class="grid-btn" :disabled="store.selectedItemIds.length < 3" @click="onDistribute('vertical')">Distr V</el-button>
           </div>
+          <div class="btn-grid-2">
+            <el-button size="small" class="grid-btn" :disabled="store.selectedItemIds.length < 3" @click="onDistributeGap('horizontal')">Gap H</el-button>
+            <el-button size="small" class="grid-btn" :disabled="store.selectedItemIds.length < 3" @click="onDistributeGap('vertical')">Gap V</el-button>
+          </div>
         </div>
       </div>
 
@@ -919,6 +923,13 @@ function onDistribute(axis: DistributeAxis) {
   if (!e) return
   e.distributeSelection(axis)
   e.pushHistory(axis === 'horizontal' ? 'Distribute Horizontally' : 'Distribute Vertically')
+}
+
+function onDistributeGap(axis: DistributeAxis) {
+  const e = getEngine()
+  if (!e) return
+  e.distributeSpacing(axis)
+  e.pushHistory('Distribute Gaps')
 }
 
 /** Number of selected unlocked paths usable as boolean operands. */

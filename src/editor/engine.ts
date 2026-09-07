@@ -1434,6 +1434,39 @@ export class EditorEngine {
   }
 
   /**
+   * Spread unlocked selected items along an axis with equal gaps between
+   * neighbors (first and last stay put; even overlap when cramped).
+   * Needs at least three unlocked items. Callers record history.
+   */
+  distributeSpacing(axis: DistributeAxis): void {
+    const items = this.getSelection().filter((item) => !item.locked && item.bounds)
+    if (items.length < 3) return
+    const horizontal = axis === 'horizontal'
+    const leading = (b: paper.Rectangle) => (horizontal ? b.x : b.y)
+    const sizeOf = (b: paper.Rectangle) => (horizontal ? b.width : b.height)
+    const sorted = items.slice().sort((a, b) => leading(a.bounds) - leading(b.bounds))
+    const first = leading(sorted[0].bounds)
+    const last = leading(sorted[sorted.length - 1].bounds) + sizeOf(sorted[sorted.length - 1].bounds)
+    const totalSize = sorted.reduce((sum, item) => sum + sizeOf(item.bounds), 0)
+    const gap = (last - first - totalSize) / (items.length - 1)
+    if (!Number.isFinite(gap)) return
+    let cursor = first
+    for (const item of sorted) {
+      const b = item.bounds
+      const delta = cursor - leading(b)
+      if (Math.abs(delta) > 1e-9) {
+        const shift = horizontal
+          ? new this.scope.Point(delta, 0)
+          : new this.scope.Point(0, delta)
+        item.position = item.position.add(shift)
+        this.refreshItemGradient(item)
+      }
+      cursor += sizeOf(item.bounds) + gap
+    }
+    this.scope.view.update()
+  }
+
+  /**
    * Spread unlocked selected items evenly along an axis by distributing
    * their centers between the extreme centers. The extreme items stay in
    * place. Needs at least three unlocked items with distinct extremes.
