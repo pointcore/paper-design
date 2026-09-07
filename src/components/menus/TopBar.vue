@@ -225,6 +225,14 @@
               <el-option v-for="u in units" :key="u.value" :label="u.label" :value="u.value" />
             </el-select>
           </div>
+          <div class="setting-row">
+            <div class="setting-label">
+              <span class="setting-name">Nudge Step</span>
+              <span class="setting-desc">Arrow-key distance in document units (Shift moves 10x)</span>
+            </div>
+            <el-input-number v-model="settings.nudgeStep" :min="0.1" :max="100" :step="1" size="small"
+              @change="onNudgeStepChange" />
+          </div>
         </div>
       </div>
     </AppDialog>
@@ -339,6 +347,7 @@ const settings = reactive({
     store.activeArtboard?.width ?? store.pageSize.width,
     store.activeArtboard?.height ?? store.pageSize.height
   ),
+  nudgeStep: store.nudgeStep,
 })
 
 const units = [
@@ -786,6 +795,7 @@ function syncSettingsFromStore() {
   settings.snapGuides = store.snap.guides
   settings.snapPoint = store.snap.point
   settings.smartGuides = store.snap.smartGuides
+  settings.nudgeStep = store.nudgeStep
   syncPageSettings()
 }
 
@@ -874,6 +884,15 @@ function onPageOrientationSwap() {
 function onUnitChange(val: string) {
   store.setRulerUnit(val as RulerUnit)
   store.setStatusMessage(`Ruler unit: ${val}`)
+}
+
+function onNudgeStepChange(val: number | undefined) {
+  if (!val) {
+    settings.nudgeStep = store.nudgeStep
+    return
+  }
+  store.setNudgeStep(val)
+  settings.nudgeStep = store.nudgeStep
 }
 
 function onHelp() {
