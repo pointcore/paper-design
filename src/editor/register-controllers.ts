@@ -4,6 +4,7 @@
 import { EditorEngine } from './engine'
 import { SelectController } from './selection/select-controller'
 import { PenController } from './path-drawing/pen-controller'
+import { PencilController } from './path-drawing/pencil-controller'
 import { CurvatureController } from './path-drawing/curvature-controller'
 import { AnchorController } from './path-drawing/anchor-controller'
 import { ShapeController } from './shapes/shape-controller'
@@ -19,6 +20,9 @@ export function registerAllControllers(engine: EditorEngine) {
 
   // Pen tool
   engine.registerController('pen', new PenController())
+
+  // Pencil tool (freehand)
+  engine.registerController('pencil', new PencilController())
 
   // Curvature tool (independent of the pen tool)
   engine.registerController('curvature', new CurvatureController())
