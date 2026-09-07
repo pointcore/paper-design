@@ -2,6 +2,7 @@
  * EditorEngine - Vue/Pinia ↔ Paper.js bridge hub
  */
 import paper from 'paper'
+import { PaperOffset } from 'paperjs-offset'
 import type { ToolName, StyleState, LayerMeta, LayerItemNode, HistoryEntry, GuideOrientation, ProjectFileData, ReferencePoint, AlignMode, DistributeAxis, BooleanOperation, RasterExportOptions } from './types'
 import { createDefaultStyle } from './store'
 import type { EditorStore } from './store-types'
@@ -1407,6 +1408,276 @@ export class EditorEngine {
       if (!(layer.data as any)?.isUserLayer) continue
       for (const child of layer.children) yield* walk(child as paper.Item)
     }
+  }
+
+  // ===== Path construction (compound / join / outline) =====
+
+  /**
+   * Merge unlocked selected paths into one compound path with even-odd
+   * holes. Compound operands contribute their children so nesting never
+   * stacks. The result takes the back operand style (painted onto every
+   * leaf so rendering never depends on inheritance) and its stacking slot.
+   */
+  makeCompoundPath(): boolean {
+    const scope = this.scope
+    const operands = this.getSelection().filter(
+      (item) =>
+        !item.locked &&
+        item.parent &&
+        (item instanceof scope.Path || item instanceof scope.CompoundPath)
+    ) as Array<paper.Path | paper.CompoundPath>
+    if (operands.length < 2) return false
+    const ordered = operands
+      .slice()
+      .sort((a, b) => (a.isBelow(b) ? -1 : a.isAbove(b) ? 1 : 0))
+    const leaves: paper.Path[] = []
+    for (const operand of ordered) {
+      if (operand instanceof scope.CompoundPath) {
+        for (const child of operand.children.slice()) leaves.push(child as paper.Path)
+      } else {
+        leaves.push(operand)
+      }
+    }
+    if (leaves.length < 2) return false
+    const base = ordered[0]
+    const style = this.getStyleFromItem(base)
+    const parent = base.parent ?? this.getActiveLayer()
+    const rawAt = parent.children.indexOf(base)
+    const at = rawAt < 0 ? parent.children.length : rawAt
+    const compound = new scope.CompoundPath({ insert: false }) as paper.CompoundPath
+    for (const leaf of leaves) compound.addChild(leaf)
+    for (const operand of ordered) operand.remove()
+    parent.insertChild(Math.min(at, parent.children.length), compound)
+    compound.data.id = this.genId()
+    compound.data.isUserItem = true
+    this.applyStyleToItem(compound, style)
+    for (const leaf of leaves) {
+      const node = leaf as any
+      if (node.fillColor !== undefined) node.fillColor = style.fillColor
+      if (node.strokeColor !== undefined) node.strokeColor = style.strokeColor
+      if (node.strokeWidth !== undefined) node.strokeWidth = style.strokeWidth
+    }
+    compound.fillRule = 'evenodd'
+    this.clearSelection()
+    compound.selected = true
+    this.syncSelectionToStore()
+    this.pushHistory('Make Compound Path')
+    this.scope.view.update()
+    return true
+  }
+
+  /**
+   * Release selected compound paths back into plain paths. Each child
+   * keeps its stacking slot and inherits the compound style so the artwork
+   * looks identical after the release.
+   */
+  releaseCompoundPath(): boolean {
+    const scope = this.scope
+    const compounds = this.getSelection().filter(
+      (item) => !item.locked && item.parent && item instanceof scope.CompoundPath
+    ) as paper.CompoundPath[]
+    if (compounds.length === 0) return false
+    const released: paper.Item[] = []
+    for (const compound of compounds) {
+      const style = this.getStyleFromItem(compound)
+      const parent = compound.parent ?? this.getActiveLayer()
+      let at = parent.children.indexOf(compound)
+      if (at < 0) at = parent.children.length
+      for (const child of compound.children.slice()) {
+        const node = child as paper.Item
+        parent.insertChild(Math.min(at, parent.children.length), node)
+        at++
+        node.data.id = this.genId()
+        node.data.isUserItem = true
+        this.applyStyleToItem(node, style)
+        released.push(node)
+      }
+      compound.remove()
+    }
+    this.clearSelection()
+    released.forEach((item) => {
+      item.selected = true
+    })
+    this.syncSelectionToStore()
+    this.pushHistory('Release Compound Path')
+    this.scope.view.update()
+    return true
+  }
+
+  /**
+   * Join exactly two unlocked open paths end to end. The closest endpoint
+   * pair wins; a gap bridges with a straight span and coincident ends merge
+   * cleanly. Curves keep their handles (reversed where the walk flips).
+   */
+  joinPaths(): boolean {
+    const scope = this.scope
+    const paths = this.getSelection().filter(
+      (item) =>
+        !item.locked &&
+        item.parent &&
+        item instanceof scope.Path &&
+        !(item instanceof scope.CompoundPath) &&
+        !item.closed &&
+        item.segments.length > 0
+    ) as paper.Path[]
+    if (paths.length !== 2) return false
+    const ordered = paths
+      .slice()
+      .sort((a, b) => (a.isBelow(b) ? -1 : a.isAbove(b) ? 1 : 0))
+    const [first, second] = ordered
+    const aEnds = [first.segments[0].point, first.segments[first.segments.length - 1].point]
+    const bEnds = [second.segments[0].point, second.segments[second.segments.length - 1].point]
+    // [aEnd, bEnd, aUsesFirst, bUsesFirst]
+    const pairs: Array<[paper.Point, paper.Point, boolean, boolean]> = [
+      [aEnds[1], bEnds[0], false, true],
+      [aEnds[1], bEnds[1], false, false],
+      [aEnds[0], bEnds[0], true, true],
+      [aEnds[0], bEnds[1], true, false],
+    ]
+    let best = pairs[0]
+    let bestDist = Infinity
+    for (const pair of pairs) {
+      const dist = pair[0].getDistance(pair[1])
+      if (dist < bestDist) {
+        bestDist = dist
+        best = pair
+      }
+    }
+    const style = this.getStyleFromItem(first)
+    const parent = first.parent ?? this.getActiveLayer()
+    const rawAt = parent.children.indexOf(first)
+    const at = rawAt < 0 ? parent.children.length : rawAt
+    const merged = new scope.Path({ insert: false }) as paper.Path
+    const pushOriented = (path: paper.Path, useFirst: boolean) => {
+      const segs = path.segments
+      if (!useFirst) {
+        for (const seg of segs) merged.add(this.cloneSegment(seg))
+      } else {
+        for (let i = segs.length - 1; i >= 0; i--) merged.add(this.reversedSegment(segs[i]))
+      }
+    }
+    pushOriented(first, best[2])
+    pushOriented(second, best[3])
+    merged.closed = false
+    first.remove()
+    second.remove()
+    parent.insertChild(Math.min(at, parent.children.length), merged)
+    merged.data.id = this.genId()
+    merged.data.isUserItem = true
+    this.applyStyleToItem(merged, style)
+    this.clearSelection()
+    merged.selected = true
+    this.syncSelectionToStore()
+    this.pushHistory('Join Paths')
+    this.scope.view.update()
+    return true
+  }
+
+  /** Copy a segment (points and handles cloned). */
+  private cloneSegment(seg: paper.Segment): paper.Segment {
+    const scope = this.scope
+    return new scope.Segment(
+      seg.point.clone(),
+      seg.handleIn ? seg.handleIn.clone() : undefined,
+      seg.handleOut ? seg.handleOut.clone() : undefined
+    )
+  }
+
+  /**
+   * Copy a segment for backwards traversal: the anchor stays, handles swap
+   * sides (no negation — a reversed bezier reuses the same offsets).
+   */
+  private reversedSegment(seg: paper.Segment): paper.Segment {
+    const scope = this.scope
+    return new scope.Segment(
+      seg.point.clone(),
+      seg.handleOut ? seg.handleOut.clone() : undefined,
+      seg.handleIn ? seg.handleIn.clone() : undefined
+    )
+  }
+
+  /**
+   * Expand selected stroked paths into filled outlines (Illustrator Expand
+   * for strokes). The outline takes the stroke color and opacity; when the
+   * source also carries a fill, the two unite so nothing is lost. Dash
+   * patterns expand along the centerline.
+   */
+  outlineStroke(): boolean {
+    const scope = this.scope
+    const targets = this.getSelection().filter(
+      (item) =>
+        !item.locked &&
+        item.parent &&
+        (item instanceof scope.Path || item instanceof scope.CompoundPath) &&
+        (item as any).strokeColor &&
+        Number((item as any).strokeWidth) > 0
+    ) as Array<paper.Path | paper.CompoundPath>
+    if (targets.length === 0) return false
+    const expanded: paper.Item[] = []
+    for (const target of targets) {
+      const result = this.expandOneStroke(target)
+      if (result) expanded.push(...result)
+    }
+    if (expanded.length === 0) return false
+    this.clearSelection()
+    expanded.forEach((item) => {
+      item.selected = true
+    })
+    this.syncSelectionToStore()
+    this.pushHistory('Outline Stroke')
+    this.scope.view.update()
+    return true
+  }
+
+  /** Expand one stroked path; null when the geometry defeats the offset. */
+  private expandOneStroke(target: paper.Path | paper.CompoundPath): paper.Item[] | null {
+    const source = target as any
+    const width = Number(source.strokeWidth) || 0
+    if (!(width > 0) || !source.strokeColor) return null
+    const join =
+      source.strokeJoin === 'round' ? 'round' : source.strokeJoin === 'bevel' ? 'bevel' : 'miter'
+    const cap = source.strokeCap === 'round' ? 'round' : 'butt'
+    const limit = Number(source.miterLimit) || 10
+    let outline: paper.Path | paper.CompoundPath
+    try {
+      outline = PaperOffset.offsetStroke(target, width / 2, { join, cap, limit, insert: false })
+    } catch {
+      return null
+    }
+    if (!outline) return null
+    const parent = target.parent ?? this.getActiveLayer()
+    const rawAt = parent.children.indexOf(target)
+    const at = rawAt < 0 ? parent.children.length : rawAt
+    target.remove()
+    const paint = (node: paper.Item) => {
+      node.data.id = this.genId()
+      node.data.isUserItem = true
+      if (source.opacity !== undefined) node.opacity = source.opacity
+      if (source.blendMode !== undefined) (node as any).blendMode = source.blendMode
+    }
+    // The library already paints the outline with the stroke color.
+    if (source.fillColor) {
+      const fillShape = target.clone({ insert: false }) as paper.Item
+      ;(fillShape as any).strokeColor = null
+      try {
+        const combined = (outline as paper.PathItem).unite(fillShape as paper.PathItem, {
+          insert: false,
+        })
+        paint(combined as paper.Item)
+        parent.insertChild(Math.min(at, parent.children.length), combined as paper.Item)
+        return [combined as paper.Item]
+      } catch {
+        // Keep both pieces as siblings instead of losing the fill.
+        paint(outline as paper.Item)
+        paint(fillShape)
+        parent.insertChild(Math.min(at, parent.children.length), outline as paper.Item)
+        parent.insertChild(Math.min(at + 1, parent.children.length), fillShape)
+        return [outline as paper.Item, fillShape]
+      }
+    }
+    paint(outline as paper.Item)
+    parent.insertChild(Math.min(at, parent.children.length), outline as paper.Item)
+    return [outline as paper.Item]
   }
 
   // ===== Edit operations =====

@@ -14,6 +14,7 @@ A vector graphics editor built with **Vue 3 + TypeScript + Paper.js**, offering 
 - **Live shapes**: Rectangle, rounded rectangle, ellipse and line with live preview (not added to history until confirmed). Shift constrains proportions (square/circle, 45° lines), Alt draws from the center.
 - **Transform**: Selection bounding-box scale handles plus a rotate knob (Shift = uniform / 45° snap), and a properties panel with X/Y/W/H, rotate-by degrees, flip H/V and a nine-point reference anchor that drives panel edits.
 - **Align & Pathfinder**: Six align modes and horizontal/vertical distribution for multi-selections (align-to-selection); unite / subtract / intersect / exclude boolean operations on selected paths.
+- **Path construction**: Make/release even-odd compound paths, join two open paths end to end, and outline strokes into filled shapes (paperjs-offset).
 - **Snapping**: Snap pointer and placement to ruler guides, grid crossings and anchor points, plus smart edge/center alignment guides while dragging. Every source has a toggle in Canvas Settings.
 - **Clipboard**: Instant internal copy/cut/paste plus OS clipboard SVG exchange (copy out to other apps, paste SVG in), on Ctrl+C/X/V, the Edit menu and the canvas context menu.
 - **Save / Open / Export**: Versioned JSON project files (Save/Open truly round-trip the document); SVG import/export (editor layers stay out of exports); raster PNG/JPEG/WebP export with 1x–3x scale and all-artwork/selection choice.
@@ -33,7 +34,7 @@ Not yet implemented: gradient/pattern fills, masks, multiple artboards, bitmap p
 | Category | Choice |
 | --- | --- |
 | Frontend framework | Vue 3 + TypeScript |
-| Graphics engine | Paper.js (`paper` ^0.12.17) |
+| Graphics engine | Paper.js (`paper` ^0.12.17) + `paperjs-offset` |
 | State management | Pinia |
 | UI components | Element Plus 2.14 + `@element-plus/icons-vue` |
 | Build tool | Vite 5 + `vue-tsc` type checking |

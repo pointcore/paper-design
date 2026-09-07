@@ -43,6 +43,10 @@
               <el-dropdown-item command="sendToBack" :disabled="!store.hasSelection">Send to Back</el-dropdown-item>
               <el-dropdown-item command="group" divided :disabled="!store.hasSelection">Group</el-dropdown-item>
               <el-dropdown-item command="ungroup" :disabled="!store.hasSelection">Ungroup</el-dropdown-item>
+              <el-dropdown-item command="makeCompound" divided :disabled="!store.hasSelection">Make Compound Path</el-dropdown-item>
+              <el-dropdown-item command="releaseCompound" :disabled="!store.hasSelection">Release Compound Path</el-dropdown-item>
+              <el-dropdown-item command="joinPaths" :disabled="!store.hasSelection">Join Paths</el-dropdown-item>
+              <el-dropdown-item command="outlineStroke" :disabled="!store.hasSelection">Outline Stroke</el-dropdown-item>
               <el-dropdown-item command="lock" divided :disabled="!store.hasSelection">Lock</el-dropdown-item>
               <el-dropdown-item command="unlockAll">Unlock All</el-dropdown-item>
               <el-dropdown-item command="hide" divided :disabled="!store.hasSelection">Hide</el-dropdown-item>
@@ -525,6 +529,26 @@ function onObjectCmd(cmd: string) {
       store.setStatusMessage(`Selected ${count} items with the same stroke`)
       break
     }
+    case 'makeCompound':
+      if (!e.makeCompoundPath()) {
+        store.setStatusMessage('Compound needs at least two unlocked paths')
+      }
+      break
+    case 'releaseCompound':
+      if (!e.releaseCompoundPath()) {
+        store.setStatusMessage('Select a compound path to release')
+      }
+      break
+    case 'joinPaths':
+      if (!e.joinPaths()) {
+        store.setStatusMessage('Join needs exactly two unlocked open paths')
+      }
+      break
+    case 'outlineStroke':
+      if (!e.outlineStroke()) {
+        store.setStatusMessage('Outline needs a path with a stroke')
+      }
+      break
   }
 }
 
