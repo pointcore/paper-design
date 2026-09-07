@@ -14,18 +14,19 @@ A vector graphics editor built with **Vue 3 + TypeScript + Paper.js**, offering 
 - **Live shapes**: Rectangle, rounded rectangle, ellipse and line with live preview (not added to history until confirmed). Shift constrains proportions (square/circle, 45° lines), Alt draws from the center.
 - **Transform**: Selection bounding-box scale handles plus a rotate knob (Shift = uniform / 45° snap), and a properties panel with X/Y/W/H, rotate-by degrees, flip H/V and a nine-point reference anchor that drives panel edits.
 - **Align & Pathfinder**: Six align modes and horizontal/vertical distribution for multi-selections (align-to-selection); unite / subtract / intersect / exclude boolean operations on selected paths.
-- **Path construction**: Make/release even-odd compound paths, join two open paths end to end, and outline strokes into filled shapes (paperjs-offset).
+- **Path construction**: Make/release even-odd compound paths, join two open paths end to end, outline strokes into filled shapes (paperjs-offset), and make/release clipping masks.
 - **Snapping**: Snap pointer and placement to ruler guides, grid crossings and anchor points, plus smart edge/center alignment guides while dragging. Every source has a toggle in Canvas Settings.
 - **Clipboard**: Instant internal copy/cut/paste plus OS clipboard SVG exchange (copy out to other apps, paste SVG in), on Ctrl+C/X/V, the Edit menu and the canvas context menu.
-- **Save / Open / Export**: Versioned JSON project files (Save/Open truly round-trip the document); SVG import/export (editor layers stay out of exports); raster PNG/JPEG/WebP export with 1x–3x scale and all-artwork/selection choice.
+- **Save / Open / Export**: Versioned JSON project files (Save/Open truly round-trip the document, page size included); SVG import/export (editor layers stay out of exports); raster PNG/JPEG/WebP export with 1x–3x scale and artwork/selection/page choice; bitmap placement (PNG/JPEG/WebP/GIF) with embedded persistent sources.
 - **Layers**: Create/delete/rename, visibility/lock/opacity, top-first drag reorder, expandable per-layer object tree with select/visibility/lock per object.
 - **Object ops**: Bring to front/back plus stepwise forward/backward, group/ungroup, lock/unlock-all, hide/show-all, select same fill/stroke. Locked items are skipped by selection and tools; hidden items never hit-test.
-- **Appearance**: Single fill + stroke with caps, joins, miter limit, dash patterns and all 16 canvas blend modes, plus opacity. Applied live from the properties panel to the selection and to subsequently drawn shapes.
+- **Appearance**: Single fill + stroke with caps, joins, miter limit, dash patterns and all 16 canvas blend modes, plus opacity and linear/radial gradient fills with a stops editor. Applied live from the properties panel to the selection and to subsequently drawn shapes.
+- **Page setup**: Canvas Settings page size (presets, custom W/H, orientation swap) driving New Document, Save/Open persistence and page-area raster export.
 - **Guides & grid**: Ruler drag-out guides with move/delete (drag back to a ruler), line grid with size control, transparent checkerboard background.
 - **History**: Whole-project JSON snapshots with a 100-entry limit; Ctrl+Z to undo, Ctrl+Shift+Z / Ctrl+Y to redo.
 - **Annotation tools**: Callout annotations with persisted content/style models.
 
-Not yet implemented: gradient/pattern fills, masks, multiple artboards, bitmap placement, PDF export, pencil/brush/eraser/scissors tools, symbols, and multi-fill/stroke appearance stacks.
+Not yet implemented: pattern fills, mesh gradients, opacity masks, multiple artboards, PDF export, pencil/brush/eraser/scissors tools, symbols, and multi-fill/stroke appearance stacks.
 
 ---
 

@@ -1214,8 +1214,18 @@ export class EditorEngine {
    * nothing to export or the output exceeds the size guard.
    */
   exportRaster(options: RasterExportOptions): string | null {
-    const source = options.selectionOnly ? this.getSelection() : this.getUserItems()
-    const bounds = this.unitedBoundsOf(source)
+    let bounds: paper.Rectangle | null
+    if (options.area === 'selection') {
+      bounds = this.getSelectionBounds()
+    } else if (options.area === 'page') {
+      const page = this.store.pageSize
+      bounds =
+        Number.isFinite(page.width) && Number.isFinite(page.height) && page.width > 0 && page.height > 0
+          ? new this.scope.Rectangle(0, 0, page.width, page.height)
+          : null
+    } else {
+      bounds = this.unitedBoundsOf(this.getUserItems())
+    }
     if (!bounds || bounds.width < 1 || bounds.height < 1) return null
     const scale = Number.isFinite(options.scale) ? Math.min(4, Math.max(0.5, options.scale)) : 1
     const width = Math.max(1, Math.ceil(bounds.width * scale))

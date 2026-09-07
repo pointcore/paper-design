@@ -281,13 +281,16 @@ export type ExportFormat = 'svg' | 'png' | 'jpeg' | 'pdf' | 'webp'
 /** Raster export format supported by the canvas capture. */
 export type RasterExportFormat = 'png' | 'jpeg' | 'webp'
 
+/** Artwork source for raster export (page means the page-size rect). */
+export type RasterExportArea = 'artwork' | 'selection' | 'page'
+
 /** Options for rasterizing artwork through the paper.js view. */
 export interface RasterExportOptions {
   format: RasterExportFormat
   /** Pixel scale multiplier (document units to output pixels). */
   scale: number
-  /** Export only the current selection instead of all artwork. */
-  selectionOnly: boolean
+  /** Which artwork fills the output frame. */
+  area: RasterExportArea
 }
 
 /** Versioned project file envelope used by Save/Open. */

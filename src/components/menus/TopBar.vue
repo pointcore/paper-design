@@ -180,6 +180,31 @@
         </div>
 
         <div class="setting-section">
+          <div class="setting-title">Page</div>
+
+          <div class="setting-row">
+            <div class="setting-label">
+              <span class="setting-name">Preset</span>
+            </div>
+            <el-select v-model="settings.pagePreset" size="small" style="width: 150px" @change="onPagePresetChange">
+              <el-option v-for="p in pagePresets" :key="p.value" :label="p.label" :value="p.value" />
+            </el-select>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-label">
+              <span class="setting-name">Page Size</span>
+              <span class="setting-desc">Width x height in px</span>
+            </div>
+            <div class="page-size-inputs">
+              <el-input-number v-model="settings.pageWidth" :min="1" :max="16384" size="small" @change="onPageSizeChange" />
+              <el-button size="small" title="Swap orientation" @click="onPageOrientationSwap">Swap</el-button>
+              <el-input-number v-model="settings.pageHeight" :min="1" :max="16384" size="small" @change="onPageSizeChange" />
+            </div>
+          </div>
+        </div>
+
+        <div class="setting-section">
           <div class="setting-title">Units</div>
           <div class="setting-row">
             <div class="setting-label">
@@ -223,8 +248,9 @@
               <span class="setting-name">Area</span>
             </div>
             <el-radio-group v-model="exportForm.area" size="small">
-              <el-radio-button value="all">All artwork</el-radio-button>
+              <el-radio-button value="artwork">All artwork</el-radio-button>
               <el-radio-button value="selection" :disabled="!store.hasSelection">Selection</el-radio-button>
+              <el-radio-button value="page">Page</el-radio-button>
             </el-radio-group>
           </div>
         </div>
@@ -242,7 +268,7 @@ import { ref, reactive, inject, type Ref } from 'vue'
 import { QuestionFilled, Check } from '@element-plus/icons-vue'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
-import type { RulerUnit, RasterExportFormat } from '../../editor/types'
+import type { RulerUnit, RasterExportFormat, RasterExportArea } from '../../editor/types'
 
 const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
@@ -252,7 +278,7 @@ const exportVisible = ref(false)
 const exportForm = reactive({
   format: 'png' as RasterExportFormat,
   scale: 2,
-  area: 'all' as 'all' | 'selection',
+  area: 'artwork' as RasterExportArea,
 })
 const exportFormats = [
   { value: 'png', label: 'PNG' },
@@ -264,6 +290,22 @@ const exportScales = [
   { value: 2, label: '2x' },
   { value: 3, label: '3x' },
 ]
+
+const pagePresets = [
+  { value: 'custom', label: 'Custom' },
+  { value: '1920x1080', label: 'HD 1920 x 1080' },
+  { value: '1080x1080', label: 'Square 1080 x 1080' },
+  { value: '1080x1920', label: 'Story 1080 x 1920' },
+  { value: '595x842', label: 'A4 595 x 842' },
+  { value: '612x792', label: 'Letter 612 x 792' },
+]
+
+/** Preset value matching W/H, or custom when nothing matches. */
+function matchPagePreset(width: number, height: number): string {
+  const found = pagePresets.find((p) => p.value === `${width}x${height}`)
+  return found ? found.value : 'custom'
+}
+
 const settings = reactive({
   rulers: store.view.rulersVisible,
   grid: store.view.showGrid,
@@ -275,6 +317,9 @@ const settings = reactive({
   snapGuides: store.snap.guides,
   snapPoint: store.snap.point,
   smartGuides: store.snap.smartGuides,
+  pageWidth: store.pageSize.width,
+  pageHeight: store.pageSize.height,
+  pagePreset: matchPagePreset(store.pageSize.width, store.pageSize.height),
 })
 
 const units = [
@@ -290,7 +335,7 @@ function onFileCmd(cmd: string) {
   switch (cmd) {
     case 'new':
       if (e) {
-        e.newDocument(1920, 1080)
+        e.newDocument(store.pageSize.width, store.pageSize.height)
         store.setStatusMessage('New document')
       } else {
         store.setPageSize(1920, 1080)
@@ -334,7 +379,7 @@ function onFileCmd(cmd: string) {
     }
     case 'exportRaster':
       if (exportForm.area === 'selection' && !store.hasSelection) {
-        exportForm.area = 'all'
+        exportForm.area = 'artwork'
       }
       exportVisible.value = true
       break
@@ -441,7 +486,7 @@ function onExportRasterConfirm() {
     const dataUrl = e.exportRaster({
       format: exportForm.format,
       scale: exportForm.scale,
-      selectionOnly: exportForm.area === 'selection',
+      area: exportForm.area,
     })
     if (!dataUrl) {
       store.setStatusMessage('Raster export failed')
@@ -664,6 +709,9 @@ function syncSettingsFromStore() {
   settings.snapGuides = store.snap.guides
   settings.snapPoint = store.snap.point
   settings.smartGuides = store.snap.smartGuides
+  settings.pageWidth = store.pageSize.width
+  settings.pageHeight = store.pageSize.height
+  settings.pagePreset = matchPagePreset(store.pageSize.width, store.pageSize.height)
 }
 
 function onRulersToggle(val: boolean) {
@@ -705,6 +753,36 @@ function onSnapPointToggle(val: boolean) {
 
 function onSmartGuidesToggle(val: boolean) {
   store.updateSnap({ smartGuides: val })
+}
+
+function syncPageSettings() {
+  settings.pageWidth = store.pageSize.width
+  settings.pageHeight = store.pageSize.height
+  settings.pagePreset = matchPagePreset(store.pageSize.width, store.pageSize.height)
+}
+
+function onPagePresetChange(value: string) {
+  if (value === 'custom') return
+  const [width, height] = value.split('x').map(Number)
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return
+  store.setPageSize(width, height)
+  syncPageSettings()
+}
+
+function onPageSizeChange() {
+  const width = Math.round(settings.pageWidth)
+  const height = Math.round(settings.pageHeight)
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width < 1 || height < 1) {
+    syncPageSettings()
+    return
+  }
+  store.setPageSize(width, height)
+  settings.pagePreset = matchPagePreset(width, height)
+}
+
+function onPageOrientationSwap() {
+  store.setPageSize(store.pageSize.height, store.pageSize.width)
+  syncPageSettings()
 }
 
 function onUnitChange(val: string) {
@@ -804,6 +882,16 @@ function onHelp() {
   padding-left: 24px;
   border-left: 2px solid #e0e0e0;
   margin-left: 8px;
+}
+
+.page-size-inputs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.page-size-inputs .el-input-number {
+  width: 90px;
 }
 
 .setting-label {
