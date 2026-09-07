@@ -27,6 +27,8 @@
               <el-dropdown-item command="cut" divided :disabled="!store.hasSelection">Cut</el-dropdown-item>
               <el-dropdown-item command="copy" :disabled="!store.hasSelection">Copy</el-dropdown-item>
               <el-dropdown-item command="paste">Paste</el-dropdown-item>
+              <el-dropdown-item command="pasteFront">Paste in Front</el-dropdown-item>
+              <el-dropdown-item command="pasteBack">Paste in Back</el-dropdown-item>
               <el-dropdown-item command="delete" divided :disabled="!store.hasSelection">Delete</el-dropdown-item>
               <el-dropdown-item command="selectAll" divided>Select All</el-dropdown-item>
             </el-dropdown-menu>
@@ -524,6 +526,12 @@ function onEditCmd(cmd: string) {
       break
     case 'paste':
       e.pasteWithSystemFallback().catch(() => undefined)
+      break
+    case 'pasteFront':
+      if (!e.pasteInPlace('front')) store.setStatusMessage('Clipboard is empty')
+      break
+    case 'pasteBack':
+      if (!e.pasteInPlace('back')) store.setStatusMessage('Clipboard is empty')
       break
     case 'delete':
       e.deleteSelected()

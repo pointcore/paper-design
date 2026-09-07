@@ -1920,6 +1920,31 @@ export class EditorEngine {
   }
 
   /**
+   * Paste the internal clipboard in place (no offset), stacked at the very
+   * front or back of the active layer. Returns false when it is empty.
+   */
+  pasteInPlace(where: 'front' | 'back'): boolean {
+    if (this.clipboardItems.length === 0) return false
+    const layer = this.getActiveLayer()
+    const pasted: paper.Item[] = []
+    for (const source of this.clipboardItems) {
+      const clone = source.clone({ insert: false })
+      layer.addChild(clone)
+      clone.data.id = this.genId()
+      clone.data.isUserItem = true
+      if (where === 'front') clone.bringToFront()
+      else clone.sendToBack()
+      pasted.push(clone)
+    }
+    this.clearSelection()
+    pasted.forEach((item) => (item.selected = true))
+    this.syncSelectionToStore()
+    this.pushHistory(where === 'front' ? 'Paste in Front' : 'Paste in Back')
+    this.scope.view.update()
+    return true
+  }
+
+  /**
    * Paste the clipboard clones into the active layer. Each paste is offset
    * by a small step so repeated pastes do not stack exactly on top of the
    * source, and the pasted items become the new selection.

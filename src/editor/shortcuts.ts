@@ -146,6 +146,12 @@ export function handleGlobalKeydown(
     } else if (key === 'v') {
       engine?.pasteWithSystemFallback()?.catch(() => undefined)
       e.preventDefault()
+    } else if (key === 'f') {
+      // Paste in front only claims the key when it pastes something, so
+      // browser find keeps working with an empty internal clipboard.
+      if (engine?.pasteInPlace('front')) e.preventDefault()
+    } else if (key === 'b') {
+      if (engine?.pasteInPlace('back')) e.preventDefault()
     } else if (key === 'z' && !e.shiftKey) {
       engine?.undo()
       e.preventDefault()
