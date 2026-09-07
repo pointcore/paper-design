@@ -10,6 +10,7 @@
 import { EditorEngine } from '../engine'
 import { AnchorChrome } from '../path-drawing/anchor-chrome'
 import { GuideController } from '../guides/guide-controller'
+import { SnapService } from '../snap/snap-service'
 import type { TextController } from '../text/text-controller'
 
 type EditMode = 'select' | 'direct-select'
@@ -39,11 +40,18 @@ export class SelectController {
   engine: EditorEngine | null = null
   chrome: AnchorChrome = new AnchorChrome()
   guides: GuideController = new GuideController()
+  snapService: SnapService = new SnapService()
 
   private isDragging = false
   private isMarquee = false
   private dragStart: { x: number; y: number } = { x: 0, y: 0 }
   private dragItems: paper.Item[] = []
+  // Absolute drag bookkeeping: item positions and the snapped pointer at
+  // grab time, so each move step recomputes from scratch (snap corrections
+  // never accumulate and releasing a snap does not jump).
+  private dragItemStartPositions: paper.Point[] = []
+  private dragPointerStart: paper.Point | null = null
+  private dragStartBounds: paper.Rectangle | null = null
   private marqueeRect: paper.Path | null = null
   private marqueeLayer: paper.Layer | null = null
 
@@ -109,6 +117,7 @@ export class SelectController {
     this.engine = engine
     this.chrome.attachEngine(engine)
     this.guides.attachEngine(engine)
+    this.snapService.attachEngine(engine)
   }
 
   activate() {
@@ -273,6 +282,11 @@ export class SelectController {
 
         this.isDragging = true
         this.dragItems = engine.getSelection()
+        this.dragItemStartPositions = this.dragItems.map(
+          (item) => (item.position as paper.Point).clone()
+        )
+        this.dragPointerStart = this.snapService.snapPoint(event.point, this.dragItems).clone()
+        this.dragStartBounds = engine.getSelectionBounds()?.clone() ?? null
         this.dragStart = { x: event.point.x, y: event.point.y }
         this.grab = 'object'
       } else {
@@ -304,16 +318,7 @@ export class SelectController {
       } else if (this.isMarquee) {
         this.updateMarquee(event.point.x, event.point.y)
       } else if (this.isDragging && this.dragItems.length > 0) {
-        const delta = new scope.Point(
-          event.point.x - this.dragStart.x,
-          event.point.y - this.dragStart.y
-        )
-        this.dragItems.forEach((item) => {
-          if (!item.locked) {
-            item.position = (item.position as paper.Point).add(delta)
-          }
-        })
-        this.dragStart = { x: event.point.x, y: event.point.y }
+        this.dragObjects(event.point)
       }
       store.setCursorPos(event.point.x, event.point.y)
       this.refreshChrome()
@@ -1008,6 +1013,42 @@ export class SelectController {
     }
     // Stem line plus knob for rotation.
     this.chrome.drawHandle(positions.topCenter, positions.rotate)
+    engine.scope.view.update()
+  }
+
+  /**
+   * Move grabbed objects with pointer snapping plus smart alignment.
+   * Positions recompute from the grab-time snapshot every step: the pointer
+   * follows the snapped cursor, then the smart correction nudges the united
+   * bounds onto nearby edges / centers and draws its guide lines.
+   */
+  private dragObjects(point: paper.Point) {
+    const engine = this.engine
+    if (!engine || this.dragItems.length === 0) return
+    if (!this.dragPointerStart || !this.dragStartBounds) return
+    const snapped = this.snapService.snapPoint(point, this.dragItems)
+    const dx = snapped.x - this.dragPointerStart.x
+    const dy = snapped.y - this.dragPointerStart.y
+    const candidate = new engine.scope.Rectangle(
+      this.dragStartBounds.x + dx,
+      this.dragStartBounds.y + dy,
+      this.dragStartBounds.width,
+      this.dragStartBounds.height
+    )
+    const correction = this.snapService.alignDraggedBounds(candidate, this.dragItems)
+    const shift = new engine.scope.Point(dx + correction.dx, dy + correction.dy)
+    this.dragItems.forEach((item, index) => {
+      if (item.locked) return
+      const start = this.dragItemStartPositions[index]
+      if (!start) return
+      item.position = start.add(shift)
+    })
+    engine.store.setCursorPos(point.x, point.y)
+    this.refreshChrome()
+    // Smart alignment guides draw above the bbox chrome.
+    for (const line of correction.lines) {
+      this.chrome.drawLine(line.from, line.to)
+    }
     engine.scope.view.update()
   }
 

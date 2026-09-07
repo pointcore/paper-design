@@ -21,6 +21,7 @@
  */
 import { EditorEngine } from '../engine'
 import { AnchorChrome } from './anchor-chrome'
+import { SnapService } from '../snap/snap-service'
 
 /** What an active mouse press is doing while a pen stroke is open. */
 type PressAction =
@@ -32,6 +33,7 @@ type PressAction =
 export class PenController {
   engine: EditorEngine | null = null
   chrome: AnchorChrome = new AnchorChrome()
+  snapService: SnapService = new SnapService()
 
   private isDrawing = false
   private currentPath: paper.Path | null = null
@@ -48,6 +50,7 @@ export class PenController {
   attachEngine(engine: EditorEngine) {
     this.engine = engine
     this.chrome.attachEngine(engine)
+    this.snapService.attachEngine(engine)
   }
 
   activate() {
@@ -81,7 +84,8 @@ export class PenController {
       if (native && native.button === 1) return
       this.restoreDefaultCursor()
 
-      const point = event.point
+      // Anchor placement follows snapping; handle shaping stays free.
+      const point = this.snapService.snapPoint(event.point)
 
       if (!this.isDrawing) {
         // Try to resume an open path at its end point before starting fresh.

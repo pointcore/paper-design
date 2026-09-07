@@ -126,6 +126,23 @@ export class AnchorChrome {
   }
 
   /**
+   * Draw a straight smart-guide line between two points (no end markers).
+   */
+  drawLine(from: paper.Point, to: paper.Point, color: string = '#ff4d6d'): paper.Path | null {
+    const engine = this.engine
+    const layer = this.ensureLayer()
+    if (!engine || !layer) return null
+    const scope = engine.scope
+    const line = new scope.Path.Line(from, to) as paper.Path
+    line.strokeColor = new scope.Color(color)
+    line.strokeWidth = 1 / scope.view.zoom
+    line.data.isChrome = true
+    layer.addChild(line)
+    layer.bringToFront()
+    return line
+  }
+
+  /**
    * Draw a small crosshair marker (used by the add-anchor hover preview).
    */
   drawCrosshair(point: paper.Point, color: string = '#4a90d9'): paper.Path | null {

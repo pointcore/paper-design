@@ -120,6 +120,50 @@
         </div>
 
         <div class="setting-section">
+          <div class="setting-title">Snapping</div>
+
+          <div class="setting-row">
+            <div class="setting-label">
+              <span class="setting-name">Enable Snapping</span>
+              <span class="setting-desc">Master switch for every snap source below</span>
+            </div>
+            <el-switch v-model="settings.snap" size="small" @change="onSnapToggle" />
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-label">
+              <span class="setting-name">Snap to Grid</span>
+              <span class="setting-desc">Pull points onto grid crossings</span>
+            </div>
+            <el-switch v-model="settings.snapGrid" size="small" :disabled="!settings.snap" @change="onSnapGridToggle" />
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-label">
+              <span class="setting-name">Snap to Guides</span>
+              <span class="setting-desc">Pull points onto ruler guide lines</span>
+            </div>
+            <el-switch v-model="settings.snapGuides" size="small" :disabled="!settings.snap" @change="onSnapGuidesToggle" />
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-label">
+              <span class="setting-name">Snap to Anchors</span>
+              <span class="setting-desc">Pull points onto nearby anchor points</span>
+            </div>
+            <el-switch v-model="settings.snapPoint" size="small" :disabled="!settings.snap" @change="onSnapPointToggle" />
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-label">
+              <span class="setting-name">Smart Guides</span>
+              <span class="setting-desc">Align dragged objects to nearby edges and centers</span>
+            </div>
+            <el-switch v-model="settings.smartGuides" size="small" :disabled="!settings.snap" @change="onSmartGuidesToggle" />
+          </div>
+        </div>
+
+        <div class="setting-section">
           <div class="setting-title">Units</div>
           <div class="setting-row">
             <div class="setting-label">
@@ -155,6 +199,11 @@ const settings = reactive({
   gridSize: store.snap.gridSize,
   transparent: store.view.transparentBackground,
   unit: store.rulerUnit as RulerUnit,
+  snap: store.snap.enable,
+  snapGrid: store.snap.grid,
+  snapGuides: store.snap.guides,
+  snapPoint: store.snap.point,
+  smartGuides: store.snap.smartGuides,
 })
 
 const units = [
@@ -423,6 +472,11 @@ function syncSettingsFromStore() {
   settings.gridSize = store.snap.gridSize
   settings.transparent = store.view.transparentBackground
   settings.unit = store.rulerUnit as RulerUnit
+  settings.snap = store.snap.enable
+  settings.snapGrid = store.snap.grid
+  settings.snapGuides = store.snap.guides
+  settings.snapPoint = store.snap.point
+  settings.smartGuides = store.snap.smartGuides
 }
 
 function onRulersToggle(val: boolean) {
@@ -444,6 +498,26 @@ function onGridSizeChange(val: number | undefined) {
 
 function onTransparentToggle(val: boolean) {
   store.updateView({ transparentBackground: val })
+}
+
+function onSnapToggle(val: boolean) {
+  store.updateSnap({ enable: val })
+}
+
+function onSnapGridToggle(val: boolean) {
+  store.updateSnap({ grid: val })
+}
+
+function onSnapGuidesToggle(val: boolean) {
+  store.updateSnap({ guides: val })
+}
+
+function onSnapPointToggle(val: boolean) {
+  store.updateSnap({ point: val })
+}
+
+function onSmartGuidesToggle(val: boolean) {
+  store.updateSnap({ smartGuides: val })
 }
 
 function onUnitChange(val: string) {

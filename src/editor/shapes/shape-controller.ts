@@ -9,10 +9,12 @@
  *   center instead of its corner.
  */
 import { EditorEngine } from '../engine'
+import { SnapService } from '../snap/snap-service'
 import type { LiveShapeParams } from '../types'
 
 export class ShapeController {
   engine: EditorEngine | null = null
+  snapService: SnapService = new SnapService()
   private isDrawing = false
   private startPoint: { x: number; y: number } = { x: 0, y: 0 }
   private previewShape: paper.Path | null = null
@@ -20,6 +22,7 @@ export class ShapeController {
 
   attachEngine(engine: EditorEngine) {
     this.engine = engine
+    this.snapService.attachEngine(engine)
   }
 
   activate() {
@@ -59,15 +62,17 @@ export class ShapeController {
     scope.tool.onMouseDown = (event: paper.ToolEvent) => {
       const native = this.getNativeEvent(event)
       if (native.button !== 0) return
-      this.startPoint = { x: event.point.x, y: event.point.y }
+      const snapped = this.snapService.snapPoint(event.point)
+      this.startPoint = { x: snapped.x, y: snapped.y }
       this.isDrawing = true
       engine.store.setDragging(true)
     }
 
     scope.tool.onMouseDrag = (event: paper.ToolEvent) => {
       if (!this.isDrawing) return
-      this.updatePreview(event.point, event.modifiers)
-      engine.store.setCursorPos(event.point.x, event.point.y)
+      const snapped = this.snapService.snapPoint(event.point)
+      this.updatePreview(snapped, event.modifiers)
+      engine.store.setCursorPos(snapped.x, snapped.y)
     }
 
     scope.tool.onMouseUp = () => {
