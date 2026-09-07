@@ -38,8 +38,12 @@ export function registerAllControllers(engine: EditorEngine) {
     engine.registerController(shape, shapeCtrl)
   }
 
-  // Text tool
-  engine.registerController('type', new TextController())
+  // Text tools (one shared controller; the mode follows the active tool)
+  const textCtrl = new TextController()
+  engine.registerController('type', textCtrl)
+  engine.registerController('area-type', textCtrl)
+  engine.registerController('type-on-path', textCtrl)
+  engine.registerController('vertical-type', textCtrl)
 
   // Annotation tools
   engine.registerController('callout', new CalloutController())

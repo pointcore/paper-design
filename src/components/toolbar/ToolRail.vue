@@ -50,7 +50,7 @@
 import {
   Pointer, Aim, EditPen, Edit, MagicStick,
   Position, ZoomIn, Setting, Brush, Star, Operation, ChatLineRound,
-  CirclePlus, Remove
+  CirclePlus, Remove, Tickets, Link, Document
 } from '@element-plus/icons-vue'
 import { useEditorStore } from '../../editor/store'
 import type { ToolName } from '../../editor/types'
@@ -78,6 +78,9 @@ const drawTools: ToolDef[] = [
   { name: 'delete-anchor', tip: 'Delete Anchor Point Tool (-)', icon: Remove },
   { name: 'convert-anchor', tip: 'Convert Anchor Point Tool (Shift+C)', icon: MagicStick },
   { name: 'type', tip: 'Text Tool (T)', icon: Edit },
+  { name: 'area-type', tip: 'Area Text Tool (drag a frame)', icon: Tickets },
+  { name: 'type-on-path', tip: 'Type on Path Tool (click a path)', icon: Link },
+  { name: 'vertical-type', tip: 'Vertical Text Tool', icon: Document },
   { name: 'rect', tip: 'Rectangle Tool (R)', icon: MagicStick },
   { name: 'rounded-rect', tip: 'Rounded Rectangle Tool', icon: Brush },
   { name: 'ellipse', tip: 'Ellipse Tool (L)', icon: Star },
