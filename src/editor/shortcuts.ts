@@ -63,6 +63,7 @@ export const TOOL_SHORTCUTS: Record<ToolName, ShortcutDef | null> = {
   measure:         null,
   callout:         null,
   'shape-builder': null,
+  eyedropper:      { label: 'I',    match: (e) => key(e) === 'i' },
 }
 
 /**
@@ -82,6 +83,7 @@ const SHORTCUT_ORDER: ToolName[] = [
   'pen',
   'pencil',
   'eraser',
+  'eyedropper',
   'type',
   'rect',
   'ellipse',

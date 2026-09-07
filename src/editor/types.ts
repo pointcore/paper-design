@@ -39,6 +39,7 @@ export type ToolName =
   | 'measure'         // Measure tool
   | 'callout'         // Callout
   | 'shape-builder'   // Shape builder Shift+M
+  | 'eyedropper'      // Eyedropper I
 
 /** Stroke alignment */
 export type StrokeAlign = 'center' | 'inside' | 'outside'

@@ -11,6 +11,7 @@ A vector graphics editor built with **Vue 3 + TypeScript + Paper.js**, offering 
 - **Pen & Curvature tools**: Dual Pen/Curvature tools with rubber-band preview, hover states, anchor add/delete/convert, handle linkage, 45° Shift constraints and Alt handle breaking.
 - **Pencil tool**: Freehand strokes with minimum-spacing capture and zoom-scaled simplify smoothing on release; Escape cancels, dots are discarded.
 - **Eraser tool**: Drag paints a fixed screen-size stroke that subtracts from every unlocked path it touches (clicks punch holes); one history entry per drag.
+- **Eyedropper tool**: Click artwork to load its appearance (fill incl. gradients, stroke, dash, opacity, blend, text styling) into the defaults and repaint the current selection.
 - **Path editing**: In Direct Select mode the hit priority is handle > anchor > object; supports anchor sub-selection, marquee select, move, duplicate and delete.
 - **Text tools**: Point, area (dragged frame with canvas-measured word wrap), path-attached (one rotated glyph per character) and vertical text. All modes edit through an HTML overlay that mirrors the typography at the current zoom; sessions commit on Escape, a click outside, or a tool switch; double-click a text item with a select tool to re-enter editing. Font family, size, weight, italic and alignment come from the properties panel.
 - **Live shapes**: Rectangle, rounded rectangle, ellipse and line with live preview (not added to history until confirmed). Shift constrains proportions (square/circle, 45° lines), Alt draws from the center.
