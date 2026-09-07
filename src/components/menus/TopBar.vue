@@ -83,6 +83,9 @@
               <el-dropdown-item command="transparentBg" :icon="store.view.transparentBackground ? Check : undefined">
                 Transparent Background
               </el-dropdown-item>
+              <el-dropdown-item command="navigator" :icon="store.ui.showNavigator ? Check : undefined">
+                Navigator
+              </el-dropdown-item>
               <el-dropdown-item command="canvasSettings" divided>Canvas Settings...</el-dropdown-item>
             </el-dropdown-menu>
           </template>
@@ -730,6 +733,9 @@ function onViewCmd(cmd: string) {
       break
     case 'transparentBg':
       toggleTransparent()
+      break
+    case 'navigator':
+      store.setShowNavigator(!store.ui.showNavigator)
       break
     case 'canvasSettings':
       settingsVisible.value = true

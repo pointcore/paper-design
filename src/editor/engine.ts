@@ -1498,6 +1498,63 @@ export class EditorEngine {
     }
     if (!bounds || bounds.width < 1 || bounds.height < 1) return null
     const scale = Number.isFinite(options.scale) ? Math.min(4, Math.max(0.5, options.scale)) : 1
+    const mime =
+      options.format === 'jpeg' ? 'image/jpeg' :
+      options.format === 'webp' ? 'image/webp' : 'image/png'
+    return this.withCapturedView(bounds, scale, false, (canvas, width, height) => {
+      if (options.format === 'png') {
+        return canvas.toDataURL('image/png')
+      }
+      const output = document.createElement('canvas')
+      output.width = width
+      output.height = height
+      const ctx = output.getContext('2d')
+      if (!ctx) return null
+      if (options.format === 'jpeg') {
+        ctx.fillStyle = '#ffffff'
+        ctx.fillRect(0, 0, width, height)
+      }
+      ctx.drawImage(canvas, 0, 0)
+      return output.toDataURL(mime, 0.92)
+    })
+  }
+
+  /**
+   * Render a whole-scene thumbnail (artwork plus artboard sheets) for the
+   * navigator, capped at maxPixels on the long edge. Returns the image
+   * with the document bounds it covers, or null when the scene is empty.
+   */
+  renderThumbnail(maxPixels: number): { url: string; x: number; y: number; width: number; height: number } | null {
+    let bounds = this.unitedBoundsOf(this.getUserItems())
+    for (const board of this.store.artboards) {
+      if (board.width > 0 && board.height > 0) {
+        const rect = new this.scope.Rectangle(board.x, board.y, board.width, board.height)
+        bounds = bounds ? bounds.unite(rect) : rect
+      }
+    }
+    if (!bounds) return null
+    const longest = Math.max(bounds.width, bounds.height)
+    if (!(longest > 0)) return null
+    const limit = maxPixels > 0 ? maxPixels : 320
+    const scale = Math.min(2, limit / longest)
+    const snapshot = { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height }
+    const url = this.withCapturedView(bounds, scale, true, (canvas) => canvas.toDataURL('image/png'))
+    if (!url) return null
+    return { url, ...snapshot }
+  }
+
+  /**
+   * Point the view at bounds for exactly one synchronous render of `fn`,
+   * then restore everything. The callback must be synchronous: restoring
+   * resizes the canvas, which clears whatever was just drawn.
+   */
+  private withCapturedView<T>(
+    bounds: paper.Rectangle,
+    scale: number,
+    keepArtboards: boolean,
+    fn: (canvas: HTMLCanvasElement, width: number, height: number) => T | null
+  ): T | null {
+    if (!bounds || bounds.width < 1 || bounds.height < 1) return null
     const width = Math.max(1, Math.ceil(bounds.width * scale))
     const height = Math.max(1, Math.ceil(bounds.height * scale))
     if (width > 16384 || height > 16384) return null
@@ -1510,7 +1567,8 @@ export class EditorEngine {
     // Temporarily hide non-user layers so editing chrome never leaks in.
     const hiddenLayers: paper.Layer[] = []
     for (const layer of this.project.layers) {
-      if (!(layer.data as any)?.isUserLayer && layer.visible) {
+      const data = (layer.data as any) ?? {}
+      if (!data.isUserLayer && layer.visible && !(keepArtboards && data.isArtboardLayer)) {
         layer.visible = false
         hiddenLayers.push(layer)
       }
@@ -1521,24 +1579,7 @@ export class EditorEngine {
       view.zoom = scale
       view.center = bounds.center
       view.update()
-
-      const mime =
-        options.format === 'jpeg' ? 'image/jpeg' :
-        options.format === 'webp' ? 'image/webp' : 'image/png'
-      if (options.format === 'png') {
-        return this.canvas.toDataURL('image/png')
-      }
-      const output = document.createElement('canvas')
-      output.width = width
-      output.height = height
-      const ctx = output.getContext('2d')
-      if (!ctx) return null
-      if (options.format === 'jpeg') {
-        ctx.fillStyle = '#ffffff'
-        ctx.fillRect(0, 0, width, height)
-      }
-      ctx.drawImage(this.canvas, 0, 0)
-      return output.toDataURL(mime, 0.92)
+      return fn(this.canvas, width, height)
     } finally {
       hiddenLayers.forEach((layer) => {
         layer.visible = true

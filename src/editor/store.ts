@@ -174,6 +174,7 @@ export const useEditorStore = defineStore('editor', {
       panelWidth: 240,
       rightTab: 'property' as RightPanelTab,
       settingsOpen: false,
+      showNavigator: true,
     },
     /** Clipboard copy queue */
     clipboard: null as any,
@@ -360,6 +361,11 @@ export const useEditorStore = defineStore('editor', {
     /** Update panel UI state */
     setPanelCollapsed(val: boolean) {
       this.ui.panelCollapsed = val
+    },
+
+    /** Show or hide the navigator minimap */
+    setShowNavigator(val: boolean) {
+      this.ui.showNavigator = val
     },
 
     /** Switch the right-panel tab */

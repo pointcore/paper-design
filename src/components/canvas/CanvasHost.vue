@@ -18,6 +18,8 @@
     <!-- Main drawing canvas -->
     <canvas ref="canvasRef" class="main-canvas" @contextmenu.prevent="onContextMenu" @wheel.prevent="onWheel" @mousedown="onCanvasMouseDown"></canvas>
 
+    <NavigatorPanel />
+
     <div v-if="contextMenu.visible" class="context-menu"
          :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
          @click.stop>
@@ -38,6 +40,7 @@ import { useEditorStore } from '../../editor/store'
 import { EditorEngine } from '../../editor/engine'
 import { registerAllControllers } from '../../editor/register-controllers'
 import { handleGlobalKeydown, handleGlobalKeyUp } from '../../editor/shortcuts'
+import NavigatorPanel from './NavigatorPanel.vue'
 
 const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
