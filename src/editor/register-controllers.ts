@@ -49,11 +49,11 @@ export function registerAllControllers(engine: EditorEngine) {
   engine.registerController('delete-anchor', anchorCtrl)
   engine.registerController('convert-anchor', anchorCtrl)
 
-  // Shape tools
+  // Shape tools (every registered tool draws its own geometry; unlisted
+  // ToolName shapes stay available for scripts but have no drawing UI)
   const shapeCtrl = new ShapeController()
   for (const shape of [
-    'rect', 'rounded-rect', 'ellipse', 'polygon', 'line',
-    'arc', 'spiral', 'rect-grid', 'polar-grid'
+    'rect', 'rounded-rect', 'ellipse', 'polygon', 'line', 'spiral'
   ] as const) {
     engine.registerController(shape, shapeCtrl)
   }

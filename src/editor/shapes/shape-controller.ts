@@ -43,6 +43,7 @@ export class ShapeController {
       case 'ellipse': return 'ellipse'
       case 'polygon': return 'polygon'
       case 'line': return 'line'
+      case 'spiral': return 'spiral'
       default: return 'rect'
     }
   }
@@ -228,6 +229,23 @@ export class ShapeController {
         const cy = top + height / 2
         const radius = Math.max(width, height) / 2
         path = new scope.Path.RegularPolygon(new scope.Point(cx, cy), sides, radius) as paper.Path
+        break
+      }
+      case 'spiral': {
+        // Archimedean spiral: fixed turns, drag diagonal sets the extent.
+        const cx = left + width / 2
+        const cy = top + height / 2
+        const maxRadius = Math.min(width, height) / 2
+        const turns = 3
+        const steps = 120
+        const spiral = new scope.Path() as paper.Path
+        for (let i = 0; i <= steps; i++) {
+          const t = i / steps
+          const angle = t * turns * Math.PI * 2
+          const radius = maxRadius * t
+          spiral.add(new scope.Point(cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius))
+        }
+        path = spiral
         break
       }
       default: {

@@ -50,7 +50,8 @@
 import {
   Pointer, Aim, EditPen, Edit, MagicStick,
   Position, ZoomIn, Setting, Brush, BrushFilled, Star, Operation, ChatLineRound,
-  CirclePlus, Remove, Tickets, Link, Document, CopyDocument, Delete, Stamp, Scissor, Crop
+  CirclePlus, Remove, Tickets, Link, Document, CopyDocument, Delete, Stamp, Scissor, Crop,
+  Discount, Loading
 } from '@element-plus/icons-vue'
 import { useEditorStore } from '../../editor/store'
 import type { ToolName } from '../../editor/types'
@@ -89,6 +90,8 @@ const drawTools: ToolDef[] = [
   { name: 'rect', tip: 'Rectangle Tool (R)', icon: MagicStick },
   { name: 'rounded-rect', tip: 'Rounded Rectangle Tool', icon: Crop },
   { name: 'ellipse', tip: 'Ellipse Tool (L)', icon: Star },
+  { name: 'polygon', tip: 'Polygon Tool', icon: Discount },
+  { name: 'spiral', tip: 'Spiral Tool', icon: Loading },
   { name: 'line', tip: 'Line Segment Tool (\\)', icon: Position },
 ]
 
