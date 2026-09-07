@@ -905,6 +905,7 @@ export class EditorEngine {
     if (data.textMode === 'path') kind = 'Path Text'
     else if (data.textMode === 'area') kind = 'Area Text'
     else if (data.textMode === 'vertical') kind = 'Vertical Text'
+    else if (item instanceof scope.Group && this.isClipGroup(item)) kind = 'Clipping Mask'
     else if (item instanceof scope.PointText) kind = 'Text'
     else if (item instanceof scope.CompoundPath) kind = 'Compound Path'
     else if (item instanceof scope.Group) kind = 'Group'
@@ -1730,6 +1731,115 @@ export class EditorEngine {
     paint(outline as paper.Item)
     parent.insertChild(Math.min(at, parent.children.length), outline as paper.Item)
     return [outline as paper.Item]
+  }
+
+  // ===== Clipping masks =====
+
+  /**
+   * Make a clipping mask from the selection: the front-most unlocked path
+   * masks everything else selected. Paper.js clips through the bottom
+   * child of a group, so the mask is inserted first. The mask paint clears
+   * (plain-color paints are stashed on the mask for release).
+   */
+  makeClippingMask(): boolean {
+    const scope = this.scope
+    const items = this.getSelection().filter((item) => !item.locked && item.parent)
+    if (items.length < 2) return false
+    const ordered = items
+      .slice()
+      .sort((a, b) => (a.isBelow(b) ? -1 : a.isAbove(b) ? 1 : 0))
+    const mask = ordered[ordered.length - 1] as paper.PathItem
+    if (!(mask instanceof scope.Path) && !(mask instanceof scope.CompoundPath)) return false
+    const content = ordered.slice(0, -1)
+    const parent = mask.parent ?? this.getActiveLayer()
+    const rawAt = parent.children.indexOf(mask)
+    const at = rawAt < 0 ? parent.children.length : rawAt
+
+    const maskAny = mask as any
+    maskAny.data.maskPaint = {
+      fill: this.cssOrNull(maskAny.fillColor),
+      stroke: this.cssOrNull(maskAny.strokeColor),
+      width: Number(maskAny.strokeWidth) || 0,
+    }
+
+    const group = new scope.Group({ insert: false }) as paper.Group
+    group.addChild(mask)
+    for (const node of content) group.addChild(node)
+    // The flag only takes on grouped paths: set it after inserting.
+    mask.clipMask = true
+    if (maskAny.fillColor !== undefined) maskAny.fillColor = null
+    if (maskAny.strokeColor !== undefined) maskAny.strokeColor = null
+    parent.insertChild(Math.min(at, parent.children.length), group)
+    group.data.id = this.genId()
+    group.data.isUserItem = true
+    this.clearSelection()
+    group.selected = true
+    this.syncSelectionToStore()
+    this.pushHistory('Make Clipping Mask')
+    this.scope.view.update()
+    return true
+  }
+
+  /**
+   * Release selected clipping groups: mask paints restore, children keep
+   * their stacking slots and the group dissolves.
+   */
+  releaseClippingMask(): boolean {
+    const scope = this.scope
+    const groups = this.getSelection().filter(
+      (item) =>
+        !item.locked && item.parent && item instanceof scope.Group && this.isClipGroup(item)
+    ) as paper.Group[]
+    if (groups.length === 0) return false
+    const released: paper.Item[] = []
+    for (const group of groups) {
+      const parent = group.parent ?? this.getActiveLayer()
+      let at = parent.children.indexOf(group)
+      if (at < 0) at = parent.children.length
+      for (const child of group.children.slice()) {
+        const node = child as any
+        if (node.clipMask) {
+          node.clipMask = false
+          const paint = node.data?.maskPaint as
+            | { fill: string | null; stroke: string | null; width: number }
+            | undefined
+          if (paint) {
+            if (node.fillColor !== undefined) node.fillColor = paint.fill
+            if (node.strokeColor !== undefined) node.strokeColor = paint.stroke
+            if (node.strokeWidth !== undefined && Number.isFinite(paint.width)) {
+              node.strokeWidth = paint.width
+            }
+          }
+          if (node.data) delete node.data.maskPaint
+        }
+        parent.insertChild(Math.min(at, parent.children.length), node)
+        at++
+        released.push(node)
+      }
+      group.remove()
+    }
+    this.clearSelection()
+    released.forEach((item) => {
+      item.selected = true
+    })
+    this.syncSelectionToStore()
+    this.pushHistory('Release Clipping Mask')
+    this.scope.view.update()
+    return true
+  }
+
+  /** Whether a group clips through a masked child. */
+  private isClipGroup(group: paper.Group): boolean {
+    for (const child of group.children) {
+      if ((child as any).clipMask) return true
+    }
+    return false
+  }
+
+  /** Plain CSS color string, or null for empty / gradient paints. */
+  private cssOrNull(color: any): string | null {
+    if (!color || color.gradient) return null
+    return color.toCSS(true) as string
   }
 
   // ===== Edit operations =====

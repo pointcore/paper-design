@@ -47,6 +47,8 @@
               <el-dropdown-item command="releaseCompound" :disabled="!store.hasSelection">Release Compound Path</el-dropdown-item>
               <el-dropdown-item command="joinPaths" :disabled="!store.hasSelection">Join Paths</el-dropdown-item>
               <el-dropdown-item command="outlineStroke" :disabled="!store.hasSelection">Outline Stroke</el-dropdown-item>
+              <el-dropdown-item command="makeMask" divided :disabled="!store.hasSelection">Make Clipping Mask</el-dropdown-item>
+              <el-dropdown-item command="releaseMask" :disabled="!store.hasSelection">Release Clipping Mask</el-dropdown-item>
               <el-dropdown-item command="lock" divided :disabled="!store.hasSelection">Lock</el-dropdown-item>
               <el-dropdown-item command="unlockAll">Unlock All</el-dropdown-item>
               <el-dropdown-item command="hide" divided :disabled="!store.hasSelection">Hide</el-dropdown-item>
@@ -547,6 +549,16 @@ function onObjectCmd(cmd: string) {
     case 'outlineStroke':
       if (!e.outlineStroke()) {
         store.setStatusMessage('Outline needs a path with a stroke')
+      }
+      break
+    case 'makeMask':
+      if (!e.makeClippingMask()) {
+        store.setStatusMessage('Clipping needs art plus a path on top')
+      }
+      break
+    case 'releaseMask':
+      if (!e.releaseClippingMask()) {
+        store.setStatusMessage('Select a clipping mask to release')
       }
       break
   }
