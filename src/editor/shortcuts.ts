@@ -124,8 +124,9 @@ export function resolveToolShortcut(e: KeyboardEvent): ToolName | null {
  * Global keydown handler for editor shortcuts.
  *
  * Three groups live here:
- * - Clipboard, history and fit shortcuts (Ctrl+C / X / V / F / B / Z /
- *   Shift+Z / Y / 0). Copy also mirrors the selection to the OS clipboard
+ * - Clipboard, history, fit, select, arrange, group, lock and hide
+ *   shortcuts (Ctrl+C / X / V / F / B / A / G / Shift+G / 2 / Alt+2 / 3 /
+ *   Alt+3 / Z / Shift+Z / Y / 0 / brackets). Copy also mirrors the selection to the OS clipboard
  *   as SVG (best effort); paste prefers OS clipboard SVG and falls back to
  *   the internal clipboard. They work in every tool context, matching
  *   Illustrator; the text edit overlay is exempt via the editable-target
@@ -174,6 +175,42 @@ export function handleGlobalKeydown(
       e.preventDefault()
     } else if (key === '0') {
       engine?.fitToContent()
+      e.preventDefault()
+    } else if (key === 'a') {
+      engine?.selectAllArtwork()
+      e.preventDefault()
+    } else if (key === 'g' && !e.shiftKey && !e.altKey) {
+      // Group only claims the key with 2+ selected (browser find-again
+      // keeps working otherwise, same conditional pattern as paste).
+      if ((engine?.getSelection().length ?? 0) > 1 && engine?.groupSelection()) {
+        e.preventDefault()
+      }
+    } else if (key === 'g' && e.shiftKey && !e.altKey) {
+      if (engine?.ungroupSelection()) e.preventDefault()
+    } else if (key === '2' && !e.shiftKey && !e.altKey) {
+      if ((engine?.getSelection().length ?? 0) > 0) {
+        engine?.setSelectedLocked(true)
+        e.preventDefault()
+      }
+    } else if (key === '2' && e.altKey) {
+      engine?.unlockAll()
+      e.preventDefault()
+    } else if (key === '3' && !e.shiftKey && !e.altKey) {
+      if ((engine?.getSelection().length ?? 0) > 0) {
+        engine?.setSelectedVisible(false)
+        e.preventDefault()
+      }
+    } else if (key === '3' && e.altKey) {
+      engine?.showAll()
+      e.preventDefault()
+    } else if (e.code === 'BracketRight' && !e.altKey && store.hasSelection) {
+      // Physical key positions (layout-independent): ] forward, Shift+] front.
+      if (e.shiftKey) engine?.bringSelectionToFront()
+      else engine?.bringForward()
+      e.preventDefault()
+    } else if (e.code === 'BracketLeft' && !e.altKey && store.hasSelection) {
+      if (e.shiftKey) engine?.sendSelectionToBack()
+      else engine?.sendBackward()
       e.preventDefault()
     }
     return

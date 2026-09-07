@@ -657,10 +657,7 @@ function onEditCmd(cmd: string) {
       e.deleteSelected()
       break
     case 'selectAll':
-      e.getActiveLayer().children.forEach((c) => {
-        c.selected = true
-      })
-      e.syncSelectionToStore()
+      e.selectAllArtwork()
       break
     case 'invertSelection':
       e.invertSelection()
@@ -697,41 +694,17 @@ function onObjectCmd(cmd: string) {
       store.setReferencePoint('center')
       break
     case 'bringToFront':
-      e.getSelection().forEach((i) => i.bringToFront())
-      e.scope.view.update()
-      e.pushHistory('Bring to Front')
+      e.bringSelectionToFront()
       break
     case 'sendToBack':
-      e.getSelection().forEach((i) => i.sendToBack())
-      e.scope.view.update()
-      e.pushHistory('Send to Back')
+      e.sendSelectionToBack()
       break
-    case 'group': {
-      const items = e.getSelection()
-      if (items.length > 1) {
-        const group = new e.scope.Group(items) as paper.Group
-        group.data.id = e.genId()
-        group.data.isUserItem = true
-        e.selectItem(group)
-        e.pushHistory('Group')
-      }
+    case 'group':
+      e.groupSelection()
       break
-    }
-    case 'ungroup': {
-      const groups = e.getSelection().filter((i) => i instanceof e.scope.Group)
-      groups.forEach((g) => {
-        const children = g.children.slice()
-        const parent = g.parent
-        children.forEach((c: any) => {
-          if (parent) parent.addChild(c)
-        })
-        g.remove()
-      })
-      e.clearSelection()
-      e.pushHistory('Ungroup')
-      e.scope.view.update()
+    case 'ungroup':
+      e.ungroupSelection()
       break
-    }
     case 'isolate': {
       const groups = e.getSelection().filter(
         (i) => i instanceof e.scope.Group && !(i.data as any)?.textMode
@@ -995,7 +968,7 @@ function onNudgeStepChange(val: number | undefined) {
 }
 
 function onHelp() {
-  store.setStatusMessage('Shortcuts: V Select | A Direct Select | P Pen | N Pencil | Shift+E Eraser | Shift+B Blob | B Brush | C Scissors | Curvature | +/- & C Anchor Tools | Space Pan | Ctrl+0 Fit | Esc Cancel')
+  store.setStatusMessage('Shortcuts: V Select | A Direct Select | P Pen | N Pencil | Shift+E Eraser | Shift+B Blob | B Brush | C Scissors | Curvature | +/- & C Anchor Tools | Space Pan | Ctrl+0 Fit | Arrows Nudge | Ctrl+A Select | Ctrl+G Group | Ctrl+2 Lock | Ctrl+3 Hide | Ctrl+F/B Paste | Ctrl+[ Order | Esc Cancel')
 }
 </script>
 

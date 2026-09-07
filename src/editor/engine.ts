@@ -1751,6 +1751,31 @@ export class EditorEngine {
   // ===== Object order / visibility / select-same =====
 
   /**
+   * Bring the selection to the very front (top of each parent stack).
+   * Returns false (no history) when nothing is selected.
+   */
+  bringSelectionToFront(): boolean {
+    const items = this.getSelection()
+    if (items.length === 0) return false
+    items.forEach((i) => i.bringToFront())
+    this.scope.view.update()
+    this.pushHistory('Bring to Front')
+    return true
+  }
+
+  /**
+   * Send the selection to the very back. Returns false when empty.
+   */
+  sendSelectionToBack(): boolean {
+    const items = this.getSelection()
+    if (items.length === 0) return false
+    items.forEach((i) => i.sendToBack())
+    this.scope.view.update()
+    this.pushHistory('Send to Back')
+    return true
+  }
+
+  /**
    * Move every selected item one step towards the front within its parent.
    * Items move front-most first so multi-selections keep their order.
    */
@@ -1764,6 +1789,59 @@ export class EditorEngine {
   sendBackward(): void {
     this.shiftSelectedOrder(-1)
     this.pushHistory('Send Backward')
+    this.scope.view.update()
+  }
+
+  /**
+   * Group the selection (needs 2+ items). Returns false when grouped
+   * nothing, so callers can leave browser keys alone.
+   */
+  groupSelection(): boolean {
+    const items = this.getSelection()
+    if (items.length < 2) return false
+    const group = new this.scope.Group(items) as paper.Group
+    group.data.id = this.genId()
+    group.data.isUserItem = true
+    this.selectItem(group)
+    this.pushHistory('Group')
+    return true
+  }
+
+  /**
+   * Ungroup selected groups (children keep slot, selection clears).
+   * Returns false when nothing ungrouped.
+   */
+  ungroupSelection(): boolean {
+    const groups = this.getSelection().filter((i) => i instanceof this.scope.Group)
+    if (groups.length === 0) return false
+    groups.forEach((g) => {
+      const children = (g as paper.Group).children.slice()
+      const parent = g.parent
+      children.forEach((c: any) => {
+        if (parent) parent.addChild(c)
+      })
+      g.remove()
+    })
+    this.clearSelection()
+    this.pushHistory('Ungroup')
+    this.scope.view.update()
+    return true
+  }
+
+  /**
+   * Select every visible unlocked top-level user item across all layers.
+   */
+  selectAllArtwork(): void {
+    this.project.deselectAll()
+    for (const layer of this.project.layers) {
+      if (!(layer.data as any)?.isUserLayer || !layer.visible || layer.locked) continue
+      for (const child of layer.children) {
+        const item = child as paper.Item
+        if (!item.visible || (item as any).locked) continue
+        item.selected = true
+      }
+    }
+    this.syncSelectionToStore()
     this.scope.view.update()
   }
 
