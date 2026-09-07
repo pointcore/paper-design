@@ -16,7 +16,7 @@
     <div v-if="store.view.rulersVisible" class="ruler-corner"></div>
 
     <!-- Main drawing canvas -->
-    <canvas ref="canvasRef" class="main-canvas" @contextmenu.prevent="onContextMenu" @wheel.prevent="onWheel"></canvas>
+    <canvas ref="canvasRef" class="main-canvas" @contextmenu.prevent="onContextMenu" @wheel.prevent="onWheel" @mousedown="onCanvasMouseDown"></canvas>
 
     <div v-if="contextMenu.visible" class="context-menu"
          :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
@@ -60,6 +60,11 @@ let guideDragOrientation: 'horizontal' | 'vertical' = 'horizontal'
 let guideDragGhost: paper.Path | null = null
 let guideDragGhostLayer: paper.Layer | null = null
 let guideDragStartClient = { x: 0, y: 0 }
+
+// Middle-drag pan state (works in every tool; paper tools ignore button 1)
+let middlePanActive = false
+let middlePanLast: { x: number; y: number } | null = null
+let middlePanPrevCursor = ''
 
 onMounted(() => {
   if (!canvasRef.value || !containerRef.value) return
@@ -154,7 +159,10 @@ onUnmounted(() => {
   document.removeEventListener('click', onDocumentClick)
   window.removeEventListener('mousemove', onGuideDragMove)
   window.removeEventListener('mouseup', onGuideDragEnd)
+  window.removeEventListener('mousemove', onMiddlePanMove)
+  window.removeEventListener('mouseup', onMiddlePanEnd)
   guideDragActive = false
+  middlePanActive = false
   if (engine) {
     if (engine.onViewChange) {
       engine.onViewChange = null
@@ -196,6 +204,52 @@ function onWheel(e: WheelEvent) {
 /** Global tool-switch keyboard shortcut handler. */
 function onGlobalKeydown(e: KeyboardEvent) {
   handleGlobalKeydown(e, store, engine)
+}
+
+/** Convert a client position to document space through the paper view. */
+function clientToDocument(clientX: number, clientY: number): { x: number; y: number } | null {
+  if (!engine || !canvasRef.value) return null
+  const rect = canvasRef.value.getBoundingClientRect()
+  const point = engine.scope.view.viewToProject(
+    new engine.scope.Point(clientX - rect.left, clientY - rect.top)
+  )
+  return { x: point.x, y: point.y }
+}
+
+/** Middle-button drag pans in every tool (paper tools ignore button 1). */
+function onCanvasMouseDown(e: MouseEvent) {
+  if (!engine || e.button !== 1 || middlePanActive) return
+  const start = clientToDocument(e.clientX, e.clientY)
+  if (!start) return
+  middlePanActive = true
+  middlePanLast = start
+  if (canvasRef.value) {
+    middlePanPrevCursor = canvasRef.value.style.cursor
+    canvasRef.value.style.cursor = 'grabbing'
+  }
+  e.preventDefault()
+  window.addEventListener('mousemove', onMiddlePanMove)
+  window.addEventListener('mouseup', onMiddlePanEnd)
+}
+
+function onMiddlePanMove(e: MouseEvent) {
+  if (!middlePanActive || !engine || !middlePanLast) return
+  const current = clientToDocument(e.clientX, e.clientY)
+  if (!current) return
+  // Same document-space deltas the hand tool feeds to panBy.
+  engine.panBy(current.x - middlePanLast.x, current.y - middlePanLast.y)
+  middlePanLast = current
+}
+
+function onMiddlePanEnd() {
+  if (!middlePanActive) return
+  middlePanActive = false
+  middlePanLast = null
+  window.removeEventListener('mousemove', onMiddlePanMove)
+  window.removeEventListener('mouseup', onMiddlePanEnd)
+  if (canvasRef.value) {
+    canvasRef.value.style.cursor = middlePanPrevCursor
+  }
 }
 
 /** Space-pan release handler (restores the parked tool). */
