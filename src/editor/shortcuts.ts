@@ -116,15 +116,20 @@ export function resolveToolShortcut(e: KeyboardEvent): ToolName | null {
 /**
  * Global keydown handler for editor shortcuts.
  *
- * Two groups live here:
- * - Clipboard and history shortcuts (Ctrl+C / X / V / Z / Shift+Z / Y).
- *   Copy also mirrors the selection to the OS clipboard as SVG (best
- *   effort); paste prefers OS clipboard SVG and falls back to the internal
- *   clipboard. They work in every tool context, matching Illustrator; the
- *   text edit overlay is exempt via the editable-target guard so the
- *   browser's own textarea editing keeps working.
+ * Three groups live here:
+ * - Clipboard, history and fit shortcuts (Ctrl+C / X / V / F / B / Z /
+ *   Shift+Z / Y / 0). Copy also mirrors the selection to the OS clipboard
+ *   as SVG (best effort); paste prefers OS clipboard SVG and falls back to
+ *   the internal clipboard. They work in every tool context, matching
+ *   Illustrator; the text edit overlay is exempt via the editable-target
+ *   guard so the browser's own textarea editing keeps working.
+ * - Space-pan: holding Space parks the current tool and pans with the hand
+ *   tool until release (see handleGlobalKeyUp).
  * - Single-key tool switching (see resolveToolShortcut).
  */
+
+/** Tool parked while Space-pan holds the hand tool, or null. */
+let spacePanPreviousTool: ToolName | null = null
 export function handleGlobalKeydown(
   e: KeyboardEvent,
   store: EditorStore,
@@ -158,11 +163,23 @@ export function handleGlobalKeydown(
     } else if ((key === 'z' && e.shiftKey) || key === 'y') {
       engine?.redo()
       e.preventDefault()
+    } else if (key === '0') {
+      engine?.fitToContent()
+      e.preventDefault()
     }
     return
   }
   if (e.altKey) return
   if (e.repeat) return
+
+  // Hold Space to pan with the hand tool from any other tool.
+  if (e.key === ' ' && !spacePanPreviousTool && store.tool !== 'view-hand') {
+    spacePanPreviousTool = store.tool
+    store.setTool('view-hand')
+    engine?.setTool('view-hand')
+    e.preventDefault()
+    return
+  }
 
   const tool = resolveToolShortcut(e)
   if (!tool || tool === store.tool) return
@@ -171,5 +188,23 @@ export function handleGlobalKeydown(
   store.setTool(tool)
   if (engine) engine.setTool(tool)
   // The shortcut is consumed so it never leaks into tool-level key handlers.
+  e.preventDefault()
+}
+
+/**
+ * Global keyup handler: releasing Space restores the tool parked by
+ * Space-pan. Preventing default also stops a focused button from
+ * re-triggering on the same keystroke.
+ */
+export function handleGlobalKeyUp(
+  e: KeyboardEvent,
+  store: EditorStore,
+  engine: EditorEngine | null
+): void {
+  if (e.key !== ' ' || !spacePanPreviousTool) return
+  const previous = spacePanPreviousTool
+  spacePanPreviousTool = null
+  store.setTool(previous)
+  engine?.setTool(previous)
   e.preventDefault()
 }

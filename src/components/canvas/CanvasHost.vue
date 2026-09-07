@@ -37,7 +37,7 @@ import { ref, onMounted, onUnmounted, onBeforeUnmount, watch, inject, type Ref }
 import { useEditorStore } from '../../editor/store'
 import { EditorEngine } from '../../editor/engine'
 import { registerAllControllers } from '../../editor/register-controllers'
-import { handleGlobalKeydown } from '../../editor/shortcuts'
+import { handleGlobalKeydown, handleGlobalKeyUp } from '../../editor/shortcuts'
 
 const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
@@ -105,6 +105,7 @@ onMounted(() => {
 
   window.addEventListener('resize', onResize)
   window.addEventListener('keydown', onGlobalKeydown)
+  window.addEventListener('keyup', onGlobalKeyUp)
   document.addEventListener('click', onDocumentClick)
 
   // Watch for view setting changes
@@ -149,6 +150,7 @@ onBeforeUnmount(() => {
 onUnmounted(() => {
   window.removeEventListener('resize', onResize)
   window.removeEventListener('keydown', onGlobalKeydown)
+  window.removeEventListener('keyup', onGlobalKeyUp)
   document.removeEventListener('click', onDocumentClick)
   window.removeEventListener('mousemove', onGuideDragMove)
   window.removeEventListener('mouseup', onGuideDragEnd)
@@ -194,6 +196,11 @@ function onWheel(e: WheelEvent) {
 /** Global tool-switch keyboard shortcut handler. */
 function onGlobalKeydown(e: KeyboardEvent) {
   handleGlobalKeydown(e, store, engine)
+}
+
+/** Space-pan release handler (restores the parked tool). */
+function onGlobalKeyUp(e: KeyboardEvent) {
+  handleGlobalKeyUp(e, store, engine)
 }
 
 function onResize() {
