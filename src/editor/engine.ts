@@ -2787,7 +2787,8 @@ export class EditorEngine {
   }
 
   deleteSelected() {
-    const items = this.getSelection()
+    const items = this.getSelection().filter((item) => !item.locked)
+    if (items.length === 0) return
     items.forEach((i) => i.remove())
     this.clearSelection()
     this.pushHistory('Delete')
