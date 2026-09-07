@@ -8,17 +8,23 @@ A vector graphics editor built with **Vue 3 + TypeScript + Paper.js**, offering 
 
 ## Features
 
-- **Pen & Curvature tools**: Dual Pen/Curvature tools with rubber-band preview, hover states, anchor add/remove, and handle linkage.
-- **Path editing**: In Direct Select mode the hit priority is handle > anchor > segment > object; supports multi-select, marquee select, move, copy, rotate/scale (around bounds center), apply appearance, and delete.
-- **Text tool**: Click to place point text and edit it in an HTML overlay that mirrors the text's typography at the current zoom; commits on Escape, a click outside, or a tool switch; double-click a text item with a select tool to re-enter editing. Font family, size, weight, italic and alignment are styled from the properties panel and applied to all selected text items.
-- **Annotation tools**: Callout annotations with rich text rendering and persisted content/style models.
-- **Live shapes**: Rectangle, rounded rectangle, ellipse, polygon, line, arc, spiral, rectangular grid, and polar grid, with live preview (not added to history until confirmed).
-- **Transform & panels**: Rotate/mirror tools share reference points + snapping; the transform panel (X/Y/W/H/rotate/flip) is based on nine-point reference anchors.
-- **SVG import/export**: Import automatically strips clip masks and fits the viewport; export hides editor layers (overlay/annotation) to avoid leaking editing chrome.
-- **Layer management**: Layer CRUD, visibility/lock/opacity, isolated scopes, and thumbnails, located in the right-side panel tabs.
-- **History**: Geometry snapshots via `project.exportJSON()` plus UI metadata; drag transactions are merged while discrete operations are committed; Ctrl+Z to undo, Ctrl+Shift+Z / Ctrl+Y to redo.
-- **Offset Path**: Illustrator-style inside/outside strokes (based on paperjs-offset).
-- **Ripple FX** and a native vector clipboard bridge (local HTTP + PowerShell accessing the system clipboard) among other extensions.
+- **Pen & Curvature tools**: Dual Pen/Curvature tools with rubber-band preview, hover states, anchor add/delete/convert, handle linkage, 45° Shift constraints and Alt handle breaking.
+- **Path editing**: In Direct Select mode the hit priority is handle > anchor > object; supports anchor sub-selection, marquee select, move, duplicate and delete.
+- **Text tools**: Point, area (dragged frame with canvas-measured word wrap), path-attached (one rotated glyph per character) and vertical text. All modes edit through an HTML overlay that mirrors the typography at the current zoom; sessions commit on Escape, a click outside, or a tool switch; double-click a text item with a select tool to re-enter editing. Font family, size, weight, italic and alignment come from the properties panel.
+- **Live shapes**: Rectangle, rounded rectangle, ellipse and line with live preview (not added to history until confirmed). Shift constrains proportions (square/circle, 45° lines), Alt draws from the center.
+- **Transform**: Selection bounding-box scale handles plus a rotate knob (Shift = uniform / 45° snap), and a properties panel with X/Y/W/H, rotate-by degrees, flip H/V and a nine-point reference anchor that drives panel edits.
+- **Align & Pathfinder**: Six align modes and horizontal/vertical distribution for multi-selections (align-to-selection); unite / subtract / intersect / exclude boolean operations on selected paths.
+- **Snapping**: Snap pointer and placement to ruler guides, grid crossings and anchor points, plus smart edge/center alignment guides while dragging. Every source has a toggle in Canvas Settings.
+- **Clipboard**: Instant internal copy/cut/paste plus OS clipboard SVG exchange (copy out to other apps, paste SVG in), on Ctrl+C/X/V, the Edit menu and the canvas context menu.
+- **Save / Open / Export**: Versioned JSON project files (Save/Open truly round-trip the document); SVG import/export (editor layers stay out of exports); raster PNG/JPEG/WebP export with 1x–3x scale and all-artwork/selection choice.
+- **Layers**: Create/delete/rename, visibility/lock/opacity, top-first drag reorder, expandable per-layer object tree with select/visibility/lock per object.
+- **Object ops**: Bring to front/back plus stepwise forward/backward, group/ungroup, lock/unlock-all, hide/show-all, select same fill/stroke. Locked items are skipped by selection and tools; hidden items never hit-test.
+- **Appearance**: Single fill + stroke with caps, joins, miter limit, dash patterns and all 16 canvas blend modes, plus opacity. Applied live from the properties panel to the selection and to subsequently drawn shapes.
+- **Guides & grid**: Ruler drag-out guides with move/delete (drag back to a ruler), line grid with size control, transparent checkerboard background.
+- **History**: Whole-project JSON snapshots with a 100-entry limit; Ctrl+Z to undo, Ctrl+Shift+Z / Ctrl+Y to redo.
+- **Annotation tools**: Callout annotations with persisted content/style models.
+
+Not yet implemented: gradient/pattern fills, masks, multiple artboards, bitmap placement, PDF export, pencil/brush/eraser/scissors tools, symbols, and multi-fill/stroke appearance stacks.
 
 ---
 
@@ -27,12 +33,11 @@ A vector graphics editor built with **Vue 3 + TypeScript + Paper.js**, offering 
 | Category | Choice |
 | --- | --- |
 | Frontend framework | Vue 3 + TypeScript |
-| Graphics engine | Paper.js (`paper` ^0.12.17) + `paperjs-offset` |
+| Graphics engine | Paper.js (`paper` ^0.12.17) |
 | State management | Pinia |
-| UI components | Element Plus 2.14 (on-demand) + iconfont icons |
+| UI components | Element Plus 2.14 + `@element-plus/icons-vue` |
 | Build tool | Vite 5 + `vue-tsc` type checking |
-| Testing | Node built-in test runner `node --test` (Node ≥ 22.6 strips TS types natively) |
-| E2E | Playwright |
+| Testing | `npm test` runs `scripts/check-engine-size.js` (no committed test suite) |
 
 ---
 
@@ -40,8 +45,8 @@ A vector graphics editor built with **Vue 3 + TypeScript + Paper.js**, offering 
 
 ### Requirements
 
-- **Node.js ≥ 22.6** (tests rely on Node natively stripping TS types; 22 LTS recommended)
-- Package manager: npm (this repository does not lock `package-lock.json`, so `npm ci` will fail; use `npm install`)
+- **Node.js ≥ 22.6** (per `engines`; 22 LTS recommended)
+- Package manager: npm (`package-lock.json` is gitignored and untracked, so `npm ci` will fail; use `npm install`)
 
 ### Install
 
@@ -62,20 +67,13 @@ npm run build        # Run type checking (vue-tsc -b) first, then Vite productio
 npm run preview      # Preview the production build locally
 ```
 
-### Run tests
+### Run checks
 
 ```bash
-npm test             # Run all tests under tests/ (runs the engine size check first)
+npm test             # Engine size check (scripts/check-engine-size.js)
 ```
 
-> `npm test` enumerates each test file explicitly in `package.json`; new tests must be added to that script.
-
-### Other scripts
-
-```bash
-npm run init:icon           # Fetch iconfont project resources → src/assets/iconList.{ts,js}
-npm run native:clipboard    # Start the local HTTP bridge for system clipboard vector paste
-```
+Available scripts are exactly `dev`, `build`, `preview` and `test` (see `package.json`).
 
 ---
 
@@ -83,50 +81,47 @@ npm run native:clipboard    # Start the local HTTP bridge for system clipboard v
 
 ```
 src/
-├── editor/                 # Editor core (engine.ts hub + store/types)
-│   ├── engine.ts           # EditorEngine: Vue/Pinia ↔ Paper.js bridge (incl. <canvas>)
-│   ├── store.ts            # Pinia store (UI/metadata only, no geometry)
-│   ├── types.ts            # ToolName / StyleState / LayerMeta / Guide etc.
-│   ├── overlay/            # Anchor/handle/marquee chrome rendering
-│   ├── style/              # Pure style application and stroke alignment
-│   ├── path-drawing/       # Pen + curvature tools
-│   ├── text/               # Text subsystem (area/path/shape/vertical + font library + character styles)
-│   ├── eraser/             # Eraser / scissors
-│   ├── shapes/             # Live shape tools
-│   ├── annotation/         # Annotation tools
-│   ├── selection/          # Selection/anchor/transform/layer panel
-│   ├── history/            # History
-│   ├── layer/              # Layer tree/hierarchy/thumbnails
-│   ├── svg/                # SVG import/export
-│   └── view-controller.ts  # Zoom/pan
-├── components/             # Vue components (subdirectories by subsystem)
-│   ├── canvas/  ToolRail.vue  TopBar.vue  LayerPanel.vue  PropertyPanel.vue ...
-├── assets/                 # iconList.{ts,js} (icons, generated by init:icon)
-├── api/                    # Local API credentials (gitignored)
-└── main.ts                 # Entry, injects iconfont <symbol>
-tests/                      # Tests (gitignored, local only)
-docs/                       # Subsystem design documents
-scripts/                    # Build/check/icon scripts
+├── editor/                          # Editor core
+│   ├── engine.ts                    # EditorEngine: document ops + Vue/Pinia ↔ Paper.js bridge
+│   ├── store.ts / store-types.ts    # Pinia store (UI/metadata only, no geometry)
+│   ├── types.ts                     # ToolName / StyleState / LayerMeta / Guide / Snap / ... toolbox
+│   ├── shortcuts.ts                 # Global tool-switch and clipboard/history shortcuts
+│   ├── register-controllers.ts      # One place where every tool controller is registered
+│   ├── view-controller.ts           # Zoom/pan (hand + zoom tools)
+│   ├── path-drawing/                # Pen + curvature + anchor tools, anchor chrome
+│   ├── selection/                   # Select / direct-select (bbox transform, marquee, guides)
+│   ├── shapes/                      # Live shape tools
+│   ├── text/                        # Point / area / path / vertical text controller
+│   ├── snap/                        # Pointer snapping + smart alignment guides
+│   ├── guides/                      # Ruler guide interaction
+│   └── annotation/                  # Callout annotations
+├── components/
+│   ├── canvas/CanvasHost.vue        # Canvas + rulers + context menu + engine bootstrap
+│   ├── menus/TopBar.vue             # File/Edit/Object/View menus, settings, export dialogs
+│   ├── panels/LayerPanel.vue        # Layers (reorder, opacity, object tree)
+│   ├── panels/PropertyPanel.vue     # Fill/stroke/appearance/text/transform/align/pathfinder
+│   └── toolbar/ToolRail.vue         # Tool buttons
+└── main.ts                          # Entry (Pinia + Element Plus, mounts App)
+scripts/
+└── check-engine-size.js             # Size check run by npm test
 ```
 
 ---
 
 ## Architecture Highlights
 
-- **The single source of truth for geometry is Paper.js; Pinia stores only metadata.** The engine reads and writes Paper.js objects directly and syncs the UI panels via `setSelection()` / `syncLayers()` / `clearSelection()`.
-- **Tool/subsystem logic is delegated to separate controller modules**; the engine keeps only thin proxies and one-line delegate stubs. New tool logic must go into a controller, not the engine monolith.
-- User layers are marked `layer.data.isUserLayer = true`; overlay / annotation layers are hidden during SVG export.
-- The entry `App.vue` constructs the `EditorEngine` once and `provide('engine', engine)`; components access it via `inject<EditorEngine>('engine')`.
+- **The single source of truth for geometry is Paper.js; Pinia stores only metadata.** The engine reads and writes Paper.js objects directly and syncs the UI panels via selection/layer sync calls.
+- **Tool interaction logic lives in controller modules** (`selection/`, `path-drawing/`, `text/`, `shapes/`, `snap/`, `guides/`, `annotation/`); document-level operations (history, clipboard, boolean ops, raster export, save/open, layer and object ops) live on the engine. New tool behavior belongs in a controller.
+- User layers are marked `layer.data.isUserLayer = true` (user items carry `data.id` / `data.isUserItem`); grid, overlay, annotation and guide layers are hidden during SVG/raster export.
+- The entry `App.vue` constructs the `EditorEngine` once and `provide('engine', engine)`; components access it via `inject<Ref<EditorEngine>>('engine')`.
 
 ---
 
 ## Notes
 
-- `tests/` and `src/api/` are gitignored and intended for local use (test suites are not committed; API credentials are not committed).
-- `scripts/iconBuild.ts` contains hardcoded iconfont credentials and is a one-time init tool, not an app runtime dependency.
-- `package-lock.json` is not ignored but is **untracked**, so `npm ci` will fail; dependency versions are not locked.
-- Do not hand-edit generated files: `components.d.ts`, `auto-imports.d.ts`, `vite.config.js`, and each `tsconfig*.tsbuildinfo`.
-- `CLAUDE.md` / `AGENTS.md` are synced copies of the same guidance; updating one requires updating the other.
+- `tests/` and `src/api/` are gitignored and intended for local use (no test suite or credentials are committed).
+- `package-lock.json` is gitignored and untracked, so `npm ci` will fail; dependency versions are not locked.
+- Build outputs (`dist/`) and `*.tsbuildinfo` files are generated — do not hand-edit them.
 
 ---
 
