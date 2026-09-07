@@ -73,6 +73,7 @@
           <template #dropdown>
             <el-dropdown-menu>
               <el-dropdown-item command="fitAll">Fit to Window</el-dropdown-item>
+              <el-dropdown-item command="zoomSelection" :disabled="!store.hasSelection">Zoom to Selection</el-dropdown-item>
               <el-dropdown-item command="zoomIn">Zoom In</el-dropdown-item>
               <el-dropdown-item command="zoomOut">Zoom Out</el-dropdown-item>
               <el-dropdown-item command="zoom100" divided>Actual Size</el-dropdown-item>
@@ -748,6 +749,9 @@ function onViewCmd(cmd: string) {
   switch (cmd) {
     case 'fitAll':
       e.fitToContent()
+      break
+    case 'zoomSelection':
+      e.zoomToSelection()
       break
     case 'zoomIn':
       e.zoomAt(1.2, e.canvas.width / 2, e.canvas.height / 2)

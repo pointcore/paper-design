@@ -702,27 +702,30 @@ export class EditorEngine {
   }
 
   fitToContent() {
-    const items = this.getUserItems()
-    if (items.length === 0) return
-    const bounds = items[0].bounds
-    items.forEach((item, i) => {
-      if (i > 0) bounds.include(item.bounds)
-    })
-    if (bounds.width > 0 && bounds.height > 0) {
-      const padding = 50
-      const zoom = Math.min(
-        (this.canvas.width - padding * 2) / bounds.width,
-        (this.canvas.height - padding * 2) / bounds.height,
-        100
-      )
-      this.zoom = zoom
-      this.scope.view.zoom = zoom
-      this.center = { x: -bounds.center.x * zoom + this.canvas.width / 2, y: -bounds.center.y * zoom + this.canvas.height / 2 }
-      this.scope.view.update()
-      this.refreshGrid()
-      this.store.updateView({ zoom: this.zoom })
-      this.emitViewChange()
-    }
+    this.fitBounds(this.unitedBoundsOf(this.getUserItems()))
+  }
+
+  /** Fit the view to the current selection bounds (View menu). */
+  zoomToSelection(): void {
+    this.fitBounds(this.getSelectionBounds())
+  }
+
+  /** Zoom the view to frame bounds with padding (ignores empty bounds). */
+  private fitBounds(bounds: paper.Rectangle | null): void {
+    if (!bounds || bounds.width <= 0 || bounds.height <= 0) return
+    const padding = 50
+    const zoom = Math.min(
+      (this.canvas.width - padding * 2) / bounds.width,
+      (this.canvas.height - padding * 2) / bounds.height,
+      100
+    )
+    this.zoom = zoom
+    this.scope.view.zoom = zoom
+    this.center = { x: -bounds.center.x * zoom + this.canvas.width / 2, y: -bounds.center.y * zoom + this.canvas.height / 2 }
+    this.scope.view.update()
+    this.refreshGrid()
+    this.store.updateView({ zoom: this.zoom })
+    this.emitViewChange()
   }
 
   getUserItems(): paper.Item[] {
