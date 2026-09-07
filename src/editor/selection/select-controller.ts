@@ -285,6 +285,19 @@ export class SelectController {
           engine.selectItem(item, true)
         }
 
+        if (event.modifiers.alt && engine.getSelection().length > 0) {
+          // Alt-drag duplicates first; the copies become the drag set.
+          // Records Duplicate up front so the copies stay undoable even
+          // without a drag (release adds the usual Move entry).
+          const clones = engine.copySelected()
+          engine.clearSelection()
+          clones.forEach((clone) => {
+            clone.selected = true
+          })
+          engine.syncSelectionToStore()
+          engine.pushHistory('Duplicate')
+        }
+
         this.isDragging = true
         this.dragItems = engine.getSelection()
         this.dragItemStartPositions = this.dragItems.map(
@@ -323,7 +336,7 @@ export class SelectController {
       } else if (this.isMarquee) {
         this.updateMarquee(event.point.x, event.point.y)
       } else if (this.isDragging && this.dragItems.length > 0) {
-        this.dragObjects(event.point)
+        this.dragObjects(event.point, event.modifiers)
       }
       store.setCursorPos(event.point.x, event.point.y)
       this.refreshChrome()
@@ -1032,9 +1045,10 @@ export class SelectController {
    * Move grabbed objects with pointer snapping plus smart alignment.
    * Positions recompute from the grab-time snapshot every step: the pointer
    * follows the snapped cursor, then the smart correction nudges the united
-   * bounds onto nearby edges / centers and draws its guide lines.
+   * bounds onto nearby edges / centers and draws its guide lines. Holding
+   * Shift constrains the total shift to the dominant axis.
    */
-  private dragObjects(point: paper.Point) {
+  private dragObjects(point: paper.Point, modifiers: any) {
     const engine = this.engine
     if (!engine || this.dragItems.length === 0) return
     if (!this.dragPointerStart || !this.dragStartBounds) return
@@ -1048,7 +1062,13 @@ export class SelectController {
       this.dragStartBounds.height
     )
     const correction = this.snapService.alignDraggedBounds(candidate, this.dragItems)
-    const shift = new engine.scope.Point(dx + correction.dx, dy + correction.dy)
+    let totalX = dx + correction.dx
+    let totalY = dy + correction.dy
+    if (modifiers && modifiers.shift && (totalX !== 0 || totalY !== 0)) {
+      if (Math.abs(totalX) > Math.abs(totalY)) totalY = 0
+      else totalX = 0
+    }
+    const shift = new engine.scope.Point(totalX, totalY)
     this.dragItems.forEach((item, index) => {
       if (item.locked) return
       const start = this.dragItemStartPositions[index]
