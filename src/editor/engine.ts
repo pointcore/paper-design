@@ -1287,6 +1287,25 @@ export class EditorEngine {
   }
 
   /**
+   * Skew every unlocked selected item by degrees around a pivot (default:
+   * united selection bounds center). Callers record history.
+   */
+  skewSelection(skewXDeg: number, skewYDeg: number, pivot?: paper.Point): void {
+    if (!Number.isFinite(skewXDeg) || !Number.isFinite(skewYDeg)) return
+    if (Math.abs(skewXDeg) < 1e-9 && Math.abs(skewYDeg) < 1e-9) return
+    const items = this.getSelection().filter((item) => !item.locked)
+    if (items.length === 0) return
+    const center = pivot ?? this.getSelectionBounds()?.center
+    if (!center) return
+    const skew = new this.scope.Point(skewXDeg, skewYDeg)
+    for (const item of items) {
+      item.skew(skew, center)
+      this.refreshItemGradient(item)
+    }
+    this.scope.view.update()
+  }
+
+  /**
    * Mirror every unlocked selected item across a pivot. Horizontal flips
    * left/right, vertical flips top/bottom. The pivot defaults to the
    * reference-point pivot. Callers record history.

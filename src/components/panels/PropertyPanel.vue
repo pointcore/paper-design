@@ -178,6 +178,11 @@
             <el-button size="small" class="icon-btn" :type="store.transform.flipH ? 'primary' : ''" title="Flip Horizontal" @click="onFlipH">⇔</el-button>
             <el-button size="small" class="icon-btn" :type="store.transform.flipV ? 'primary' : ''" title="Flip Vertical" @click="onFlipV">⇕</el-button>
           </div>
+          <div class="prop-row">
+            <span class="prop-label-sm">Skew</span>
+            <el-input-number v-model="skewXBy" :precision="1" size="small" controls-position="right" placeholder="X deg" @change="onSkewChange" />
+            <el-input-number v-model="skewYBy" :precision="1" size="small" controls-position="right" placeholder="Y deg" @change="onSkewChange" />
+          </div>
         </div>
       </div>
 
@@ -509,6 +514,9 @@ const posW = ref(0)
 const posH = ref(0)
 // Relative rotation in degrees applied on change, then reset to zero.
 const rotateBy = ref(0)
+// Relative skew in degrees applied on change, then reset to zero.
+const skewXBy = ref(0)
+const skewYBy = ref(0)
 
 // Align target: the selection itself or the active artboard.
 const alignTarget = ref<'selection' | 'board'>('selection')
@@ -864,6 +872,19 @@ function onRotateByChange(val: number | undefined) {
   e.rotateSelection(val, pivot)
   e.pushHistory('Rotate')
   rotateBy.value = 0
+}
+
+function onSkewChange() {
+  const e = getEngine()
+  const skewX = skewXBy.value || 0
+  const skewY = skewYBy.value || 0
+  skewXBy.value = 0
+  skewYBy.value = 0
+  if (!e || (skewX === 0 && skewY === 0)) return
+  const pivot = e.selectionReferencePivot() ?? e.getSelectionBounds()?.center
+  if (!pivot) return
+  e.skewSelection(skewX, skewY, pivot)
+  e.pushHistory('Skew')
 }
 
 function onFlipH() {
