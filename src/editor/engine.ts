@@ -759,6 +759,35 @@ export class EditorEngine {
     this.pushHistory(name)
   }
 
+  /**
+   * Move a user layer to a position in the user band (0 = bottom).
+   * Only permutes user layers via pairwise stacking, so the grid, guide
+   * and overlay layers keep their slots. Callers mirror the store order.
+   */
+  moveUserLayer(layerId: string, toUserIndex: number): void {
+    const users = this.project.layers.filter((l) => (l.data as any)?.isUserLayer)
+    const from = users.findIndex((l) => (l.data as any)?.layerId === layerId)
+    if (from < 0) return
+    const clamped = Math.min(users.length - 1, Math.max(0, toUserIndex))
+    const [moved] = users.splice(from, 1)
+    users.splice(clamped, 0, moved)
+    for (let i = 1; i < users.length; i++) {
+      users[i].insertAbove(users[i - 1])
+    }
+    this.scope.view.update()
+  }
+
+  /** Set the active user layer opacity (store stays in sync, no history). */
+  setActiveLayerOpacity(opacity: number): void {
+    const layer = this.getActiveLayer()
+    if (!layer) return
+    const clamped = Math.min(1, Math.max(0, opacity))
+    layer.opacity = clamped
+    const id = (layer.data as any)?.layerId as string | undefined
+    if (id) this.store.updateLayer(id, { opacity: clamped })
+    this.scope.view.update()
+  }
+
   // ===== Selection transform =====
 
   /** United axis-aligned bounds of the current selection, or null. */

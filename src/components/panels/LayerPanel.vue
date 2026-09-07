@@ -9,9 +9,14 @@
     </div>
 
     <div class="panel-body">
-      <div class="layer-item" v-for="layer in store.layers" :key="layer.id"
-           :class="{ active: layer.id === store.activeLayerId }"
-           @click="selectLayer(layer.id)">
+      <div class="layer-item" v-for="(layer, displayIndex) in displayedLayers" :key="layer.id"
+           :class="{ active: layer.id === store.activeLayerId, 'drop-before': dropIndex === displayIndex }"
+           draggable="true"
+           @click="selectLayer(layer.id)"
+           @dragstart="onDragStart($event, layer.id)"
+           @dragover.prevent="onDragOver($event, displayIndex)"
+           @drop="onDrop($event, displayIndex)"
+           @dragend="onDragEnd">
         <span class="layer-vis" @click.stop="toggleVisibility(layer)">
           <el-icon v-if="layer.visible" size="12"><View /></el-icon>
           <el-icon v-else size="12"><Hide /></el-icon>
@@ -27,12 +32,20 @@
           <template v-else>{{ layer.name }}</template>
         </span>
       </div>
+      <div class="drop-end" :class="{ active: dropIndex === displayedLayers.length }"
+           @dragover.prevent="onDragOver($event, displayedLayers.length)"
+           @drop="onDrop($event, displayedLayers.length)"></div>
+    </div>
+
+    <div class="layer-footer" v-if="store.activeLayer">
+      <span class="footer-label">Opacity</span>
+      <el-slider v-model="layerOpacity" :min="0" :max="100" size="small" @change="onLayerOpacityChange" />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, inject, type Ref } from 'vue'
+import { ref, computed, watch, inject, type Ref } from 'vue'
 import { Plus, Delete, View, Hide, Lock, Unlock } from '@element-plus/icons-vue'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
@@ -42,6 +55,13 @@ const engineRef = inject<Ref<EditorEngine | null>>('engine')
 
 const renamingId = ref('')
 const renameValue = ref('')
+// Displayed top-first (Illustrator order); the store keeps bottom-first
+// project order, so display indices map in reverse.
+const displayedLayers = computed(() => [...store.layers].reverse())
+// Insert-before display index while dragging (length means the bottom end).
+const dropIndex = ref(-1)
+const draggedId = ref('')
+const layerOpacity = ref(100)
 
 function getEngine() { return engineRef?.value || null }
 
@@ -126,6 +146,54 @@ function finishRename() {
   }
   renamingId.value = ''
 }
+
+function onDragStart(e: DragEvent, id: string) {
+  draggedId.value = id
+  dropIndex.value = -1
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', id)
+  }
+}
+
+function onDragOver(e: DragEvent, displayIndex: number) {
+  if (!draggedId.value) return
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+  dropIndex.value = displayIndex
+}
+
+function onDrop(e: DragEvent, displayIndex: number) {
+  e.preventDefault()
+  const id = draggedId.value
+  onDragEnd()
+  if (!id) return
+  // Work in bottom-first store order, then mirror to the paper project.
+  const order = [...store.layers]
+  const from = order.findIndex((l) => l.id === id)
+  if (from < 0) return
+  order.splice(from, 1)
+  const to = Math.min(order.length, Math.max(0, order.length - displayIndex))
+  if (to === from) return
+  store.reorderLayer(from, to)
+  getEngine()?.moveUserLayer(id, to)
+}
+
+function onDragEnd() {
+  draggedId.value = ''
+  dropIndex.value = -1
+}
+
+function syncOpacityFromStore() {
+  const active = store.activeLayer
+  layerOpacity.value = Math.round((active?.opacity ?? 1) * 100)
+}
+
+function onLayerOpacityChange(val: number) {
+  getEngine()?.setActiveLayerOpacity(val / 100)
+}
+
+watch(() => store.activeLayerId, syncOpacityFromStore, { immediate: true })
+watch(() => store.layers.map((l) => `${l.id}:${l.opacity}`).join(','), syncOpacityFromStore)
 </script>
 
 <style scoped>
@@ -185,6 +253,32 @@ function finishRename() {
 .layer-item.active {
   background: #3a5a8c;
   color: #fff;
+}
+
+.layer-item.drop-before {
+  box-shadow: inset 0 2px 0 #4a90d9;
+}
+
+.drop-end {
+  height: 8px;
+}
+
+.drop-end.active {
+  box-shadow: inset 0 -2px 0 #4a90d9;
+}
+
+.layer-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-top: 1px solid #3a3a3a;
+}
+
+.footer-label {
+  font-size: 12px;
+  color: #aaa;
+  flex-shrink: 0;
 }
 
 .layer-vis,
