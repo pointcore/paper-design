@@ -55,15 +55,33 @@
 
       <div class="prop-section">
         <div class="prop-label">Transform</div>
+        <div class="prop-row">
+          <span class="prop-label-sm">Ref</span>
+          <div class="ref-grid">
+            <div
+              v-for="rp in refPoints"
+              :key="rp"
+              class="ref-cell"
+              :class="{ active: store.referencePoint === rp }"
+              @click="onReferencePointChange(rp)"
+            />
+          </div>
+        </div>
         <div class="prop-grid">
           <span class="prop-label-sm">X</span>
           <el-input-number v-model="posX" :precision="1" size="small" @change="onTransformChange" />
           <span class="prop-label-sm">Y</span>
           <el-input-number v-model="posY" :precision="1" size="small" @change="onTransformChange" />
           <span class="prop-label-sm">W</span>
-          <el-input-number v-model="posW" :precision="1" size="small" @change="onTransformChange" />
+          <el-input-number v-model="posW" :precision="1" :min="0.1" size="small" @change="onTransformChange" />
           <span class="prop-label-sm">H</span>
-          <el-input-number v-model="posH" :precision="1" size="small" @change="onTransformChange" />
+          <el-input-number v-model="posH" :precision="1" :min="0.1" size="small" @change="onTransformChange" />
+        </div>
+        <div class="prop-row">
+          <span class="prop-label-sm">Rotate</span>
+          <el-input-number v-model="rotateBy" :precision="1" size="small" placeholder="deg" @change="onRotateByChange" />
+          <el-button size="small" :type="store.transform.flipH ? 'primary' : ''" @click="onFlipH">Flip H</el-button>
+          <el-button size="small" :type="store.transform.flipV ? 'primary' : ''" @click="onFlipV">Flip V</el-button>
         </div>
       </div>
     </div>
@@ -74,7 +92,7 @@
 import { ref, watch, inject, type Ref } from 'vue'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
-import type { TextAlign } from '../../editor/types'
+import type { ReferencePoint, TextAlign } from '../../editor/types'
 
 const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
@@ -88,6 +106,15 @@ const posX = ref(0)
 const posY = ref(0)
 const posW = ref(0)
 const posH = ref(0)
+// Relative rotation in degrees applied on change, then reset to zero.
+const rotateBy = ref(0)
+
+// Nine-point reference anchors in grid order.
+const refPoints: ReferencePoint[] = [
+  'top-left', 'top-center', 'top-right',
+  'middle-left', 'center', 'middle-right',
+  'bottom-left', 'bottom-center', 'bottom-right',
+]
 
 // ---- Text properties ----
 
@@ -252,35 +279,92 @@ function onOpacityChange(val: number) {
 function onTransformChange() {
   const e = getEngine()
   if (!e) return
+  if (!Number.isFinite(posW.value) || !Number.isFinite(posH.value)) return
+  if (posW.value <= 0 || posH.value <= 0) return
+  // X/Y address the reference point; W/H scale about it so it stays fixed.
+  const ref = store.referencePoint
   const items = e.getSelection()
   items.forEach((item: any) => {
+    if (item.locked) return
     const b = item.bounds
-    const scaleX = b.width !== 0 ? posW.value / b.width : 1
-    const scaleY = b.height !== 0 ? posH.value / b.height : 1
-    item.position = new e!.scope.Point(
-      posX.value + posW.value / 2,
-      posY.value + posH.value / 2
-    )
-    item.scale(scaleX, scaleY)
+    if (!b || b.width <= 0 || b.height <= 0) return
+    const anchor = e.referencePointForRect(b, ref)
+    const dx = posX.value - anchor.x
+    const dy = posY.value - anchor.y
+    if (dx !== 0 || dy !== 0) {
+      item.position = item.position.add(new e!.scope.Point(dx, dy))
+    }
+    const current = item.bounds
+    const scaleX = current.width !== 0 ? posW.value / current.width : 1
+    const scaleY = current.height !== 0 ? posH.value / current.height : 1
+    item.scale(scaleX, scaleY, new e!.scope.Point(posX.value, posY.value))
   })
   e.scope.view.update()
   e.pushHistory('Transform')
 }
 
-// `immediate` covers the panel mounting after a selection already exists
-// (the panel is v-if'd on hasSelection, so its first selection change is
-// missed without it).
-watch(() => store.selectedItemIds, () => {
+function onReferencePointChange(point: ReferencePoint) {
+  store.setReferencePoint(point)
+  // X/Y display follows the reference point, so resync the panel.
+  syncTransformFromSelection()
+}
+
+function onRotateByChange(val: number | undefined) {
+  const e = getEngine()
+  if (!e || !val) {
+    rotateBy.value = 0
+    return
+  }
+  const pivot = e.selectionReferencePivot() ?? e.getSelectionBounds()?.center
+  if (!pivot) {
+    rotateBy.value = 0
+    return
+  }
+  e.rotateSelection(val, pivot)
+  e.pushHistory('Rotate')
+  rotateBy.value = 0
+}
+
+function onFlipH() {
+  const e = getEngine()
+  if (!e) return
+  const pivot = e.selectionReferencePivot() ?? e.getSelectionBounds()?.center
+  if (!pivot) return
+  e.flipSelection('horizontal', pivot)
+  e.pushHistory('Flip Horizontal')
+}
+
+function onFlipV() {
+  const e = getEngine()
+  if (!e) return
+  const pivot = e.selectionReferencePivot() ?? e.getSelectionBounds()?.center
+  if (!pivot) return
+  e.flipSelection('vertical', pivot)
+  e.pushHistory('Flip Vertical')
+}
+
+/** Read the first selected item bounds into the transform fields. */
+function syncTransformFromSelection() {
   const e = getEngine()
   if (!e || !store.hasSelection) return
   const items = e.getSelection()
   if (items.length === 0) return
   const item = items[0] as any
   const b = item.bounds
-  posX.value = Math.round(b.x * 10) / 10
-  posY.value = Math.round(b.y * 10) / 10
+  if (!b) return
+  const anchor = e.referencePointForRect(b, store.referencePoint)
+  posX.value = Math.round(anchor.x * 10) / 10
+  posY.value = Math.round(anchor.y * 10) / 10
   posW.value = Math.round(b.width * 10) / 10
   posH.value = Math.round(b.height * 10) / 10
+  rotateBy.value = 0
+}
+
+// `immediate` covers the panel mounting after a selection already exists
+// (the panel is v-if'd on hasSelection, so its first selection change is
+// missed without it).
+watch(() => store.selectedItemIds, () => {
+  syncTransformFromSelection()
   syncTextFromSelection()
 }, { immediate: true })
 </script>
@@ -352,5 +436,29 @@ watch(() => store.selectedItemIds, () => {
   grid-template-columns: 24px 1fr;
   gap: 4px;
   align-items: center;
+}
+
+.ref-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 14px);
+  grid-template-rows: repeat(3, 14px);
+  gap: 2px;
+}
+
+.ref-cell {
+  width: 14px;
+  height: 14px;
+  border: 1px solid #555;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.ref-cell:hover {
+  border-color: #fff;
+}
+
+.ref-cell.active {
+  background: #4a90d9;
+  border-color: #4a90d9;
 }
 </style>

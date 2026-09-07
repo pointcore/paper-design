@@ -14,6 +14,27 @@ import type { TextController } from '../text/text-controller'
 
 type EditMode = 'select' | 'direct-select'
 
+/** Bounding-box transform handle in select mode (plus the rotate knob). */
+type TransformHandle =
+  | 'none'
+  | 'topLeft' | 'topCenter' | 'topRight'
+  | 'middleLeft' | 'middleRight'
+  | 'bottomLeft' | 'bottomCenter' | 'bottomRight'
+  | 'rotate'
+
+/** Hover / drag cursor per transform handle. */
+const TRANSFORM_CURSORS: Record<Exclude<TransformHandle, 'none'>, string> = {
+  topLeft: 'nwse-resize',
+  bottomRight: 'nwse-resize',
+  topRight: 'nesw-resize',
+  bottomLeft: 'nesw-resize',
+  topCenter: 'ns-resize',
+  bottomCenter: 'ns-resize',
+  middleLeft: 'ew-resize',
+  middleRight: 'ew-resize',
+  rotate: 'grab',
+}
+
 export class SelectController {
   engine: EditorEngine | null = null
   chrome: AnchorChrome = new AnchorChrome()
@@ -28,7 +49,7 @@ export class SelectController {
 
   // Direct-select anchor editing state.
   private mode: EditMode = 'select'
-  private grab: 'none' | 'anchor' | 'anchor-group' | 'handle' | 'object' | 'guide' = 'none'
+  private grab: 'none' | 'anchor' | 'anchor-group' | 'handle' | 'object' | 'guide' | 'transform' = 'none'
   private grabSegmentIndex = -1
   private grabIsIn = false
   private lastSegmentCount = -1
@@ -45,6 +66,16 @@ export class SelectController {
   private marqueeShift = false
   // Reference point for group anchor translation.
   private dragStartPoint: { x: number; y: number } | null = null
+
+  // Bounding-box transform drag state (select mode).
+  private transformHandle: TransformHandle = 'none'
+  private transformKind: 'scale' | 'rotate' | 'none' = 'none'
+  private transformItems: paper.Item[] = []
+  private transformPivot: paper.Point | null = null
+  private transformCenter: paper.Point | null = null
+  private transformLastPoint: { x: number; y: number } | null = null
+  private transformLastAngle = 0
+  private transformMoved = false
 
   // Paths whose native paper.js selected-item decoration (the blue bounding
   // box + solid corner/segment squares) we suppress while they are shown via
@@ -89,6 +120,7 @@ export class SelectController {
     this.restoreAllNativeSelections()
     this.mode = store.tool === 'direct-select' ? 'direct-select' : 'select'
     this.clearAnchorState()
+    this.resetTransformDrag()
     this.grabGuide = null
     this.guideOriginalPos = 0
     this.grabPath = null
@@ -107,6 +139,18 @@ export class SelectController {
     this.lastSegmentCount = -1
     this.grabPath = null
     this.dragStartPoint = null
+  }
+
+  /** Drop any in-progress bounding-box transform drag state. */
+  private resetTransformDrag() {
+    this.transformHandle = 'none'
+    this.transformKind = 'none'
+    this.transformItems = []
+    this.transformPivot = null
+    this.transformCenter = null
+    this.transformLastPoint = null
+    this.transformLastAngle = 0
+    this.transformMoved = false
   }
 
   private getNativeEvent(event: paper.ToolEvent): MouseEvent {
@@ -199,6 +243,14 @@ export class SelectController {
       // Not clicking a guide -> clear guide selection.
       this.guides.clearSelection()
 
+      // In select mode, bounding-box transform handles take priority over
+      // object hit testing so scale / rotate drags start reliably.
+      if (this.mode === 'select' && this.tryGrabTransformHandle(event)) {
+        engine.store.setDragging(true)
+        this.refreshChrome()
+        return
+      }
+
       const hitResult = this.hitTest(event.point)
 
       if (hitResult) {
@@ -241,7 +293,9 @@ export class SelectController {
 
     scope.tool.onMouseDrag = (event: paper.ToolEvent) => {
       const store = engine.store
-      if (this.grab === 'guide' && this.grabGuide) {
+      if (this.grab === 'transform') {
+        this.dragTransform(event.point, event.modifiers)
+      } else if (this.grab === 'guide' && this.grabGuide) {
         this.dragGuide(event.point)
       } else if (this.mode === 'direct-select' && (this.grab === 'anchor' || this.grab === 'anchor-group')) {
         this.dragAnchor(event.point)
@@ -267,7 +321,12 @@ export class SelectController {
     }
 
     scope.tool.onMouseUp = (event: paper.ToolEvent) => {
-      if (this.grab === 'guide' && this.grabGuide) {
+      if (this.grab === 'transform') {
+        if (this.transformMoved) {
+          engine.pushHistory(this.transformKind === 'rotate' ? 'Rotate' : 'Scale')
+        }
+        this.resetTransformDrag()
+      } else if (this.grab === 'guide' && this.grabGuide) {
         this.finishGuideDrag(event)
       } else if (this.isMarquee) {
         if (this.anchorMarquee) this.finishAnchorMarquee()
@@ -292,9 +351,18 @@ export class SelectController {
 
     scope.tool.onMouseMove = (event: paper.ToolEvent) => {
       engine.store.setCursorPos(event.point.x, event.point.y)
-      // Show a move cursor when hovering over a guide.
-      const guide = engine.store.view.showGuides ? this.guides.hitTest(event.point) : null
-      engine.canvas.style.cursor = guide ? 'move' : ''
+      // Transform handle hover wins over guide hover in select mode.
+      const handleCursor =
+        this.mode === 'select' && this.grab === 'none' && !this.isMarquee
+          ? this.cursorForHandleAt(event.point)
+          : null
+      if (handleCursor) {
+        engine.canvas.style.cursor = handleCursor
+      } else {
+        // Show a move cursor when hovering over a guide.
+        const guide = engine.store.view.showGuides ? this.guides.hitTest(event.point) : null
+        engine.canvas.style.cursor = guide ? 'move' : ''
+      }
       this.refreshChrome()
     }
 
@@ -689,11 +757,11 @@ export class SelectController {
     scope.view.update()
   }
 
-  /** Redraw anchor + handle chrome for the currently edited path. */
+  /** Redraw editing chrome: bbox handles in select mode, anchors in direct-select. */
   private refreshChrome() {
     if (this.mode !== 'direct-select') {
       this.restoreAllNativeSelections()
-      this.chrome.clear()
+      this.drawSelectionBounds()
       return
     }
     const engine = this.engine
@@ -750,6 +818,197 @@ export class SelectController {
       }
     }
     scope.view.update()
+  }
+
+  // ------------------------------------------------------------------
+  // Bounding-box transform (select mode)
+  // ------------------------------------------------------------------
+
+  /** Corner / edge / rotate-knob positions for a bounds rectangle. */
+  private boundsHandlePositions(
+    bounds: paper.Rectangle
+  ): Record<Exclude<TransformHandle, 'none'>, paper.Point> {
+    const engine = this.engine
+    const scope = engine!.scope
+    const x = bounds.x
+    const y = bounds.y
+    const w = bounds.width
+    const h = bounds.height
+    const cx = x + w / 2
+    const cy = y + h / 2
+    // The rotate knob floats above the top edge with a stem line.
+    const rotateOffset = 22 / scope.view.zoom
+    return {
+      topLeft: new scope.Point(x, y),
+      topCenter: new scope.Point(cx, y),
+      topRight: new scope.Point(x + w, y),
+      middleLeft: new scope.Point(x, cy),
+      middleRight: new scope.Point(x + w, cy),
+      bottomLeft: new scope.Point(x, y + h),
+      bottomCenter: new scope.Point(cx, y + h),
+      bottomRight: new scope.Point(x + w, y + h),
+      rotate: new scope.Point(cx, y - rotateOffset),
+    }
+  }
+
+  /** Opposite pivot for a scale handle (the point that stays fixed). */
+  private oppositeHandle(handle: TransformHandle): Exclude<TransformHandle, 'none'> {
+    switch (handle) {
+      case 'topLeft': return 'bottomRight'
+      case 'topRight': return 'bottomLeft'
+      case 'bottomLeft': return 'topRight'
+      case 'bottomRight': return 'topLeft'
+      case 'topCenter': return 'bottomCenter'
+      case 'bottomCenter': return 'topCenter'
+      case 'middleLeft': return 'middleRight'
+      case 'middleRight': return 'middleLeft'
+      default: return 'rotate'
+    }
+  }
+
+  private isCornerHandle(handle: TransformHandle): boolean {
+    return (
+      handle === 'topLeft' ||
+      handle === 'topRight' ||
+      handle === 'bottomLeft' ||
+      handle === 'bottomRight'
+    )
+  }
+
+  /** Handle under a point within tolerance (rotate knob wins ties). */
+  private transformHandleAt(
+    point: paper.Point,
+    bounds: paper.Rectangle,
+    tol: number
+  ): TransformHandle {
+    const positions = this.boundsHandlePositions(bounds)
+    if (point.getDistance(positions.rotate) <= tol) return 'rotate'
+    const order: Exclude<TransformHandle, 'none' | 'rotate'>[] = [
+      'topLeft', 'topCenter', 'topRight',
+      'middleLeft', 'middleRight',
+      'bottomLeft', 'bottomCenter', 'bottomRight',
+    ]
+    for (const handle of order) {
+      if (point.getDistance(positions[handle]) <= tol) return handle
+    }
+    return 'none'
+  }
+
+  /** Clockwise pointer angle in degrees around a center point. */
+  private pointerAngle(point: paper.Point, center: paper.Point): number {
+    return (Math.atan2(point.y - center.y, point.x - center.x) * 180) / Math.PI
+  }
+
+  /** Begin a bbox transform drag when a handle is grabbed. */
+  private tryGrabTransformHandle(event: paper.ToolEvent): boolean {
+    const engine = this.engine
+    if (!engine || this.mode !== 'select') return false
+    if (engine.getSelection().length === 0) return false
+    const bounds = engine.getSelectionBounds()
+    if (!bounds || bounds.width <= 0 || bounds.height <= 0) return false
+    const tol = 7 / engine.scope.view.zoom
+    const handle = this.transformHandleAt(event.point, bounds, tol)
+    if (handle === 'none') return false
+    const positions = this.boundsHandlePositions(bounds)
+    this.transformHandle = handle
+    this.transformKind = handle === 'rotate' ? 'rotate' : 'scale'
+    this.transformItems = engine.getSelection()
+    this.transformCenter = bounds.center.clone()
+    if (handle === 'rotate') {
+      this.transformPivot = null
+      this.transformLastAngle = this.pointerAngle(event.point, bounds.center)
+    } else {
+      this.transformPivot = positions[this.oppositeHandle(handle)].clone()
+    }
+    this.transformLastPoint = { x: event.point.x, y: event.point.y }
+    this.transformMoved = false
+    this.grab = 'transform'
+    this.isDragging = true
+    this.dragStart = { x: event.point.x, y: event.point.y }
+    return true
+  }
+
+  /** Apply one step of an in-progress bbox scale / rotate drag. */
+  private dragTransform(point: paper.Point, modifiers: any) {
+    const engine = this.engine
+    if (!engine) return
+    if (this.transformKind === 'rotate' && this.transformCenter) {
+      const raw = this.pointerAngle(point, this.transformCenter)
+      let delta = raw - this.transformLastAngle
+      if (modifiers && modifiers.shift) {
+        // Snap the swept angle to 45-degree increments while Shift is held.
+        delta = snapAngle45(raw) - snapAngle45(this.transformLastAngle)
+      }
+      // Normalize across the +/-180 branch cut for smooth dragging.
+      delta = ((delta + 540) % 360) - 180
+      if (Math.abs(delta) > 1e-9) {
+        engine.rotateSelection(delta, this.transformCenter)
+        this.transformMoved = true
+      }
+      this.transformLastAngle = raw
+    } else if (this.transformKind === 'scale' && this.transformPivot && this.transformLastPoint) {
+      const px = this.transformPivot.x
+      const py = this.transformPivot.y
+      const dx0 = this.transformLastPoint.x - px
+      const dy0 = this.transformLastPoint.y - py
+      let fx = Math.abs(dx0) > 1e-6 ? (point.x - px) / dx0 : 1
+      let fy = Math.abs(dy0) > 1e-6 ? (point.y - py) / dy0 : 1
+      if (!Number.isFinite(fx)) fx = 1
+      if (!Number.isFinite(fy)) fy = 1
+      fx = Math.max(-100, Math.min(100, fx))
+      fy = Math.max(-100, Math.min(100, fy))
+      if (modifiers && modifiers.shift && this.isCornerHandle(this.transformHandle)) {
+        // Constrain corner drags to uniform proportions (dominant axis wins).
+        const uniform = Math.abs(fx - 1) > Math.abs(fy - 1) ? fx : fy
+        fx = uniform
+        fy = uniform
+      }
+      if (Math.abs(fx - 1) > 1e-9 || Math.abs(fy - 1) > 1e-9) {
+        const pivot = new engine.scope.Point(px, py)
+        for (const item of this.transformItems) {
+          if (!item.parent || item.locked) continue
+          item.scale(fx, fy, pivot)
+        }
+        this.transformMoved = true
+      }
+      this.transformLastPoint = { x: point.x, y: point.y }
+    }
+    engine.store.setCursorPos(point.x, point.y)
+    this.refreshChrome()
+    engine.scope.view.update()
+  }
+
+  /** Hover cursor for the bbox handle under a point, or null. */
+  private cursorForHandleAt(point: paper.Point): string | null {
+    const engine = this.engine
+    if (!engine || engine.getSelection().length === 0) return null
+    const bounds = engine.getSelectionBounds()
+    if (!bounds || bounds.width <= 0 || bounds.height <= 0) return null
+    const tol = 7 / engine.scope.view.zoom
+    const handle = this.transformHandleAt(point, bounds, tol)
+    if (handle === 'none') return null
+    return TRANSFORM_CURSORS[handle]
+  }
+
+  /** Draw the selection bounding box with scale handles + rotate knob. */
+  private drawSelectionBounds() {
+    const engine = this.engine
+    this.chrome.clear()
+    if (!engine || this.isMarquee) return
+    const bounds = engine.getSelectionBounds()
+    if (!bounds || bounds.width <= 0 || bounds.height <= 0) return
+    const positions = this.boundsHandlePositions(bounds)
+    const order: Exclude<TransformHandle, 'none' | 'rotate'>[] = [
+      'topLeft', 'topCenter', 'topRight',
+      'middleLeft', 'middleRight',
+      'bottomLeft', 'bottomCenter', 'bottomRight',
+    ]
+    for (const handle of order) {
+      this.chrome.drawAnchor(positions[handle], handle === this.transformHandle)
+    }
+    // Stem line plus knob for rotation.
+    this.chrome.drawHandle(positions.topCenter, positions.rotate)
+    engine.scope.view.update()
   }
 
   // ------------------------------------------------------------------
@@ -918,4 +1177,12 @@ export class SelectController {
     }
     engine.scope.view.update()
   }
+}
+
+/**
+ * Snap a clockwise angle in degrees to the nearest 45-degree increment,
+ * matching the Shift-constrain convention used by the pen and shape tools.
+ */
+function snapAngle45(deg: number): number {
+  return Math.round(deg / 45) * 45
 }

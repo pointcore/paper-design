@@ -2,7 +2,7 @@
  * EditorEngine - Vue/Pinia ↔ Paper.js bridge hub
  */
 import paper from 'paper'
-import type { ToolName, StyleState, LayerMeta, HistoryEntry, GuideOrientation, ProjectFileData } from './types'
+import type { ToolName, StyleState, LayerMeta, HistoryEntry, GuideOrientation, ProjectFileData, ReferencePoint } from './types'
 import { createDefaultStyle } from './store'
 import type { EditorStore } from './store-types'
 
@@ -757,6 +757,93 @@ export class EditorEngine {
     this.historyIndex = -1
     this.store.setHistory([], -1)
     this.pushHistory(name)
+  }
+
+  // ===== Selection transform =====
+
+  /** United axis-aligned bounds of the current selection, or null. */
+  getSelectionBounds(): paper.Rectangle | null {
+    const items = this.getSelection()
+    if (items.length === 0) return null
+    let rect: paper.Rectangle | null = null
+    for (const item of items) {
+      const b = item.bounds
+      if (!b) continue
+      rect = rect ? rect.unite(b) : b.clone()
+    }
+    return rect
+  }
+
+  /** Position of a nine-point reference anchor within a rectangle. */
+  referencePointForRect(rect: paper.Rectangle, point: ReferencePoint): paper.Point {
+    const left = rect.x
+    const centerX = rect.x + rect.width / 2
+    const right = rect.x + rect.width
+    const top = rect.y
+    const centerY = rect.y + rect.height / 2
+    const bottom = rect.y + rect.height
+    switch (point) {
+      case 'top-left': return new this.scope.Point(left, top)
+      case 'top-center': return new this.scope.Point(centerX, top)
+      case 'top-right': return new this.scope.Point(right, top)
+      case 'middle-left': return new this.scope.Point(left, centerY)
+      case 'middle-right': return new this.scope.Point(right, centerY)
+      case 'bottom-left': return new this.scope.Point(left, bottom)
+      case 'bottom-center': return new this.scope.Point(centerX, bottom)
+      case 'bottom-right': return new this.scope.Point(right, bottom)
+      case 'center':
+      default: return new this.scope.Point(centerX, centerY)
+    }
+  }
+
+  /** Pivot derived from the store reference point over the selection bounds. */
+  selectionReferencePivot(): paper.Point | null {
+    const bounds = this.getSelectionBounds()
+    if (!bounds) return null
+    return this.referencePointForRect(bounds, this.store.referencePoint)
+  }
+
+  /**
+   * Rotate every unlocked selected item by an angle in degrees (clockwise
+   * positive, matching screen coordinates) around a pivot. The pivot
+   * defaults to the united selection bounds center; canvas rotation passes
+   * the center explicitly while the property panel passes the
+   * reference-point pivot. Callers record history.
+   */
+  rotateSelection(angleDeg: number, pivot?: paper.Point): void {
+    if (!Number.isFinite(angleDeg) || Math.abs(angleDeg) < 1e-9) return
+    const items = this.getSelection().filter((item) => !item.locked)
+    if (items.length === 0) return
+    const center = pivot ?? this.getSelectionBounds()?.center
+    if (!center) return
+    for (const item of items) {
+      item.rotate(angleDeg, center)
+    }
+    const next = (this.store.transform.rotation + angleDeg) % 360
+    this.store.updateTransform({ rotation: (next + 360) % 360 })
+    this.scope.view.update()
+  }
+
+  /**
+   * Mirror every unlocked selected item across a pivot. Horizontal flips
+   * left/right, vertical flips top/bottom. The pivot defaults to the
+   * reference-point pivot. Callers record history.
+   */
+  flipSelection(direction: 'horizontal' | 'vertical', pivot?: paper.Point): void {
+    const items = this.getSelection().filter((item) => !item.locked)
+    if (items.length === 0) return
+    const center = pivot ?? this.selectionReferencePivot()
+    if (!center) return
+    for (const item of items) {
+      if (direction === 'horizontal') item.scale(-1, 1, center)
+      else item.scale(1, -1, center)
+    }
+    if (direction === 'horizontal') {
+      this.store.updateTransform({ flipH: !this.store.transform.flipH })
+    } else {
+      this.store.updateTransform({ flipV: !this.store.transform.flipV })
+    }
+    this.scope.view.update()
   }
 
   // ===== Edit operations =====
