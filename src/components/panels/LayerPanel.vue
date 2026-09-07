@@ -4,6 +4,7 @@
       <span>Layers</span>
       <div class="header-actions">
         <el-icon size="14" class="action-btn" title="New Layer" @click="addLayer"><Plus /></el-icon>
+        <el-icon size="14" class="action-btn" title="Duplicate Layer" @click="duplicateLayer"><CopyDocument /></el-icon>
         <el-icon size="14" class="action-btn" title="Delete Layer" @click="removeLayer"><Delete /></el-icon>
       </div>
     </div>
@@ -66,7 +67,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, inject, type Ref } from 'vue'
-import { Plus, Delete, View, Hide, Lock, Unlock } from '@element-plus/icons-vue'
+import { Plus, Delete, View, Hide, Lock, Unlock, CopyDocument } from '@element-plus/icons-vue'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
 import type { LayerItemNode } from '../../editor/types'
@@ -188,6 +189,10 @@ function removeLayer() {
   }
   const activeId = store.activeLayerId
   e.deleteLayer(activeId)
+}
+
+function duplicateLayer() {
+  getEngine()?.duplicateLayer(store.activeLayerId)
 }
 
 function startRename(layer: any) {

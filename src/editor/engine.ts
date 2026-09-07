@@ -204,6 +204,33 @@ export class EditorEngine {
     return layer
   }
 
+  /**
+   * Duplicate a user layer with its artwork right above the source. Every
+   * document id in the copy is restamped so selection and history never
+   * confuse originals with clones.
+   */
+  duplicateLayer(layerId: string): void {
+    const source = this.project.layers.find((l) => (l.data as any)?.layerId === layerId)
+    if (!source || !(source.data as any)?.isUserLayer) return
+    const clone = source.clone({ insert: false }) as paper.Layer
+    clone.data.layerId = this.genId()
+    clone.name = `${source.name || 'Layer'} copy`
+    const restamp = (item: paper.Item): void => {
+      if ((item.data as any)?.id) (item.data as any).id = this.genId()
+      const children = (item as any).children as paper.Item[] | undefined
+      if (children) {
+        for (const child of children) restamp(child)
+      }
+    }
+    restamp(clone)
+    clone.insertAbove(source)
+    clone.activate()
+    this.syncLayersToStore()
+    this.store.setActiveLayer(clone.data.layerId as string)
+    this.pushHistory('Duplicate Layer')
+    this.scope.view.update()
+  }
+
   deleteLayer(layerId: string) {
     const layer = this.project.layers.find((l) => (l.data as any)?.layerId === layerId)
     if (layer) {
