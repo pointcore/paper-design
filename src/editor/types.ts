@@ -245,6 +245,15 @@ export interface ViewSettings {
 /** Export format */
 export type ExportFormat = 'svg' | 'png' | 'jpeg' | 'pdf' | 'webp'
 
+/** Versioned project file envelope used by Save/Open. */
+export interface ProjectFileData {
+  app: string
+  version: number
+  pageSize: { width: number; height: number }
+  /** Paper.js project JSON string captured via project.exportJSON(). */
+  snapshot: string
+}
+
 /** Import result */
 export interface ImportResult {
   success: boolean

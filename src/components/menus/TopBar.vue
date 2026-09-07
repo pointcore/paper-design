@@ -169,9 +169,49 @@ function onFileCmd(cmd: string) {
   const e = engineRef?.value
   switch (cmd) {
     case 'new':
-      store.setPageSize(1920, 1080)
-      e?.clearSelection()
+      if (e) {
+        e.newDocument(1920, 1080)
+        store.setStatusMessage('New document')
+      } else {
+        store.setPageSize(1920, 1080)
+      }
       break
+    case 'save': {
+      if (!e) break
+      try {
+        const fileText = e.exportProjectFile()
+        const blob = new Blob([fileText], { type: 'application/json' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = 'project.vec.json'
+        a.click()
+        URL.revokeObjectURL(url)
+        store.setStatusMessage('Project saved')
+      } catch (err) {
+        store.setStatusMessage('Project save failed')
+      }
+      break
+    }
+    case 'open': {
+      if (!e) break
+      const input = document.createElement('input')
+      input.type = 'file'
+      input.accept = '.json,.vec.json,application/json'
+      input.onchange = async () => {
+        const file = input.files?.[0]
+        if (!file || !e) return
+        try {
+          const text = await file.text()
+          e.importProjectFile(text)
+          store.setStatusMessage('Project opened')
+        } catch (err) {
+          store.setStatusMessage(err instanceof Error ? err.message : 'Project open failed')
+        }
+      }
+      input.click()
+      break
+    }
     case 'export':
       if (e) {
         // Temporarily hide non-user layers (grid / overlay / annotation / guides)

@@ -2,9 +2,14 @@
  * EditorEngine - Vue/Pinia ↔ Paper.js bridge hub
  */
 import paper from 'paper'
-import type { ToolName, StyleState, LayerMeta, HistoryEntry, GuideOrientation } from './types'
+import type { ToolName, StyleState, LayerMeta, HistoryEntry, GuideOrientation, ProjectFileData } from './types'
 import { createDefaultStyle } from './store'
 import type { EditorStore } from './store-types'
+
+/** Identifier stamped into every saved project file. */
+const PROJECT_FILE_APP = 'vue-vector-editor'
+/** Current project file format version. */
+const PROJECT_FILE_VERSION = 1
 
 export class EditorEngine {
   project!: paper.Project
@@ -656,6 +661,102 @@ export class EditorEngine {
       this.restoreSnapshot(this.historySnapshots[this.historyIndex])
       this.store.setHistoryIndex(this.historyIndex)
     }
+  }
+
+  // ===== Document (Save/Open/New) =====
+
+  /** Serialize the whole document into a versioned project file string. */
+  exportProjectFile(): string {
+    const data: ProjectFileData = {
+      app: PROJECT_FILE_APP,
+      version: PROJECT_FILE_VERSION,
+      pageSize: { ...this.store.pageSize },
+      snapshot: this.snapshotProject(),
+    }
+    return JSON.stringify(data)
+  }
+
+  /**
+   * Replace the current document with the content of a project file string.
+   * Throws an Error with an English message when the file is invalid.
+   */
+  importProjectFile(fileText: string): void {
+    let parsed: ProjectFileData
+    try {
+      parsed = JSON.parse(fileText) as ProjectFileData
+    } catch {
+      throw new Error('Invalid project file: not valid JSON')
+    }
+    if (!parsed || typeof parsed.snapshot !== 'string' || parsed.snapshot.length === 0) {
+      throw new Error('Invalid project file: missing snapshot')
+    }
+    if (typeof parsed.version === 'number' && parsed.version > PROJECT_FILE_VERSION) {
+      throw new Error('Unsupported project file version')
+    }
+    this.restoreSnapshot(parsed.snapshot)
+    const pageSize = parsed.pageSize
+    if (
+      pageSize &&
+      Number.isFinite(pageSize.width) &&
+      Number.isFinite(pageSize.height) &&
+      pageSize.width > 0 &&
+      pageSize.height > 0
+    ) {
+      this.store.setPageSize(pageSize.width, pageSize.height)
+    }
+    this.pointActiveLayerAtRestoredStack()
+    this.clearSelection()
+    this.clipboardItems = []
+    this.pasteCount = 0
+    this.resetHistory('Open Project')
+    this.refreshGrid()
+    this.refreshGuides()
+    this.scope.view.update()
+    this.emitViewChange()
+  }
+
+  /** Reset the document to an empty state with the given page size. */
+  newDocument(width: number, height: number): void {
+    this.project.clear()
+    this.setupProject()
+    this.initLayers()
+    this.pointActiveLayerAtRestoredStack()
+    this.store.setPageSize(width, height)
+    this.clearSelection()
+    this.clipboardItems = []
+    this.pasteCount = 0
+    this.resetHistory('New Document')
+    this.refreshGrid()
+    this.refreshGuides()
+    this.scope.view.update()
+    this.emitViewChange()
+  }
+
+  /**
+   * Point the active layer id at the restored layer stack. Import and New
+   * replace the whole layer stack, so a previously stored id may no longer
+   * exist; fall back to the topmost user layer in that case.
+   */
+  private pointActiveLayerAtRestoredStack(): void {
+    const activeId = this.store.activeLayerId
+    const stillExists =
+      !!activeId &&
+      this.project.layers.some((l) => (l.data as any)?.layerId === activeId)
+    if (stillExists) return
+    const userLayers = this.project.layers.filter((l) => (l.data as any)?.isUserLayer)
+    const last = userLayers[userLayers.length - 1]
+    if (last) {
+      this.store.setActiveLayer((last.data as any)?.layerId as string)
+    }
+  }
+
+  /** Drop the whole history stack and start over with a single entry. */
+  private resetHistory(name: string): void {
+    this.history = []
+    this.historySnapshots = []
+    this.historyIndex = -1
+    this.store.setHistory([], -1)
+    this.pushHistory(name)
   }
 
   // ===== Edit operations =====
