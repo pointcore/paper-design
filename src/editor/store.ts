@@ -118,8 +118,6 @@ export const useEditorStore = defineStore('editor', {
       rulersVisible: true,
       showGrid: false,
       showGuides: true,
-      smartGuides: true,
-      pixelPreview: false,
       transparentBackground: false,
     } as ViewSettings,
     /** Snap settings */
@@ -170,16 +168,11 @@ export const useEditorStore = defineStore('editor', {
       panelCollapsed: false,
       showLayerPanel: true,
       showPropertyPanel: true,
-      showTransformPanel: false,
       panelWidth: 240,
       rightTab: 'property' as RightPanelTab,
       settingsOpen: false,
       showNavigator: true,
     },
-    /** Clipboard copy queue */
-    clipboard: null as any,
-    /** Cutting state */
-    isCutting: false,
     /** Whether previewing (during Live Shape drag) */
     isPreviewing: false,
     /** Whether isolated group editing is active */
@@ -440,16 +433,6 @@ export const useEditorStore = defineStore('editor', {
       if (Number.isFinite(step) && step > 0) {
         this.nudgeStep = step
       }
-    },
-
-    /** Set clipboard data */
-    setClipboard(data: any) {
-      this.clipboard = data
-    },
-
-    /** Set cutting state */
-    setCutting(val: boolean) {
-      this.isCutting = val
     },
 
     /** Add a layer */

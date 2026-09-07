@@ -294,8 +294,6 @@ export interface ViewSettings {
   rulersVisible: boolean
   showGrid: boolean
   showGuides: boolean
-  smartGuides: boolean
-  pixelPreview: boolean
   /** Whether the canvas shows a transparent (checkerboard) background */
   transparentBackground: boolean
 }
