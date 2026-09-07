@@ -973,6 +973,7 @@ export class SelectController {
         for (const item of this.transformItems) {
           if (!item.parent || item.locked) continue
           item.scale(fx, fy, pivot)
+          engine.refreshItemGradient(item)
         }
         this.transformMoved = true
       }
@@ -1042,6 +1043,7 @@ export class SelectController {
       const start = this.dragItemStartPositions[index]
       if (!start) return
       item.position = start.add(shift)
+      engine.refreshItemGradient(item)
     })
     engine.store.setCursorPos(point.x, point.y)
     this.refreshChrome()

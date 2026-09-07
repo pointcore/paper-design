@@ -151,6 +151,7 @@ export class EraserController {
           continue
         }
         parent.insertChild(Math.min(Math.max(rawAt, 0), parent.children.length), result as paper.Item)
+        engine.refreshItemGradient(result as paper.Item)
         result.data.id = engine.genId()
         result.data.isUserItem = true
         carved.push(result as paper.Item)

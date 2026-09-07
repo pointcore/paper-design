@@ -798,6 +798,19 @@ export class EditorEngine {
     return { type: fill.highlight ? 'radial' : 'linear', stops }
   }
 
+  /**
+   * Re-anchor a baked gradient fill to the item's current bounds (linear
+   * keeps its direction, radial recenters). Non-gradient fills are
+   * untouched. Call after any geometry change so gradients travel with
+   * their objects instead of staying pinned to old bounds.
+   */
+  refreshItemGradient(item: paper.Item): void {
+    const params = this.gradientFromItem(item)
+    if (!params) return
+    const rebuilt = this.gradientFillForItem(item, { gradient: params } as StyleState)
+    if (rebuilt) (item as any).fillColor = rebuilt
+  }
+
   getStyleFromItem(item: paper.Item): StyleState {
     const style = createDefaultStyle()
     const s = item as any
@@ -1266,6 +1279,7 @@ export class EditorEngine {
     if (!center) return
     for (const item of items) {
       item.rotate(angleDeg, center)
+      this.refreshItemGradient(item)
     }
     const next = (this.store.transform.rotation + angleDeg) % 360
     this.store.updateTransform({ rotation: (next + 360) % 360 })
@@ -1285,6 +1299,7 @@ export class EditorEngine {
     for (const item of items) {
       if (direction === 'horizontal') item.scale(-1, 1, center)
       else item.scale(1, -1, center)
+      this.refreshItemGradient(item)
     }
     if (direction === 'horizontal') {
       this.store.updateTransform({ flipH: !this.store.transform.flipH })
@@ -1308,6 +1323,7 @@ export class EditorEngine {
     const delta = new this.scope.Point(dx, dy)
     items.forEach((item) => {
       item.position = item.position.add(delta)
+      this.refreshItemGradient(item)
     })
     this.scope.view.update()
     const now = Date.now()
@@ -1353,6 +1369,7 @@ export class EditorEngine {
       }
       if (dx !== 0 || dy !== 0) {
         item.position = item.position.add(new this.scope.Point(dx, dy))
+        this.refreshItemGradient(item)
       }
     }
     this.scope.view.update()
@@ -1386,6 +1403,7 @@ export class EditorEngine {
         ? new this.scope.Point(delta, 0)
         : new this.scope.Point(0, delta)
       item.position = item.position.add(shift)
+      this.refreshItemGradient(item)
     })
     this.scope.view.update()
   }

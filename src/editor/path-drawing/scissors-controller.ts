@@ -98,6 +98,8 @@ export class ScissorsController {
       return
     }
     const parts: paper.Item[] = [path]
+    // The kept part shrank: re-anchor its gradient to the new bounds.
+    engine.refreshItemGradient(path)
     if (second && second.parent) {
       // The split part inherits styling; re-anchor it explicitly so
       // gradients follow the new bounds.

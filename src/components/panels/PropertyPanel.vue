@@ -573,7 +573,10 @@ function applyTextStyle(apply: (item: paper.PointText) => void, label: string) {
   const e = getEngine()
   if (!e) return
   e.getSelection().forEach((item) => {
-    if (item instanceof e.scope.PointText) apply(item as paper.PointText)
+    if (item instanceof e.scope.PointText) {
+      apply(item as paper.PointText)
+      e.refreshItemGradient(item as paper.PointText)
+    }
   })
   e.scope.view.update()
   e.pushHistory(label)
@@ -826,6 +829,7 @@ function onTransformChange() {
     const scaleX = current.width !== 0 ? posW.value / current.width : 1
     const scaleY = current.height !== 0 ? posH.value / current.height : 1
     item.scale(scaleX, scaleY, new e!.scope.Point(posX.value, posY.value))
+    e.refreshItemGradient(item)
   })
   e.scope.view.update()
   e.pushHistory('Transform')
