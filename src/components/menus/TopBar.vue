@@ -12,6 +12,7 @@
               <el-dropdown-item command="save">Save</el-dropdown-item>
               <el-dropdown-item command="export" divided>Export SVG</el-dropdown-item>
               <el-dropdown-item command="exportRaster">Export Raster...</el-dropdown-item>
+              <el-dropdown-item command="exportPdf">Export PDF</el-dropdown-item>
               <el-dropdown-item command="import">Import SVG...</el-dropdown-item>
               <el-dropdown-item command="place">Place Image...</el-dropdown-item>
             </el-dropdown-menu>
@@ -388,6 +389,9 @@ function onFileCmd(cmd: string) {
       }
       exportVisible.value = true
       break
+    case 'exportPdf':
+      void onExportPdf()
+      break
     case 'export':
       if (e) {
         // Temporarily hide non-user layers (grid / overlay / annotation / guides)
@@ -505,6 +509,40 @@ function onExportRasterConfirm() {
     store.setStatusMessage(`Raster exported (${exportForm.format.toUpperCase()} ${exportForm.scale}x)`)
   } catch (err) {
     store.setStatusMessage('Raster export failed')
+  }
+}
+
+/**
+ * Export the active artboard as PDF (2x board raster embedded full-bleed).
+ * The jsPDF orientation matches the board aspect so the page keeps the
+ * exact board dimensions.
+ */
+async function onExportPdf() {
+  const e = engineRef?.value
+  if (!e) return
+  const board = store.activeArtboard ?? store.artboards[0]
+  if (!board || board.width < 1 || board.height < 1) {
+    store.setStatusMessage('Nothing to export')
+    return
+  }
+  try {
+    const dataUrl = e.exportRaster({ format: 'png', scale: 2, area: 'page' })
+    if (!dataUrl) {
+      store.setStatusMessage('PDF export failed')
+      return
+    }
+    const { jsPDF } = await import('jspdf')
+    const doc = new jsPDF({
+      orientation: board.width >= board.height ? 'landscape' : 'portrait',
+      unit: 'pt',
+      format: [board.width, board.height],
+      compress: true,
+    })
+    doc.addImage(dataUrl, 'PNG', 0, 0, board.width, board.height)
+    doc.save('export.pdf')
+    store.setStatusMessage('PDF exported')
+  } catch (err) {
+    store.setStatusMessage('PDF export failed')
   }
 }
 
