@@ -11,6 +11,7 @@ A vector graphics editor built with **Vue 3 + TypeScript + Paper.js**, offering 
 - **Pen & Curvature tools**: Dual Pen/Curvature tools with rubber-band preview, hover states, anchor add/delete/convert, handle linkage, 45° Shift constraints and Alt handle breaking.
 - **Pencil tool**: Freehand strokes with minimum-spacing capture and zoom-scaled simplify smoothing on release; Escape cancels, dots are discarded.
 - **Eraser tool**: Drag paints a fixed screen-size stroke that subtracts from every unlocked path it touches (clicks punch holes); one history entry per drag.
+- **Blob brush**: Drag paints a fixed screen-size stroke that expands into a filled shape with the current style (clicks paint dots); same-color merging is out of scope.
 - **Scissors tool**: Click a path to cut it at that point (open paths split in two, closed paths open up); endpoint clicks are no-ops.
 - **Eyedropper tool**: Click artwork to load its appearance (fill incl. gradients, stroke, dash, opacity, blend, text styling) into the defaults and repaint the current selection.
 - **Path editing**: In Direct Select mode the hit priority is handle > anchor > object; supports anchor sub-selection, marquee select, move, duplicate and delete.
@@ -30,7 +31,7 @@ A vector graphics editor built with **Vue 3 + TypeScript + Paper.js**, offering 
 - **History**: Whole-project JSON snapshots with a 100-entry limit; Ctrl+Z to undo, Ctrl+Shift+Z / Ctrl+Y to redo.
 - **Annotation tools**: Callout annotations with persisted content/style models.
 
-Not yet implemented: pattern fills, mesh gradients, opacity masks, multiple artboards, PDF export, brush tools, symbols, and multi-fill/stroke appearance stacks.
+Not yet implemented: pattern fills, mesh gradients, opacity masks, multiple artboards, PDF export, calligraphic brushes, symbols, and multi-fill/stroke appearance stacks.
 
 ---
 

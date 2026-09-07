@@ -6,6 +6,7 @@ import { SelectController } from './selection/select-controller'
 import { PenController } from './path-drawing/pen-controller'
 import { PencilController } from './path-drawing/pencil-controller'
 import { EraserController } from './path-drawing/eraser-controller'
+import { BlobBrushController } from './path-drawing/blob-brush-controller'
 import { ScissorsController } from './path-drawing/scissors-controller'
 import { EyedropperController } from './selection/eyedropper-controller'
 import { CurvatureController } from './path-drawing/curvature-controller'
@@ -29,6 +30,9 @@ export function registerAllControllers(engine: EditorEngine) {
 
   // Eraser tool (stroke subtraction)
   engine.registerController('eraser', new EraserController())
+
+  // Blob brush (filled union strokes)
+  engine.registerController('blob-brush', new BlobBrushController())
 
   // Scissors tool (cut path at click)
   engine.registerController('scissors', new ScissorsController())
