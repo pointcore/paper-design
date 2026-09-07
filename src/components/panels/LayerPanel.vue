@@ -74,6 +74,7 @@
       <div class="ly-actions">
         <el-icon size="13" class="action-btn" title="New layer" @click="addLayer"><Plus /></el-icon>
         <el-icon size="13" class="action-btn" title="Duplicate layer" @click="duplicateLayer"><CopyDocument /></el-icon>
+        <el-icon size="13" class="action-btn" title="Merge layer below" @click="mergeLayerBelow"><Files /></el-icon>
         <el-icon size="13" class="action-btn" title="Delete layer" @click="removeLayer"><Delete /></el-icon>
       </div>
     </div>
@@ -82,7 +83,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, inject, type Ref } from 'vue'
-import { Plus, CopyDocument, Delete, Search, Filter, View, Hide, Lock, Unlock } from '@element-plus/icons-vue'
+import { Plus, CopyDocument, Delete, Files, Search, Filter, View, Hide, Lock, Unlock } from '@element-plus/icons-vue'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
 import type { LayerItemNode } from '../../editor/types'
@@ -236,6 +237,14 @@ function removeLayer() {
 
 function duplicateLayer() {
   getEngine()?.duplicateLayer(store.activeLayerId)
+}
+
+function mergeLayerBelow() {
+  const e = getEngine()
+  if (!e) return
+  if (!e.mergeLayerBelow()) {
+    store.setStatusMessage('No layer below to merge')
+  }
 }
 
 function startRename(layer: any) {

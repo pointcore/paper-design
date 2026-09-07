@@ -1091,6 +1091,32 @@ export class EditorEngine {
     this.scope.view.update()
   }
 
+  /**
+   * Merge the user layer below the active one into it. Donor children land
+   * underneath in order; the emptied donor is removed. Returns false when
+   * the active layer is already the bottom one.
+   */
+  mergeLayerBelow(): boolean {
+    const users = this.project.layers.filter((l) => (l.data as any)?.isUserLayer)
+    const at = users.findIndex((l) => (l.data as any)?.layerId === this.store.activeLayerId)
+    if (at <= 0) return false
+    const target = users[at]
+    const donor = users[at - 1]
+    const wasLocked = target.locked
+    target.locked = false
+    let index = 0
+    for (const child of donor.children.slice()) {
+      target.insertChild(index, child as paper.Item)
+      index++
+    }
+    donor.remove()
+    target.locked = wasLocked
+    this.syncLayersToStore()
+    this.pushHistory('Merge Layer Below')
+    this.scope.view.update()
+    return true
+  }
+
   // ===== Layer object tree =====
 
   /**
