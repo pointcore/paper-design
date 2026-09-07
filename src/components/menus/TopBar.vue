@@ -53,6 +53,9 @@
               <el-dropdown-item command="releaseCompound" :disabled="!store.hasSelection">Release Compound Path</el-dropdown-item>
               <el-dropdown-item command="joinPaths" :disabled="!store.hasSelection">Join Paths</el-dropdown-item>
               <el-dropdown-item command="outlineStroke" :disabled="!store.hasSelection">Outline Stroke</el-dropdown-item>
+              <el-dropdown-item command="simplifyPath" :disabled="!store.hasSelection">Simplify Path</el-dropdown-item>
+              <el-dropdown-item command="closePath" :disabled="!store.hasSelection">Close Path</el-dropdown-item>
+              <el-dropdown-item command="openPath" :disabled="!store.hasSelection">Open Path</el-dropdown-item>
               <el-dropdown-item command="makeMask" divided :disabled="!store.hasSelection">Make Clipping Mask</el-dropdown-item>
               <el-dropdown-item command="releaseMask" :disabled="!store.hasSelection">Release Clipping Mask</el-dropdown-item>
               <el-dropdown-item command="lock" divided :disabled="!store.hasSelection">Lock</el-dropdown-item>
@@ -709,6 +712,21 @@ function onObjectCmd(cmd: string) {
     case 'outlineStroke':
       if (!e.outlineStroke()) {
         store.setStatusMessage('Outline needs a path with a stroke')
+      }
+      break
+    case 'simplifyPath':
+      if (e.simplifyPaths() === 0) {
+        store.setStatusMessage('Nothing to simplify')
+      }
+      break
+    case 'closePath':
+      if (e.setPathsClosed(true) === 0) {
+        store.setStatusMessage('No open paths to close')
+      }
+      break
+    case 'openPath':
+      if (e.setPathsClosed(false) === 0) {
+        store.setStatusMessage('No closed paths to open')
       }
       break
     case 'makeMask':

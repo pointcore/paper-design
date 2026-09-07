@@ -2762,6 +2762,64 @@ export class EditorEngine {
     }
   }
 
+  /**
+   * Reduce anchor counts on unlocked selected plain paths with zoom-scaled
+   * fitting tolerance. Returns how many paths lost anchors; records
+   * history only then.
+   */
+  simplifyPaths(): number {
+    const scope = this.scope
+    const paths = this.getSelection().filter(
+      (item) =>
+        !item.locked &&
+        item.parent &&
+        item instanceof scope.Path &&
+        !(item instanceof scope.CompoundPath) &&
+        item.segments.length >= 2
+    ) as paper.Path[]
+    if (paths.length === 0) return 0
+    const tolerance = 2.5 / (scope.view.zoom || 1)
+    let changed = 0
+    for (const path of paths) {
+      const before = path.segments.length
+      try {
+        path.simplify(tolerance)
+      } catch {
+        continue
+      }
+      if (path.segments.length < before) changed++
+    }
+    if (changed > 0) {
+      this.pushHistory('Simplify')
+      this.scope.view.update()
+    }
+    return changed
+  }
+
+  /**
+   * Close open paths (connect ends) or open closed ones in the unlocked
+   * selection. Returns how many paths changed; records history only then.
+   */
+  setPathsClosed(closed: boolean): number {
+    const scope = this.scope
+    const paths = this.getSelection().filter(
+      (item) =>
+        !item.locked &&
+        item.parent &&
+        item instanceof scope.Path &&
+        !(item instanceof scope.CompoundPath) &&
+        item.segments.length >= 2 &&
+        item.closed !== closed
+    ) as paper.Path[]
+    if (paths.length === 0) return 0
+    for (const path of paths) {
+      path.closed = closed
+    }
+    this.pushHistory(closed ? 'Close Path' : 'Open Path')
+    this.scope.view.update()
+    return paths.length
+  }
+
   showStatus(message: string) {
     this.store.setStatusMessage(message)
   }
