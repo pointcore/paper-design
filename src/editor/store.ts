@@ -24,6 +24,7 @@ import type {
 export function createDefaultStyle(): StyleState {
   return {
     fillColor: null,
+    gradient: null,
     fillRule: 'nonzero',
     strokeColor: '#000000',
     strokeWidth: 1,

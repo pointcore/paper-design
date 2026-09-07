@@ -65,6 +65,18 @@ export type TextAlign = 'left' | 'center' | 'right' | 'justify'
 /** Text direction */
 export type TextDirection = 'horizontal' | 'vertical'
 
+/** One gradient color stop (offset 0-1). */
+export interface GradientStopState {
+  offset: number
+  color: string
+}
+
+/** Gradient fill parameters (geometry derives from item bounds). */
+export interface GradientState {
+  type: 'linear' | 'radial'
+  stops: GradientStopState[]
+}
+
 /** Character style state */
 export interface CharStyle {
   fontFamily: string
@@ -98,6 +110,7 @@ export type TextType = 'point' | 'area' | 'path' | 'vertical'
 /** Style state - centrally manages object appearance */
 export interface StyleState {
   fillColor: string | null
+  gradient: GradientState | null
   fillRule: FillRule
   strokeColor: string | null
   strokeWidth: number

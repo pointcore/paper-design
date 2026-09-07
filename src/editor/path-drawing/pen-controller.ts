@@ -614,6 +614,8 @@ export class PenController {
   private afterCommit(path: paper.Path) {
     const engine = this.engine
     if (!engine) return
+    // Re-apply the style now that bounds exist (gradients anchor to them).
+    engine.applyStyleToItem(path, engine.store.style)
     engine.clearSelection()
     engine.selectItem(path)
   }

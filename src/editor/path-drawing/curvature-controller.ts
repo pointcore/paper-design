@@ -270,6 +270,8 @@ export class CurvatureController {
         path.data.isUserItem = true
         engine.pushHistory('Curvature Path')
         engine.clearSelection()
+        // Re-apply the style now that bounds exist (gradients anchor to them).
+        engine.applyStyleToItem(path, engine.store.style)
         engine.selectItem(path)
       } else {
         path.remove()
@@ -292,6 +294,8 @@ export class CurvatureController {
         path.data.isUserItem = true
         engine.pushHistory('Curvature Path')
         engine.clearSelection()
+        // Re-apply the style now that bounds exist (gradients anchor to them).
+        engine.applyStyleToItem(path, engine.store.style)
         engine.selectItem(path)
       } else {
         path.remove()

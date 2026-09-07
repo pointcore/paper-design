@@ -30,10 +30,32 @@
 
       <div class="prop-section">
         <div class="prop-label">Fill</div>
-        <div class="color-row">
+        <div class="prop-row">
+          <el-radio-group v-model="fillKind" size="small" @change="onFillKindChange">
+            <el-radio-button value="solid">Solid</el-radio-button>
+            <el-radio-button value="gradient">Gradient</el-radio-button>
+          </el-radio-group>
+        </div>
+        <div class="color-row" v-if="fillKind === 'solid'">
           <el-color-picker v-model="fillColorValue" size="small" @change="onFillChange" />
           <el-button size="small" type="danger" plain @click="onClearFill">×</el-button>
         </div>
+        <template v-if="fillKind === 'gradient'">
+          <div class="prop-row">
+            <el-radio-group v-model="gradientType" size="small" @change="onGradientChange">
+              <el-radio-button value="linear">Linear</el-radio-button>
+              <el-radio-button value="radial">Radial</el-radio-button>
+            </el-radio-group>
+          </div>
+          <div class="prop-row" v-for="(stop, index) in gradientStops" :key="index">
+            <el-color-picker v-model="stop.color" size="small" @change="onGradientChange" />
+            <el-input-number v-model="stop.offset" :min="0" :max="100" size="small" @change="onGradientChange" />
+            <el-button size="small" type="danger" plain :disabled="gradientStops.length <= 2" @click="removeGradientStop(index)">×</el-button>
+          </div>
+          <div class="prop-row">
+            <el-button size="small" plain @click="addGradientStop">Add Stop</el-button>
+          </div>
+        </template>
       </div>
 
       <div class="prop-section">
@@ -145,10 +167,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, inject, type Ref } from 'vue'
+import { ref, computed, watch, inject, type Ref } from 'vue'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
-import type { AlignMode, BooleanOperation, DistributeAxis, LineCap, LineJoin, ReferencePoint, TextAlign } from '../../editor/types'
+import type { AlignMode, BooleanOperation, DistributeAxis, GradientState, LineCap, LineJoin, ReferencePoint, TextAlign } from '../../editor/types'
 
 const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
@@ -157,6 +179,21 @@ const fillColorValue = ref(store.style.fillColor || '#000000')
 const strokeColorValue = ref(store.style.strokeColor || '#000000')
 const strokeWidth = ref(store.style.strokeWidth)
 const opacityValue = ref(Math.round(store.style.opacity * 100))
+
+// Fill kind follows the store gradient (solid when none is set).
+const fillKind = computed(() => (store.style.gradient ? 'gradient' : 'solid'))
+const gradientType = ref<'linear' | 'radial'>('linear')
+// Editable gradient stops (offsets in percent for the inputs).
+const gradientStops = ref<Array<{ offset: number; color: string }>>([])
+
+/** Mirror the store gradient into the editable stop list. */
+function syncGradientFromStore() {
+  const gradient = store.style.gradient
+  gradientType.value = gradient?.type ?? 'linear'
+  gradientStops.value = gradient
+    ? gradient.stops.map((stop) => ({ offset: Math.round(stop.offset * 100), color: stop.color }))
+    : []
+}
 
 const lineCap = ref<LineCap>(store.style.lineCap)
 const lineJoin = ref<LineJoin>(store.style.lineJoin)
@@ -318,6 +355,69 @@ function onClearFill() {
   fillColorValue.value = ''
   e.scope.view.update()
   e.pushHistory('Clear Fill')
+}
+
+/** Build normalized gradient parameters from the editable stop list. */
+function currentGradient(): GradientState {
+  const stops = gradientStops.value
+    .map((stop) => ({
+      offset: Math.min(1, Math.max(0, (Number(stop.offset) || 0) / 100)),
+      color: stop.color || '#000000',
+    }))
+    .sort((a, b) => a.offset - b.offset)
+  return { type: gradientType.value, stops }
+}
+
+/** Write the edited gradient to the store and repaint the selection. */
+function applyGradientToSelection(label: string) {
+  const e = getEngine()
+  if (!e) return
+  const gradient = currentGradient()
+  if (gradient.stops.length === 0) return
+  store.updateStyle({ gradient })
+  syncGradientFromStore()
+  e.getSelection().forEach((item: any) => {
+    e.applyStyleToItem(item, e.store.style)
+  })
+  e.scope.view.update()
+  e.pushHistory(label)
+}
+
+function onFillKindChange(kind: 'solid' | 'gradient') {
+  const e = getEngine()
+  if (!e) return
+  if (kind === 'gradient') {
+    if (!store.style.gradient) {
+      const from = store.style.fillColor || '#000000'
+      store.updateStyle({
+        gradient: { type: 'linear', stops: [{ offset: 0, color: from }, { offset: 1, color: '#ffffff' }] },
+      })
+    }
+    syncGradientFromStore()
+    applyGradientToSelection('Change Gradient')
+  } else {
+    store.updateStyle({ gradient: null })
+    e.getSelection().forEach((item: any) => {
+      e.applyStyleToItem(item, e.store.style)
+    })
+    e.scope.view.update()
+    e.pushHistory('Change Fill')
+  }
+}
+
+function onGradientChange() {
+  applyGradientToSelection('Change Gradient')
+}
+
+function addGradientStop() {
+  gradientStops.value.push({ offset: 50, color: '#808080' })
+  applyGradientToSelection('Change Gradient')
+}
+
+function removeGradientStop(index: number) {
+  if (gradientStops.value.length <= 2) return
+  gradientStops.value.splice(index, 1)
+  applyGradientToSelection('Change Gradient')
 }
 
 function onStrokeChange(val: string) {
@@ -545,6 +645,7 @@ function syncTransformFromSelection() {
 // missed without it).
 watch(() => store.selectedItemIds, () => {
   syncTransformFromSelection()
+  syncGradientFromStore()
   syncTextFromSelection()
 }, { immediate: true })
 </script>

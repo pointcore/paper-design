@@ -3,7 +3,7 @@
  */
 import paper from 'paper'
 import { PaperOffset } from 'paperjs-offset'
-import type { ToolName, StyleState, LayerMeta, LayerItemNode, HistoryEntry, GuideOrientation, ProjectFileData, ReferencePoint, AlignMode, DistributeAxis, BooleanOperation, RasterExportOptions } from './types'
+import type { ToolName, StyleState, LayerMeta, LayerItemNode, HistoryEntry, GuideOrientation, ProjectFileData, ReferencePoint, AlignMode, DistributeAxis, BooleanOperation, RasterExportOptions, GradientState } from './types'
 import { createDefaultStyle } from './store'
 import type { EditorStore } from './store-types'
 
@@ -588,7 +588,9 @@ export class EditorEngine {
 
   applyStyleToItem(item: paper.Item, style: StyleState) {
     const paperStyle: any = {}
-    if (style.fillColor) paperStyle.fillColor = style.fillColor
+    const gradientFill = this.gradientFillForItem(item, style)
+    if (gradientFill) paperStyle.fillColor = gradientFill
+    else if (style.fillColor) paperStyle.fillColor = style.fillColor
     else paperStyle.fillColor = null
     if (style.strokeColor) paperStyle.strokeColor = style.strokeColor
     else paperStyle.strokeColor = null
@@ -602,10 +604,59 @@ export class EditorEngine {
     item.set(paperStyle)
   }
 
+  /**
+   * Build a gradient fill anchored to the item bounds (linear runs
+   * left-center to right-center, radial spans the larger half-extent), or
+   * null when no gradient applies. Radial colors always carry an explicit
+   * highlight so linear vs radial stays detectable on readback.
+   */
+  private gradientFillForItem(item: paper.Item, style: StyleState): paper.Color | null {
+    const gradient = style.gradient
+    if (!gradient || gradient.stops.length === 0) return null
+    const scope = this.scope
+    const bounds = (item as any).bounds as paper.Rectangle | undefined
+    if (!bounds || bounds.width <= 0 || bounds.height <= 0) return null
+    const stops = gradient.stops.map(
+      (stop) => new scope.GradientStop(new scope.Color(stop.color), stop.offset)
+    )
+    // The bundled typings omit the Gradient constructor overloads, so the
+    // gradient is assembled through its declared properties instead.
+    const paperGradient = new scope.Gradient()
+    paperGradient.stops = stops
+    paperGradient.radial = gradient.type === 'radial'
+    if (gradient.type === 'radial') {
+      const center = bounds.center
+      const radius = Math.max(bounds.width, bounds.height) / 2
+      const edge = new scope.Point(center.x + radius, center.y)
+      return new scope.Color(paperGradient, center, edge, center.clone()) as paper.Color
+    }
+    const origin = new scope.Point(bounds.x, bounds.y + bounds.height / 2)
+    const destination = new scope.Point(bounds.x + bounds.width, bounds.y + bounds.height / 2)
+    return new scope.Color(paperGradient, origin, destination) as paper.Color
+  }
+
+  /** Read a baked gradient back into parameters (stops survive the trip). */
+  private gradientFromItem(item: paper.Item): GradientState | null {
+    const fill = (item as any).fillColor as any
+    if (!fill || !fill.gradient) return null
+    const stops = (fill.gradient.stops as any[]).map((stop) => ({
+      offset: Number(stop.offset ?? 0),
+      color: stop.color ? stop.color.toCSS(true) : '#000000',
+    }))
+    if (stops.length === 0) return null
+    return { type: fill.highlight ? 'radial' : 'linear', stops }
+  }
+
   getStyleFromItem(item: paper.Item): StyleState {
     const style = createDefaultStyle()
     const s = item as any
-    style.fillColor = s.fillColor ? s.fillColor.toCSS(true) : null
+    const baked = this.gradientFromItem(item)
+    if (baked) {
+      style.fillColor = null
+      style.gradient = baked
+    } else {
+      style.fillColor = s.fillColor ? s.fillColor.toCSS(true) : null
+    }
     style.strokeColor = s.strokeColor ? s.strokeColor.toCSS(true) : null
     style.strokeWidth = s.strokeWidth ?? style.strokeWidth
     style.lineCap = (s.strokeCap as any) ?? style.lineCap
@@ -1344,7 +1395,8 @@ export class EditorEngine {
       attribute === 'fill'
         ? (item as any).fillColor
         : (item as any).strokeColor
-    ) as paper.Color | null | undefined
+    ) as any
+    if (color && color.gradient) return 'gradient'
     return color ? color.toCSS(true) : 'none'
   }
 
