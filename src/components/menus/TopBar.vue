@@ -13,6 +13,7 @@
               <el-dropdown-item command="export" divided>Export SVG</el-dropdown-item>
               <el-dropdown-item command="exportRaster">Export Raster...</el-dropdown-item>
               <el-dropdown-item command="import">Import SVG...</el-dropdown-item>
+              <el-dropdown-item command="place">Place Image...</el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
@@ -392,7 +393,38 @@ function onFileCmd(cmd: string) {
       input.click()
       break
     }
+    case 'place': {
+      if (!e) break
+      const input = document.createElement('input')
+      input.type = 'file'
+      input.accept = 'image/png,image/jpeg,image/webp,image/gif'
+      input.onchange = async () => {
+        const file = input.files?.[0]
+        if (!file || !e) return
+        if (file.size > 15 * 1024 * 1024) {
+          store.setStatusMessage('Image too large (15 MB max)')
+          return
+        }
+        try {
+          e.placeImage(await readFileAsDataURL(file))
+        } catch (err) {
+          store.setStatusMessage('Image placement failed')
+        }
+      }
+      input.click()
+      break
+    }
   }
+}
+
+/** Read a file as a data URL (embeddable, unlike object URLs). */
+function readFileAsDataURL(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
+  })
 }
 
 function onExportRasterConfirm() {

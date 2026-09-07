@@ -908,6 +908,7 @@ export class EditorEngine {
     else if (item instanceof scope.Group && this.isClipGroup(item)) kind = 'Clipping Mask'
     else if (item instanceof scope.PointText) kind = 'Text'
     else if (item instanceof scope.CompoundPath) kind = 'Compound Path'
+    else if (item instanceof scope.Raster) kind = 'Image'
     else if (item instanceof scope.Group) kind = 'Group'
     else if (item instanceof scope.Path) kind = item.closed ? 'Closed Path' : 'Path'
     else kind = 'Object'
@@ -1840,6 +1841,29 @@ export class EditorEngine {
   private cssOrNull(color: any): string | null {
     if (!color || color.gradient) return null
     return color.toCSS(true) as string
+  }
+
+  /**
+   * Place a bitmap image into the active layer, centered on the current
+   * view. The data URL source embeds the pixels so the image survives
+   * history and save/reload round-trips. Selection and history land once
+   * the pixels load.
+   */
+  placeImage(dataUrl: string): void {
+    const raster = new this.scope.Raster({ source: dataUrl }) as paper.Raster
+    this.getActiveLayer().addChild(raster)
+    raster.onLoad = () => {
+      raster.position = this.scope.view.center.clone()
+      raster.data.id = this.genId()
+      raster.data.isUserItem = true
+      this.selectItem(raster)
+      this.pushHistory('Place Image')
+      this.showStatus('Image placed')
+    }
+    raster.onError = () => {
+      raster.remove()
+      this.showStatus('Image placement failed')
+    }
   }
 
   // ===== Edit operations =====
