@@ -46,6 +46,36 @@
           <span class="prop-label-sm">Weight</span>
           <el-input-number v-model="strokeWidth" :min="0.1" :max="100" size="small" @change="onStyleChange" />
         </div>
+        <div class="prop-row">
+          <span class="prop-label-sm">Cap</span>
+          <el-select v-model="lineCap" size="small" style="flex: 1" @change="onStrokeAppearanceChange">
+            <el-option v-for="c in lineCaps" :key="c.value" :label="c.label" :value="c.value" />
+          </el-select>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label-sm">Join</span>
+          <el-select v-model="lineJoin" size="small" style="flex: 1" @change="onStrokeAppearanceChange">
+            <el-option v-for="j in lineJoins" :key="j.value" :label="j.label" :value="j.value" />
+          </el-select>
+        </div>
+        <div class="prop-row" v-if="lineJoin === 'miter'">
+          <span class="prop-label-sm">Miter</span>
+          <el-input-number v-model="miterLimit" :min="1" :max="100" size="small" @change="onStrokeAppearanceChange" />
+        </div>
+        <div class="prop-row">
+          <span class="prop-label-sm">Dash</span>
+          <el-input v-model="dashPattern" size="small" placeholder="e.g. 4 2" @change="onDashChange" />
+        </div>
+      </div>
+
+      <div class="prop-section">
+        <div class="prop-label">Blending</div>
+        <div class="prop-row">
+          <span class="prop-label-sm">Mode</span>
+          <el-select v-model="blendMode" size="small" style="flex: 1" @change="onBlendChange">
+            <el-option v-for="b in blendModes" :key="b.value" :label="b.label" :value="b.value" />
+          </el-select>
+        </div>
       </div>
 
       <div class="prop-section">
@@ -118,7 +148,7 @@
 import { ref, watch, inject, type Ref } from 'vue'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
-import type { AlignMode, BooleanOperation, DistributeAxis, ReferencePoint, TextAlign } from '../../editor/types'
+import type { AlignMode, BooleanOperation, DistributeAxis, LineCap, LineJoin, ReferencePoint, TextAlign } from '../../editor/types'
 
 const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
@@ -127,6 +157,43 @@ const fillColorValue = ref(store.style.fillColor || '#000000')
 const strokeColorValue = ref(store.style.strokeColor || '#000000')
 const strokeWidth = ref(store.style.strokeWidth)
 const opacityValue = ref(Math.round(store.style.opacity * 100))
+
+const lineCap = ref<LineCap>(store.style.lineCap)
+const lineJoin = ref<LineJoin>(store.style.lineJoin)
+const miterLimit = ref(store.style.miterLimit)
+const dashPattern = ref(store.style.dashArray.join(' '))
+const blendMode = ref(store.style.blendMode)
+
+const lineCaps: Array<{ value: LineCap; label: string }> = [
+  { value: 'round', label: 'Round' },
+  { value: 'butt', label: 'Butt' },
+  { value: 'square', label: 'Square' },
+]
+
+const lineJoins: Array<{ value: LineJoin; label: string }> = [
+  { value: 'miter', label: 'Miter' },
+  { value: 'round', label: 'Round' },
+  { value: 'bevel', label: 'Bevel' },
+]
+
+const blendModes = [
+  { value: 'source-over', label: 'Normal' },
+  { value: 'multiply', label: 'Multiply' },
+  { value: 'screen', label: 'Screen' },
+  { value: 'overlay', label: 'Overlay' },
+  { value: 'darken', label: 'Darken' },
+  { value: 'lighten', label: 'Lighten' },
+  { value: 'color-dodge', label: 'Color Dodge' },
+  { value: 'color-burn', label: 'Color Burn' },
+  { value: 'hard-light', label: 'Hard Light' },
+  { value: 'soft-light', label: 'Soft Light' },
+  { value: 'difference', label: 'Difference' },
+  { value: 'exclusion', label: 'Exclusion' },
+  { value: 'hue', label: 'Hue' },
+  { value: 'saturation', label: 'Saturation' },
+  { value: 'color', label: 'Color' },
+  { value: 'luminosity', label: 'Luminosity' },
+]
 
 const posX = ref(0)
 const posY = ref(0)
@@ -289,6 +356,60 @@ function onStyleChange() {
   })
   e.scope.view.update()
   e.pushHistory('Change Stroke Style')
+}
+
+function onStrokeAppearanceChange() {
+  const e = getEngine()
+  if (!e) return
+  // A cleared miter field falls back instead of blocking cap/join edits.
+  const miter =
+    Number.isFinite(miterLimit.value) && (miterLimit.value as number) >= 1
+      ? miterLimit.value
+      : store.style.miterLimit
+  miterLimit.value = miter
+  store.updateStyle({
+    lineCap: lineCap.value,
+    lineJoin: lineJoin.value,
+    miterLimit: miter,
+  })
+  e.getSelection().forEach((item: any) => {
+    if (item.strokeCap !== undefined) item.strokeCap = lineCap.value
+    if (item.strokeJoin !== undefined) item.strokeJoin = lineJoin.value
+    if (item.miterLimit !== undefined) item.miterLimit = miter
+  })
+  e.scope.view.update()
+  e.pushHistory('Change Stroke Style')
+}
+
+/** Parse a dash pattern like "4 2" into lengths (empty means solid). */
+function parseDashPattern(text: string): number[] {
+  return text
+    .split(/[\s,]+/)
+    .map((part) => Number(part))
+    .filter((n) => Number.isFinite(n) && n >= 0)
+}
+
+function onDashChange() {
+  const e = getEngine()
+  if (!e) return
+  const dashArray = parseDashPattern(dashPattern.value)
+  store.updateStyle({ dashArray })
+  e.getSelection().forEach((item: any) => {
+    if (item.dashArray !== undefined) item.dashArray = [...dashArray]
+  })
+  e.scope.view.update()
+  e.pushHistory('Change Dash Pattern')
+}
+
+function onBlendChange() {
+  const e = getEngine()
+  if (!e) return
+  store.updateStyle({ blendMode: blendMode.value })
+  e.getSelection().forEach((item: any) => {
+    item.blendMode = blendMode.value
+  })
+  e.scope.view.update()
+  e.pushHistory('Change Blend Mode')
 }
 
 function onOpacityChange(val: number) {
