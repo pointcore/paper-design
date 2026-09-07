@@ -22,6 +22,7 @@
       <div v-if="store.ui.showPropertyPanel || store.ui.showLayerPanel" class="right-panels">
         <PropertyPanel v-if="store.hasSelection && store.ui.showPropertyPanel" />
         <LayerPanel v-if="store.ui.showLayerPanel" />
+        <HistoryPanel />
       </div>
     </div>
   </div>
@@ -37,6 +38,7 @@ import ToolRail from './components/toolbar/ToolRail.vue'
 import CanvasHost from './components/canvas/CanvasHost.vue'
 import PropertyPanel from './components/panels/PropertyPanel.vue'
 import LayerPanel from './components/panels/LayerPanel.vue'
+import HistoryPanel from './components/panels/HistoryPanel.vue'
 
 const store = useEditorStore()
 const { tool } = storeToRefs(store)

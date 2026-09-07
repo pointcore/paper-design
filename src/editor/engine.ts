@@ -742,6 +742,33 @@ export class EditorEngine {
     }
   }
 
+  /**
+   * Jump the document to a history entry (history panel click). Steps
+   * through every intermediate snapshot so state applies cleanly.
+   */
+  jumpToHistory(index: number): void {
+    if (this.history.length === 0) return
+    const clamped = Math.min(this.history.length - 1, Math.max(0, index))
+    if (clamped === this.historyIndex) return
+    while (this.historyIndex > clamped) {
+      this.historyIndex--
+      this.restoreSnapshot(this.historySnapshots[this.historyIndex])
+    }
+    while (this.historyIndex < clamped) {
+      this.historyIndex++
+      this.restoreSnapshot(this.historySnapshots[this.historyIndex])
+    }
+    this.store.setHistoryIndex(this.historyIndex)
+  }
+
+  /** Drop the whole history stack (history panel clear action). */
+  clearHistory(): void {
+    this.history = []
+    this.historySnapshots = []
+    this.historyIndex = -1
+    this.store.setHistory([], -1)
+  }
+
   // ===== Document (Save/Open/New) =====
 
   /** Serialize the whole document into a versioned project file string. */

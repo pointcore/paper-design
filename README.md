@@ -28,7 +28,7 @@ A vector graphics editor built with **Vue 3 + TypeScript + Paper.js**, offering 
 - **Appearance**: Single fill + stroke with caps, joins, miter limit, dash patterns and all 16 canvas blend modes, plus opacity and linear/radial gradient fills with a stops editor. Applied live from the properties panel to the selection and to subsequently drawn shapes.
 - **Page setup**: Canvas Settings page size (presets, custom W/H, orientation swap) driving New Document, Save/Open persistence and page-area raster export.
 - **Guides & grid**: Ruler drag-out guides with move/delete (drag back to a ruler), line grid with size control, transparent checkerboard background.
-- **History**: Whole-project JSON snapshots with a 100-entry limit; Ctrl+Z to undo, Ctrl+Shift+Z / Ctrl+Y to redo.
+- **History**: Whole-project JSON snapshots with a 100-entry limit, listed in the History panel with click-to-jump and clearing; Ctrl+Z to undo, Ctrl+Shift+Z / Ctrl+Y to redo.
 - **Annotation tools**: Callout annotations with persisted content/style models.
 
 Not yet implemented: pattern fills, mesh gradients, opacity masks, multiple artboards, PDF export, calligraphic brushes, symbols, and multi-fill/stroke appearance stacks.
