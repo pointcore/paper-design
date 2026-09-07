@@ -884,6 +884,7 @@ export class TextController {
     })
     const item = hit?.item
     if ((item as any)?.locked) return null
+    if ((item as any)?.data?.isArtboard) return null
     if (item instanceof scope.PointText && !(item as any).data?.annotation) {
       return item as paper.PointText
     }
@@ -904,6 +905,7 @@ export class TextController {
     const item = hit?.item
     if (!item || (item.data as any)?.annotation) return null
     if ((item.data as any)?.isChrome || (item.data as any)?.isPreview) return null
+    if ((item.data as any)?.isArtboard) return null
     if (item instanceof scope.Path) return item as paper.Path
     return null
   }

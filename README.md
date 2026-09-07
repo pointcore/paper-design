@@ -24,6 +24,7 @@ A vector graphics editor built with **Vue 3 + TypeScript + Paper.js**, offering 
 - **Clipboard**: Instant internal copy/cut/paste plus OS clipboard SVG exchange (copy out to other apps, paste SVG in), on Ctrl+C/X/V, the Edit menu and the canvas context menu.
 - **Save / Open / Export**: Versioned JSON project files (Save/Open truly round-trip the document, page size included); SVG import/export (editor layers stay out of exports); raster PNG/JPEG/WebP export with 1x–3x scale and artwork/selection/page choice; bitmap placement (PNG/JPEG/WebP/GIF) with embedded persistent sources.
 - **Layers**: Create/delete/rename, visibility/lock/opacity, top-first drag reorder, expandable per-layer object tree with select/visibility/lock per object.
+- **Artboards**: Multiple named page sheets with white-sheet visuals and labels, add (offset beside active) / delete / rename, click-to-activate with pan, per-board position and size; Save/Open round-trips the set, raster page export targets the active board.
 - **Object ops**: Bring to front/back plus stepwise forward/backward, group/ungroup, lock/unlock-all, hide/show-all, select same fill/stroke. Locked items are skipped by selection and tools; hidden items never hit-test.
 - **Appearance**: Single fill + stroke with caps, joins, miter limit, dash patterns and all 16 canvas blend modes, plus opacity and linear/radial gradient fills with a stops editor. Fill, stroke and stop pickers support alpha; applied live from the properties panel to the selection and to subsequently drawn shapes.
 - **Page setup**: Canvas Settings page size (presets, custom W/H, orientation swap) driving New Document, Save/Open persistence and page-area raster export.
@@ -31,7 +32,7 @@ A vector graphics editor built with **Vue 3 + TypeScript + Paper.js**, offering 
 - **History**: Whole-project JSON snapshots with a 100-entry limit, listed in the History panel with click-to-jump and clearing; Ctrl+Z to undo, Ctrl+Shift+Z / Ctrl+Y to redo.
 - **Annotation tools**: Callout annotations with persisted content/style models.
 
-Not yet implemented: pattern fills, mesh gradients, opacity masks, multiple artboards, PDF export, calligraphic brushes, symbols, and multi-fill/stroke appearance stacks.
+Not yet implemented: pattern fills, mesh gradients, opacity masks, PDF export, calligraphic brushes, symbols, and multi-fill/stroke appearance stacks.
 
 ---
 

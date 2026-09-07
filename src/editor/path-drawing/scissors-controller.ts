@@ -65,7 +65,7 @@ export class ScissorsController {
     const item = hit?.item
     if (!item || (item as any).locked) return null
     const data = (item.data as any) ?? {}
-    if (data.annotation || data.isChrome || data.isPreview || data.isGuide) return null
+    if (data.annotation || data.isChrome || data.isPreview || data.isGuide || data.isArtboard) return null
     if (item instanceof scope.Path && !(item instanceof scope.CompoundPath)) {
       return item.segments.length >= 2 ? (item as paper.Path) : null
     }

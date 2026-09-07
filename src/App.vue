@@ -14,7 +14,7 @@
           <div class="status-right">
             <span class="status-item">{{ currentToolName }}</span>
             <span v-if="store.statusMessage" class="status-item status-msg">{{ store.statusMessage }}</span>
-            <span class="status-item zoom-display" :title="'滚轮缩放 / 点击重置为 100%'" @click="resetZoom">{{ zoomPercent }}</span>
+            <span class="status-item zoom-display" :title="'Wheel to zoom / click resets to 100%'" @click="resetZoom">{{ zoomPercent }}</span>
           </div>
         </div>
       </div>
@@ -22,6 +22,7 @@
       <div v-if="store.ui.showPropertyPanel || store.ui.showLayerPanel" class="right-panels">
         <PropertyPanel v-if="store.hasSelection && store.ui.showPropertyPanel" />
         <LayerPanel v-if="store.ui.showLayerPanel" />
+        <ArtboardPanel />
         <HistoryPanel />
       </div>
     </div>
@@ -38,6 +39,7 @@ import ToolRail from './components/toolbar/ToolRail.vue'
 import CanvasHost from './components/canvas/CanvasHost.vue'
 import PropertyPanel from './components/panels/PropertyPanel.vue'
 import LayerPanel from './components/panels/LayerPanel.vue'
+import ArtboardPanel from './components/panels/ArtboardPanel.vue'
 import HistoryPanel from './components/panels/HistoryPanel.vue'
 
 const store = useEditorStore()

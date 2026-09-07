@@ -63,7 +63,7 @@ export class EyedropperController {
     const item = hit?.item
     if (!item) return null
     const data = (item.data as any) ?? {}
-    if (data.isChrome || data.isPreview || data.isGuide || data.annotation) return null
+    if (data.isChrome || data.isPreview || data.isGuide || data.annotation || data.isArtboard) return null
     if (!this.isUserArtwork(item)) return null
     return item
   }

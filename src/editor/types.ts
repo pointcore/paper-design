@@ -149,6 +149,16 @@ export interface LayerItemNode {
   locked: boolean
 }
 
+/** Artboard (page sheet) metadata; visuals derive from this list. */
+export interface ArtboardMeta {
+  id: string
+  name: string
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
 /** Item metadata */
 export interface ItemMeta {
   id: string
@@ -301,6 +311,9 @@ export interface ProjectFileData {
   pageSize: { width: number; height: number }
   /** Paper.js project JSON string captured via project.exportJSON(). */
   snapshot: string
+  /** Artboards (absent in files predating multi-artboard support). */
+  artboards?: ArtboardMeta[]
+  activeArtboardId?: string
 }
 
 /** Import result */

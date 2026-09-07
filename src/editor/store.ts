@@ -6,6 +6,7 @@ import type {
   ToolName,
   StyleState,
   LayerMeta,
+  ArtboardMeta,
   CharStyle,
   ParagraphStyle,
   RulerUnit,
@@ -155,8 +156,12 @@ export const useEditorStore = defineStore('editor', {
     cursorPos: { x: 0, y: 0 },
     /** Status bar message */
     statusMessage: '',
-    /** Page settings (document width/height) */
+    /** Page settings (default size for new documents and artboards) */
     pageSize: { width: 1920, height: 1080 },
+    /** Artboard list */
+    artboards: [] as ArtboardMeta[],
+    /** Currently active artboard id */
+    activeArtboardId: '',
     /** UI state */
     ui: {
       panelCollapsed: false,
@@ -177,6 +182,10 @@ export const useEditorStore = defineStore('editor', {
     /** Currently selected layer */
     activeLayer(state): LayerMeta | undefined {
       return state.layers.find((l) => l.id === state.activeLayerId)
+    },
+    /** Currently active artboard */
+    activeArtboard(state): ArtboardMeta | undefined {
+      return state.artboards.find((b) => b.id === state.activeArtboardId)
     },
     /** Number of selected items */
     selectedCount(state): number {
@@ -351,6 +360,46 @@ export const useEditorStore = defineStore('editor', {
     /** Set page size */
     setPageSize(width: number, height: number) {
       this.pageSize = { width, height }
+    },
+
+    /** Replace the artboard list (active id falls back to the first board) */
+    setArtboards(boards: ArtboardMeta[]) {
+      this.artboards = boards
+      if (!boards.some((b) => b.id === this.activeArtboardId)) {
+        this.activeArtboardId = boards.length > 0 ? boards[0].id : ''
+      }
+    },
+
+    /** Set the active artboard */
+    setActiveArtboard(id: string) {
+      this.activeArtboardId = id
+    },
+
+    /** Add an artboard and activate it */
+    addArtboard(board: ArtboardMeta) {
+      this.artboards.push(board)
+      this.activeArtboardId = board.id
+    },
+
+    /** Remove an artboard (the active id falls back to the first board) */
+    removeArtboard(id: string) {
+      const idx = this.artboards.findIndex((b) => b.id === id)
+      if (idx >= 0) {
+        this.artboards.splice(idx, 1)
+        if (this.activeArtboardId === id) {
+          this.activeArtboardId = this.artboards.length > 0
+            ? this.artboards[Math.min(idx, this.artboards.length - 1)].id
+            : ''
+        }
+      }
+    },
+
+    /** Update an artboard */
+    updateArtboard(id: string, partial: Partial<ArtboardMeta>) {
+      const board = this.artboards.find((b) => b.id === id)
+      if (board) {
+        Object.assign(board, partial)
+      }
     },
 
     /** Set ruler unit */

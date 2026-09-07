@@ -1069,6 +1069,7 @@ export class SelectController {
     })
     const item = hit?.item
     if ((item as any)?.locked) return null
+    if ((item as any)?.data?.isArtboard) return null
     if (item instanceof scope.PointText && !(item as any).data?.annotation) {
       return item as paper.PointText
     }
@@ -1092,7 +1093,7 @@ export class SelectController {
     for (const hit of hits) {
       const item = hit.item
       const data = (item.data as any) ?? {}
-      if (data.isChrome || data.isPreview || data.isGuide) continue
+      if (data.isChrome || data.isPreview || data.isGuide || data.isArtboard) continue
       if ((item as any).locked) continue
       return hit as paper.HitResult
     }

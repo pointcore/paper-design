@@ -196,7 +196,7 @@
           <div class="setting-row">
             <div class="setting-label">
               <span class="setting-name">Page Size</span>
-              <span class="setting-desc">Width x height in px</span>
+              <span class="setting-desc">Active artboard size in px</span>
             </div>
             <div class="page-size-inputs">
               <el-input-number v-model="settings.pageWidth" :min="1" :max="16384" size="small" @change="onPageSizeChange" />
@@ -319,9 +319,12 @@ const settings = reactive({
   snapGuides: store.snap.guides,
   snapPoint: store.snap.point,
   smartGuides: store.snap.smartGuides,
-  pageWidth: store.pageSize.width,
-  pageHeight: store.pageSize.height,
-  pagePreset: matchPagePreset(store.pageSize.width, store.pageSize.height),
+  pageWidth: store.activeArtboard?.width ?? store.pageSize.width,
+  pageHeight: store.activeArtboard?.height ?? store.pageSize.height,
+  pagePreset: matchPagePreset(
+    store.activeArtboard?.width ?? store.pageSize.width,
+    store.activeArtboard?.height ?? store.pageSize.height
+  ),
 })
 
 const units = [
@@ -717,9 +720,7 @@ function syncSettingsFromStore() {
   settings.snapGuides = store.snap.guides
   settings.snapPoint = store.snap.point
   settings.smartGuides = store.snap.smartGuides
-  settings.pageWidth = store.pageSize.width
-  settings.pageHeight = store.pageSize.height
-  settings.pagePreset = matchPagePreset(store.pageSize.width, store.pageSize.height)
+  syncPageSettings()
 }
 
 function onRulersToggle(val: boolean) {
@@ -764,16 +765,25 @@ function onSmartGuidesToggle(val: boolean) {
 }
 
 function syncPageSettings() {
-  settings.pageWidth = store.pageSize.width
-  settings.pageHeight = store.pageSize.height
-  settings.pagePreset = matchPagePreset(store.pageSize.width, store.pageSize.height)
+  const board = store.activeArtboard
+  settings.pageWidth = board?.width ?? store.pageSize.width
+  settings.pageHeight = board?.height ?? store.pageSize.height
+  settings.pagePreset = matchPagePreset(settings.pageWidth, settings.pageHeight)
+}
+
+/** Resize the active artboard (page visuals redraw with it). */
+function resizeActiveBoard(width: number, height: number) {
+  const board = store.activeArtboard
+  if (!board) return
+  store.updateArtboard(board.id, { width, height })
+  engineRef?.value?.refreshArtboards()
 }
 
 function onPagePresetChange(value: string) {
   if (value === 'custom') return
   const [width, height] = value.split('x').map(Number)
   if (!Number.isFinite(width) || !Number.isFinite(height)) return
-  store.setPageSize(width, height)
+  resizeActiveBoard(width, height)
   syncPageSettings()
 }
 
@@ -784,12 +794,14 @@ function onPageSizeChange() {
     syncPageSettings()
     return
   }
-  store.setPageSize(width, height)
+  resizeActiveBoard(width, height)
   settings.pagePreset = matchPagePreset(width, height)
 }
 
 function onPageOrientationSwap() {
-  store.setPageSize(store.pageSize.height, store.pageSize.width)
+  const board = store.activeArtboard
+  if (!board) return
+  resizeActiveBoard(board.height, board.width)
   syncPageSettings()
 }
 

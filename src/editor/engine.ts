@@ -3,7 +3,7 @@
  */
 import paper from 'paper'
 import { PaperOffset } from 'paperjs-offset'
-import type { ToolName, StyleState, LayerMeta, LayerItemNode, HistoryEntry, GuideOrientation, ProjectFileData, ReferencePoint, AlignMode, DistributeAxis, BooleanOperation, RasterExportOptions, GradientState } from './types'
+import type { ToolName, StyleState, LayerMeta, LayerItemNode, ArtboardMeta, HistoryEntry, GuideOrientation, ProjectFileData, ReferencePoint, AlignMode, DistributeAxis, BooleanOperation, RasterExportOptions, GradientState } from './types'
 import { createDefaultStyle } from './store'
 import type { EditorStore } from './store-types'
 
@@ -47,6 +47,15 @@ export class EditorEngine {
 
     this.setupProject()
     this.initLayers()
+    if (this.store.artboards.length === 0) {
+      const page = this.store.pageSize
+      const id = this.genId()
+      this.store.setArtboards([
+        { id, name: 'Artboard 1', x: 0, y: 0, width: page.width, height: page.height },
+      ])
+      this.store.setActiveArtboard(id)
+    }
+    this.refreshArtboards()
   }
 
   private setupProject() {
@@ -107,6 +116,66 @@ export class EditorEngine {
 
   genId(): string {
     return Math.random().toString(36).substring(2, 10) + Date.now().toString(36)
+  }
+
+  // ===== Artboards =====
+
+  /**
+   * Redraw artboard page sheets from the store (white sheets with name
+   * labels on a dedicated locked layer below user artwork). Visuals carry
+   * data.isArtboard so hit tests skip them; the layer hides in exports
+   * like every other non-user layer.
+   */
+  refreshArtboards(): void {
+    const scope = this.scope
+    let layer = this.project.layers.find(
+      (l) => (l.data as any)?.isArtboardLayer
+    ) as paper.Layer | undefined
+    if (!layer || !layer.parent) {
+      layer = new scope.Layer()
+      layer.name = 'artboards'
+      layer.data.isUserLayer = false
+      layer.data.isArtboardLayer = true
+    }
+    const users = this.project.layers.filter((l) => (l.data as any)?.isUserLayer)
+    if (users.length > 0) layer.insertBelow(users[0])
+
+    // Locked layers reject children: unlock around the redraw like guides.
+    layer.locked = false
+    layer.removeChildren()
+    const zoom = scope.view.zoom || 1
+    for (const board of this.store.artboards) {
+      if (!(board.width > 0 && board.height > 0)) continue
+      const active = board.id === this.store.activeArtboardId
+      const rect = new scope.Path.Rectangle(
+        new scope.Rectangle(board.x, board.y, board.width, board.height)
+      ) as paper.Path
+      rect.fillColor = new scope.Color('#ffffff')
+      rect.strokeColor = new scope.Color(active ? '#4a90d9' : '#8a8a8a')
+      rect.strokeWidth = (active ? 1.5 : 1) / zoom
+      rect.data.isArtboard = true
+      layer.addChild(rect)
+      const label = new scope.PointText({
+        point: new scope.Point(board.x, board.y - 6 / zoom),
+        content: board.name,
+        fontFamily: 'Arial',
+        fontSize: 12 / zoom,
+        justification: 'left',
+        fillColor: '#999999',
+      }) as paper.PointText
+      label.data.isArtboard = true
+      layer.addChild(label)
+    }
+    layer.locked = true
+    scope.view.update()
+  }
+
+  /** Center the view on a document point (artboard activation). */
+  panViewTo(point: paper.Point): void {
+    this.scope.view.center = point.clone()
+    this.refreshGrid()
+    this.scope.view.update()
+    this.emitViewChange()
   }
 
   setTool(tool: ToolName) {
@@ -707,6 +776,7 @@ export class EditorEngine {
     this.project.importJSON(snapshot)
     this.syncLayersToStore()
     this.syncSelectionToStore()
+    this.refreshArtboards()
     this.scope.view.update()
   }
 
@@ -778,6 +848,8 @@ export class EditorEngine {
       version: PROJECT_FILE_VERSION,
       pageSize: { ...this.store.pageSize },
       snapshot: this.snapshotProject(),
+      artboards: this.store.artboards.map((board) => ({ ...board })),
+      activeArtboardId: this.store.activeArtboardId,
     }
     return JSON.stringify(data)
   }
@@ -810,11 +882,13 @@ export class EditorEngine {
     ) {
       this.store.setPageSize(pageSize.width, pageSize.height)
     }
+    this.restoreArtboards(parsed.artboards, parsed.activeArtboardId, pageSize)
     this.pointActiveLayerAtRestoredStack()
     this.clearSelection()
     this.clipboardItems = []
     this.pasteCount = 0
     this.resetHistory('Open Project')
+    this.refreshArtboards()
     this.refreshGrid()
     this.refreshGuides()
     this.scope.view.update()
@@ -828,14 +902,67 @@ export class EditorEngine {
     this.initLayers()
     this.pointActiveLayerAtRestoredStack()
     this.store.setPageSize(width, height)
+    const boardId = this.genId()
+    this.store.setArtboards([
+      { id: boardId, name: 'Artboard 1', x: 0, y: 0, width, height },
+    ])
+    this.store.setActiveArtboard(boardId)
     this.clearSelection()
     this.clipboardItems = []
     this.pasteCount = 0
     this.resetHistory('New Document')
+    this.refreshArtboards()
     this.refreshGrid()
     this.refreshGuides()
     this.scope.view.update()
     this.emitViewChange()
+  }
+
+  /**
+   * Load artboards from a project file (pre-artboard files fall back to a
+   * single board from the page size). Invalid entries are dropped; an
+   * empty result keeps the current boards.
+   */
+  private restoreArtboards(
+    raw: ArtboardMeta[] | undefined,
+    activeId: string | undefined,
+    pageSize: { width: number; height: number } | undefined
+  ): void {
+    const clean = (Array.isArray(raw) ? raw : [])
+      .filter(
+        (board) =>
+          board &&
+          typeof board.id === 'string' &&
+          Number.isFinite(board.x) &&
+          Number.isFinite(board.y) &&
+          Number.isFinite(board.width) &&
+          Number.isFinite(board.height) &&
+          board.width > 0 &&
+          board.height > 0
+      )
+      .map((board, index) => ({
+        id: board.id,
+        name: board.name || `Artboard ${index + 1}`,
+        x: board.x,
+        y: board.y,
+        width: board.width,
+        height: board.height,
+      }))
+    if (clean.length === 0) {
+      const page = pageSize ?? this.store.pageSize
+      if (Number.isFinite(page.width) && Number.isFinite(page.height) && page.width > 0 && page.height > 0) {
+        const id = this.genId()
+        this.store.setArtboards([
+          { id, name: 'Artboard 1', x: 0, y: 0, width: page.width, height: page.height },
+        ])
+        this.store.setActiveArtboard(id)
+      }
+      return
+    }
+    this.store.setArtboards(clean)
+    this.store.setActiveArtboard(
+      clean.some((board) => board.id === activeId) ? (activeId as string) : clean[0].id
+    )
   }
 
   /**
@@ -1272,10 +1399,15 @@ export class EditorEngine {
     if (options.area === 'selection') {
       bounds = this.getSelectionBounds()
     } else if (options.area === 'page') {
+      // The active artboard is the page; older files fall back to pageSize.
+      const board =
+        this.store.artboards.find((b) => b.id === this.store.activeArtboardId) ??
+        this.store.artboards[0]
       const page = this.store.pageSize
+      const rect = board ?? { x: 0, y: 0, width: page.width, height: page.height }
       bounds =
-        Number.isFinite(page.width) && Number.isFinite(page.height) && page.width > 0 && page.height > 0
-          ? new this.scope.Rectangle(0, 0, page.width, page.height)
+        Number.isFinite(rect.width) && Number.isFinite(rect.height) && rect.width > 0 && rect.height > 0
+          ? new this.scope.Rectangle(rect.x, rect.y, rect.width, rect.height)
           : null
     } else {
       bounds = this.unitedBoundsOf(this.getUserItems())
