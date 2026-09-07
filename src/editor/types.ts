@@ -182,6 +182,9 @@ export type AlignMode =
 /** Axis for even distribution of selection centers. */
 export type DistributeAxis = 'horizontal' | 'vertical'
 
+/** Pathfinder boolean operation for combining paths. */
+export type BooleanOperation = 'unite' | 'subtract' | 'intersect' | 'exclude'
+
 /** Ruler unit */
 export type RulerUnit = 'px' | 'pt' | 'mm' | 'cm' | 'in'
 

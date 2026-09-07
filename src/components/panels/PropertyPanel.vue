@@ -100,6 +100,16 @@
           <el-button size="small" :disabled="store.selectedItemIds.length < 3" @click="onDistribute('vertical')">Distribute V</el-button>
         </div>
       </div>
+
+      <div class="prop-section">
+        <div class="prop-label">Pathfinder</div>
+        <div class="align-row">
+          <el-button size="small" :disabled="booleanOperandCount() < 2" @click="onBoolean('unite')">Unite</el-button>
+          <el-button size="small" :disabled="booleanOperandCount() < 2" @click="onBoolean('subtract')">Subtract</el-button>
+          <el-button size="small" :disabled="booleanOperandCount() < 2" @click="onBoolean('intersect')">Intersect</el-button>
+          <el-button size="small" :disabled="booleanOperandCount() < 2" @click="onBoolean('exclude')">Exclude</el-button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -108,7 +118,7 @@
 import { ref, watch, inject, type Ref } from 'vue'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
-import type { AlignMode, DistributeAxis, ReferencePoint, TextAlign } from '../../editor/types'
+import type { AlignMode, BooleanOperation, DistributeAxis, ReferencePoint, TextAlign } from '../../editor/types'
 
 const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
@@ -371,6 +381,25 @@ function onDistribute(axis: DistributeAxis) {
   if (!e) return
   e.distributeSelection(axis)
   e.pushHistory(axis === 'horizontal' ? 'Distribute Horizontally' : 'Distribute Vertically')
+}
+
+/** Number of selected unlocked paths usable as boolean operands. */
+function booleanOperandCount(): number {
+  const e = getEngine()
+  if (!e) return 0
+  return e.getSelection().filter(
+    (item) =>
+      !item.locked &&
+      (item instanceof e.scope.Path || item instanceof e.scope.CompoundPath)
+  ).length
+}
+
+function onBoolean(op: BooleanOperation) {
+  const e = getEngine()
+  if (!e) return
+  if (!e.booleanOperation(op)) {
+    store.setStatusMessage('Boolean needs at least two unlocked paths')
+  }
 }
 
 /** Read the first selected item bounds into the transform fields. */

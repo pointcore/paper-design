@@ -2,7 +2,7 @@
  * EditorEngine - Vue/Pinia ↔ Paper.js bridge hub
  */
 import paper from 'paper'
-import type { ToolName, StyleState, LayerMeta, HistoryEntry, GuideOrientation, ProjectFileData, ReferencePoint, AlignMode, DistributeAxis } from './types'
+import type { ToolName, StyleState, LayerMeta, HistoryEntry, GuideOrientation, ProjectFileData, ReferencePoint, AlignMode, DistributeAxis, BooleanOperation } from './types'
 import { createDefaultStyle } from './store'
 import type { EditorStore } from './store-types'
 
@@ -915,6 +915,85 @@ export class EditorEngine {
       item.position = item.position.add(shift)
     })
     this.scope.view.update()
+  }
+
+  /**
+   * Combine unlocked selected paths with a Pathfinder boolean operation.
+   * Operands run back-to-front in document order: unite / intersect /
+   * exclude merge every operand, subtract removes each front operand from
+   * the back one. The result keeps the back operand style, replaces the
+   * originals and becomes the new selection. Consumed (empty) results are
+   * still recorded so Undo restores the operands. Returns false when fewer
+   * than two unlocked paths are selected or the operation fails.
+   */
+  booleanOperation(op: BooleanOperation): boolean {
+    const scope = this.scope
+    const paths = this.getSelection().filter(
+      (item) =>
+        !item.locked &&
+        item.parent &&
+        (item instanceof scope.Path || item instanceof scope.CompoundPath)
+    ) as paper.PathItem[]
+    if (paths.length < 2) return false
+    // Deterministic back-to-front operand order.
+    const ordered = paths
+      .slice()
+      .sort((a, b) => (a.isBelow(b) ? -1 : a.isAbove(b) ? 1 : 0))
+    const base = ordered[0]
+    const style = this.getStyleFromItem(base)
+    const parent = base.parent ?? this.getActiveLayer()
+
+    let working: paper.PathItem = base
+    let workingIsIntermediate = false
+    try {
+      for (let i = 1; i < ordered.length; i++) {
+        const next = ordered[i]
+        let combined: paper.PathItem
+        switch (op) {
+          case 'unite': combined = working.unite(next); break
+          case 'subtract': combined = working.subtract(next); break
+          case 'intersect': combined = working.intersect(next); break
+          case 'exclude': combined = working.exclude(next); break
+        }
+        if (workingIsIntermediate) working.remove()
+        working = combined
+        workingIsIntermediate = true
+      }
+    } catch {
+      if (workingIsIntermediate) working.remove()
+      return false
+    }
+
+    for (const operand of ordered) operand.remove()
+    const historyLabel =
+      op === 'unite' ? 'Unite' :
+      op === 'subtract' ? 'Subtract' :
+      op === 'intersect' ? 'Intersect' : 'Exclude'
+    if (this.isEmptyPathResult(working)) {
+      working.remove()
+      this.clearSelection()
+      this.pushHistory(historyLabel)
+      this.scope.view.update()
+      return true
+    }
+    parent.addChild(working)
+    working.data.id = this.genId()
+    working.data.isUserItem = true
+    this.applyStyleToItem(working, style)
+    this.clearSelection()
+    working.selected = true
+    this.syncSelectionToStore()
+    this.pushHistory(historyLabel)
+    this.scope.view.update()
+    return true
+  }
+
+  /** Whether a boolean result carries no visible geometry. */
+  private isEmptyPathResult(item: paper.PathItem): boolean {
+    const scope = this.scope
+    if (item instanceof scope.Path) return item.segments.length === 0
+    if (item instanceof scope.CompoundPath) return item.children.length === 0
+    return false
   }
 
   // ===== Edit operations =====
