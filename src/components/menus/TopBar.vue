@@ -13,6 +13,7 @@
               <el-dropdown-item command="export" divided>Export SVG</el-dropdown-item>
               <el-dropdown-item command="exportRaster">Export Raster...</el-dropdown-item>
               <el-dropdown-item command="exportPdf">Export PDF</el-dropdown-item>
+              <el-dropdown-item command="exportBoardsPdf">Export All Boards PDF</el-dropdown-item>
               <el-dropdown-item command="import">Import SVG...</el-dropdown-item>
               <el-dropdown-item command="place">Place Image...</el-dropdown-item>
             </el-dropdown-menu>
@@ -418,6 +419,9 @@ function onFileCmd(cmd: string) {
     case 'exportPdf':
       void onExportPdf()
       break
+    case 'exportBoardsPdf':
+      void onExportBoardsPdf()
+      break
     case 'export':
       if (e) {
         // Temporarily hide non-user layers (grid / overlay / annotation / guides)
@@ -569,6 +573,50 @@ async function onExportPdf() {
     store.setStatusMessage('PDF exported')
   } catch (err) {
     store.setStatusMessage('PDF export failed')
+  }
+}
+
+/**
+ * Export every artboard as one PDF page each (2x rasters embedded
+ * full-bleed). The active board is restored afterwards.
+ */
+async function onExportBoardsPdf() {
+  const e = engineRef?.value
+  if (!e) return
+  const boards = store.artboards.filter((b) => b.width > 0 && b.height > 0)
+  if (boards.length === 0) {
+    store.setStatusMessage('Nothing to export')
+    return
+  }
+  const previousActive = store.activeArtboardId
+  try {
+    const { jsPDF } = await import('jspdf')
+    let doc = null as InstanceType<typeof jsPDF> | null
+    let painted = 0
+    for (const board of boards) {
+      store.setActiveArtboard(board.id)
+      const dataUrl = e.exportRaster({ format: 'png', scale: 2, area: 'page' })
+      if (!dataUrl) continue
+      const orientation = board.width >= board.height ? 'landscape' : 'portrait'
+      if (!doc) {
+        doc = new jsPDF({ orientation, unit: 'pt', format: [board.width, board.height], compress: true })
+      } else {
+        doc.addPage([board.width, board.height], orientation)
+      }
+      doc.addImage(dataUrl, 'PNG', 0, 0, board.width, board.height)
+      painted++
+    }
+    if (!doc || painted === 0) {
+      store.setStatusMessage('PDF export failed')
+      return
+    }
+    doc.save('export-boards.pdf')
+    store.setStatusMessage(`PDF exported (${painted} of ${boards.length} boards)`)
+  } catch (err) {
+    store.setStatusMessage('PDF export failed')
+  } finally {
+    store.setActiveArtboard(previousActive)
+    e.refreshArtboards()
   }
 }
 
