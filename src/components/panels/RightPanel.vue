@@ -21,6 +21,9 @@
           <ArtboardPanel />
         </div>
       </div>
+      <div v-show="activeTab === 'symbols'" class="rp-pane">
+        <SymbolsPanel />
+      </div>
       <div v-show="activeTab === 'history'" class="rp-pane">
         <HistoryPanel />
       </div>
@@ -36,12 +39,14 @@ import PropertyPanel from './PropertyPanel.vue'
 import LayerPanel from './LayerPanel.vue'
 import ArtboardPanel from './ArtboardPanel.vue'
 import HistoryPanel from './HistoryPanel.vue'
+import SymbolsPanel from './SymbolsPanel.vue'
 
 const store = useEditorStore()
 
 const tabs = [
   { key: 'property', label: 'Properties' },
   { key: 'layer', label: 'Layers' },
+  { key: 'symbols', label: 'Symbols' },
   { key: 'history', label: 'History' },
 ] as const
 

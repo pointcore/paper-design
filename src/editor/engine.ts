@@ -3,7 +3,7 @@
  */
 import paper from 'paper'
 import { PaperOffset } from 'paperjs-offset'
-import type { ToolName, StyleState, LayerMeta, LayerItemNode, ArtboardMeta, HistoryEntry, GuideOrientation, ProjectFileData, ReferencePoint, AlignMode, DistributeAxis, BooleanOperation, RasterExportOptions, GradientState } from './types'
+import type { ToolName, StyleState, LayerMeta, LayerItemNode, ArtboardMeta, SymbolEntry, HistoryEntry, GuideOrientation, ProjectFileData, ReferencePoint, AlignMode, DistributeAxis, BooleanOperation, RasterExportOptions, GradientState } from './types'
 import { createDefaultStyle } from './store'
 import type { EditorStore } from './store-types'
 
@@ -1144,6 +1144,7 @@ export class EditorEngine {
     else if (item instanceof scope.Group && this.isClipGroup(item)) kind = 'Clipping Mask'
     else if (item instanceof scope.PointText) kind = 'Text'
     else if (item instanceof scope.CompoundPath) kind = 'Compound Path'
+    else if (item instanceof scope.SymbolItem) kind = 'Symbol'
     else if (item instanceof scope.Raster) kind = 'Image'
     else if (item instanceof scope.Group) kind = 'Group'
     else if (item instanceof scope.Path) kind = item.closed ? 'Closed Path' : 'Path'
@@ -2154,6 +2155,179 @@ export class EditorEngine {
       raster.remove()
       this.showStatus('Image placement failed')
     }
+  }
+
+  // ===== Symbols =====
+
+  /**
+   * Symbol definitions live behind hidden keeper instances (one invisible
+   * SymbolItem per definition on a locked non-user layer). Keepers keep
+   * unused definitions referenced so they survive snapshots, undo and
+   * save files; they never render, hit-test, export or list anywhere.
+   */
+  private getKeeperLayer(create = true): paper.Layer | null {
+    const existing = this.project.layers.find(
+      (l) => (l.data as any)?.isSymbolKeeper
+    ) as paper.Layer | undefined
+    if (existing) return existing
+    if (!create) return null
+    const layer = new this.scope.Layer()
+    layer.name = 'symbols'
+    layer.locked = true
+    layer.visible = false
+    layer.data.isUserLayer = false
+    layer.data.isSymbolKeeper = true
+    return layer
+  }
+
+  /** All symbol keepers (library entries) in creation order. */
+  private getKeepers(): paper.SymbolItem[] {
+    const layer = this.getKeeperLayer(false)
+    if (!layer) return []
+    return (layer.children as paper.Item[]).filter(
+      (child) => (child.data as any)?.symbolId
+    ) as paper.SymbolItem[]
+  }
+
+  /** First unused "Symbol N" name. */
+  private nextSymbolName(): string {
+    const names = new Set(this.getKeepers().map((k) => (k.data as any)?.symbolName as string))
+    let n = this.getKeepers().length + 1
+    while (names.has(`Symbol ${n}`)) n++
+    return `Symbol ${n}`
+  }
+
+  /**
+   * Library entries with live instance counts (keepers excluded from the
+   * count). The panel rebuilds off history/selection changes.
+   */
+  listSymbols(): SymbolEntry[] {
+    const keepers = this.getKeepers()
+    if (keepers.length === 0) return []
+    const counts = new Map<object, number>()
+    const tally = (item: paper.Item) => {
+      if (item instanceof this.scope.SymbolItem && !(item.data as any)?.isKeeper) {
+        const definition = (item as any)._definition ?? (item as any).definition
+        if (definition) counts.set(definition, (counts.get(definition) ?? 0) + 1)
+      }
+      const children = (item as any).children as paper.Item[] | undefined
+      if (children) {
+        for (const child of children) tally(child)
+      }
+    }
+    for (const layer of this.project.layers) {
+      if (!(layer.data as any)?.isUserLayer) continue
+      for (const child of layer.children) tally(child as paper.Item)
+    }
+    return keepers.map((keeper) => {
+      const data = keeper.data as any
+      const definition = data ? ((keeper as any)._definition ?? (keeper as any).definition) : null
+      return {
+        id: data.symbolId as string,
+        name: (data.symbolName as string) || 'Symbol',
+        instances: definition ? (counts.get(definition) ?? 0) : 0,
+      }
+    })
+  }
+
+  /**
+   * Define a symbol from the unlocked selection (grouped when plural).
+   * The source leaves the scene into the definition; one hidden keeper
+   * holds the library entry. Returns false when nothing qualifies.
+   */
+  defineSymbolFromSelection(): boolean {
+    const scope = this.scope
+    const items = this.getSelection().filter((item) => !item.locked && item.parent)
+    if (items.length === 0) return false
+    const root =
+      items.length === 1 ? items[0] : (new scope.Group(items) as paper.Group)
+    const definition = new scope.SymbolDefinition(root)
+    const keeperLayer = this.getKeeperLayer()
+    if (!keeperLayer) return false
+    const keeper = definition.place(new scope.Point(0, 0)) as paper.SymbolItem
+    keeper.visible = false
+    keeper.data.symbolId = this.genId()
+    keeper.data.symbolName = this.nextSymbolName()
+    keeper.data.isKeeper = true
+    const wasLocked = keeperLayer.locked
+    keeperLayer.locked = false
+    keeperLayer.addChild(keeper)
+    keeperLayer.locked = wasLocked
+    this.clearSelection()
+    this.pushHistory('Make Symbol')
+    this.scope.view.update()
+    return true
+  }
+
+  /** Place a symbol instance at the view center and select it. */
+  placeSymbol(id: string): boolean {
+    const keeper = this.getKeepers().find((k) => (k.data as any)?.symbolId === id)
+    if (!keeper) return false
+    const definition = (keeper as any)._definition ?? (keeper as any).definition
+    if (!definition) return false
+    const instance = definition.place(this.scope.view.center.clone()) as paper.SymbolItem
+    const layer = this.getActiveLayer()
+    layer.addChild(instance)
+    instance.data.id = this.genId()
+    instance.data.isUserItem = true
+    this.selectItem(instance)
+    this.pushHistory('Place Symbol')
+    this.scope.view.update()
+    return true
+  }
+
+  /** Delete a symbol definition (placed instances keep working). */
+  deleteSymbol(id: string): boolean {
+    const keeper = this.getKeepers().find((k) => (k.data as any)?.symbolId === id)
+    if (!keeper) return false
+    keeper.remove()
+    this.pushHistory('Delete Symbol')
+    this.scope.view.update()
+    return true
+  }
+
+  /** Rename a symbol definition (metadata only, no history). */
+  renameSymbol(id: string, name: string): void {
+    const keeper = this.getKeepers().find((k) => (k.data as any)?.symbolId === id)
+    if (!keeper) return
+    ;(keeper.data as any).symbolName = name
+    this.scope.view.update()
+  }
+
+  /**
+   * Break selected symbol instances into plain artwork: definition content
+   * cloned through the instance matrix, keeping slot, paint and stacking.
+   */
+  breakSymbolLinks(): boolean {
+    const scope = this.scope
+    const instances = this.getSelection().filter(
+      (item) => item.parent && item instanceof scope.SymbolItem && !(item.data as any)?.isKeeper
+    ) as paper.SymbolItem[]
+    if (instances.length === 0) return false
+    const released: paper.Item[] = []
+    for (const instance of instances) {
+      const definition = (instance as any)._definition ?? (instance as any).definition
+      const source = definition?.item ?? definition?._item
+      if (!source) continue
+      const content = (source.clone({ insert: false }) as paper.Item)
+      content.transform(instance.matrix)
+      const parent = instance.parent ?? this.getActiveLayer()
+      const rawAt = parent.children.indexOf(instance)
+      parent.insertChild(Math.min(Math.max(rawAt, 0), parent.children.length), content)
+      content.data.id = this.genId()
+      content.data.isUserItem = true
+      instance.remove()
+      released.push(content)
+    }
+    if (released.length === 0) return false
+    this.clearSelection()
+    released.forEach((item) => {
+      item.selected = true
+    })
+    this.syncSelectionToStore()
+    this.pushHistory('Break Symbol Link')
+    this.scope.view.update()
+    return true
   }
 
   // ===== Edit operations =====

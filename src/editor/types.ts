@@ -222,7 +222,14 @@ export type BooleanOperation = 'unite' | 'subtract' | 'intersect' | 'exclude'
 export type RulerUnit = 'px' | 'pt' | 'mm' | 'cm' | 'in'
 
 /** Right-panel tab */
-export type RightPanelTab = 'property' | 'layer' | 'history'
+export type RightPanelTab = 'property' | 'layer' | 'history' | 'symbols'
+
+/** Symbol library entry (resolved from keeper instances). */
+export interface SymbolEntry {
+  id: string
+  name: string
+  instances: number
+}
 
 /** History entry */
 export interface HistoryEntry {
