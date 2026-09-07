@@ -34,6 +34,7 @@
               <el-dropdown-item command="pasteBack">Paste in Back</el-dropdown-item>
               <el-dropdown-item command="delete" divided :disabled="!store.hasSelection">Delete</el-dropdown-item>
               <el-dropdown-item command="selectAll" divided>Select All</el-dropdown-item>
+              <el-dropdown-item command="invertSelection">Invert Selection</el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
@@ -660,6 +661,9 @@ function onEditCmd(cmd: string) {
         c.selected = true
       })
       e.syncSelectionToStore()
+      break
+    case 'invertSelection':
+      e.invertSelection()
       break
   }
 }

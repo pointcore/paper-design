@@ -1230,6 +1230,32 @@ export class EditorEngine {
     this.scope.view.update()
   }
 
+  /**
+   * Select every visible unlocked top-level user item except the current
+   * selection. Locked and hidden artwork stays out so follow-up commands
+   * cannot touch it by accident. Selection-only change: no history entry.
+   */
+  invertSelection(): void {
+    const candidates: paper.Item[] = []
+    for (const layer of this.project.layers) {
+      if (!(layer.data as any)?.isUserLayer || !layer.visible || layer.locked) continue
+      for (const child of layer.children) {
+        const item = child as paper.Item
+        const data = (item.data as any) ?? {}
+        if (!item.visible || (item as any).locked) continue
+        if (data.isPreview || data.isChrome) continue
+        candidates.push(item)
+      }
+    }
+    const selected = new Set(this.getSelection())
+    this.project.deselectAll()
+    candidates.forEach((item) => {
+      if (!selected.has(item)) item.selected = true
+    })
+    this.syncSelectionToStore()
+    this.scope.view.update()
+  }
+
   /** Toggle one object-tree entry visibility. */
   setItemVisible(id: string, visible: boolean): void {
     const item = this.getItemById(id)
