@@ -1064,6 +1064,197 @@ export class EditorEngine {
     }
   }
 
+  // ===== Object order / visibility / select-same =====
+
+  /**
+   * Move every selected item one step towards the front within its parent.
+   * Items move front-most first so multi-selections keep their order.
+   */
+  bringForward(): void {
+    this.shiftSelectedOrder(1)
+    this.pushHistory('Bring Forward')
+    this.scope.view.update()
+  }
+
+  /** Move every selected item one step towards the back within its parent. */
+  sendBackward(): void {
+    this.shiftSelectedOrder(-1)
+    this.pushHistory('Send Backward')
+    this.scope.view.update()
+  }
+
+  /** Swap each selected item with the sibling beside it in `direction`. */
+  private shiftSelectedOrder(direction: 1 | -1): void {
+    const moving = new Set(this.getSelection())
+    if (moving.size === 0) return
+    const byParent = new Map<paper.Item, paper.Item[]>()
+    for (const item of moving) {
+      const parent = item.parent
+      if (!parent) continue
+      const list = byParent.get(parent) ?? []
+      list.push(item)
+      byParent.set(parent, list)
+    }
+    for (const [parent, items] of byParent) {
+      const children = parent.children as paper.Item[]
+      items.sort((a, b) =>
+        direction > 0
+          ? children.indexOf(b) - children.indexOf(a)
+          : children.indexOf(a) - children.indexOf(b)
+      )
+      for (const item of items) {
+        const at = children.indexOf(item)
+        const target = at + direction
+        if (target < 0 || target >= children.length) continue
+        // A selected neighbor travels with the block: leave it in place.
+        if (moving.has(children[target])) continue
+        parent.insertChild(target, item)
+      }
+    }
+  }
+
+  /** Lock or unlock the current selection (locked items skip most tools). */
+  setSelectedLocked(locked: boolean): void {
+    const items = this.getSelection()
+    if (items.length === 0) return
+    items.forEach((item) => {
+      item.locked = locked
+    })
+    this.pushHistory(locked ? 'Lock' : 'Unlock')
+    this.scope.view.update()
+  }
+
+  /** Unlock every user item in the document. */
+  unlockAll(): void {
+    let changed = false
+    for (const item of this.walkUserItems()) {
+      if (item.locked) {
+        item.locked = false
+        changed = true
+      }
+    }
+    if (changed) this.pushHistory('Unlock All')
+    this.scope.view.update()
+  }
+
+  /** Hide or show the current selection. */
+  setSelectedVisible(visible: boolean): void {
+    const items = this.getSelection()
+    if (items.length === 0) return
+    items.forEach((item) => {
+      item.visible = visible
+    })
+    this.pushHistory(visible ? 'Show' : 'Hide')
+    this.scope.view.update()
+  }
+
+  /** Show every user item in the document. */
+  showAll(): void {
+    let changed = false
+    for (const item of this.walkUserItems()) {
+      if (!item.visible) {
+        item.visible = true
+        changed = true
+      }
+    }
+    if (changed) this.pushHistory('Show All')
+    this.scope.view.update()
+  }
+
+  /**
+   * Select every appearance leaf sharing the fill or stroke color of the
+   * first selected leaf. Returns how many items were selected.
+   */
+  selectSame(attribute: 'fill' | 'stroke'): number {
+    const leaves = this.appearanceLeaves()
+    if (leaves.length === 0) return 0
+    const reference = this.getSelection()
+      .map((item) => this.firstLeaf(item))
+      .find((leaf) => leaf !== null) as paper.Item | undefined
+    if (!reference) return 0
+    const key = this.appearanceKey(reference, attribute)
+    const matches = leaves.filter((leaf) => this.appearanceKey(leaf, attribute) === key)
+    this.clearSelection()
+    matches.forEach((item) => {
+      item.selected = true
+    })
+    this.syncSelectionToStore()
+    this.scope.view.update()
+    return matches.length
+  }
+
+  /** Fill / stroke color key used by select-same (`none` when unset). */
+  private appearanceKey(item: paper.Item, attribute: 'fill' | 'stroke'): string {
+    const color = (
+      attribute === 'fill'
+        ? (item as any).fillColor
+        : (item as any).strokeColor
+    ) as paper.Color | null | undefined
+    return color ? color.toCSS(true) : 'none'
+  }
+
+  /** First style-carrying leaf under an item (itself when it is one). */
+  private firstLeaf(item: paper.Item): paper.Item | null {
+    const scope = this.scope
+    if (
+      item instanceof scope.Path ||
+      item instanceof scope.CompoundPath ||
+      item instanceof scope.PointText
+    ) {
+      return item
+    }
+    const children = (item as any).children as paper.Item[] | undefined
+    if (children) {
+      for (const child of children) {
+        const found = this.firstLeaf(child)
+        if (found) return found
+      }
+    }
+    return null
+  }
+
+  /** Every style-carrying leaf of user artwork (groups descended into). */
+  private appearanceLeaves(): paper.Item[] {
+    const scope = this.scope
+    const out: paper.Item[] = []
+    const walk = (item: paper.Item) => {
+      const data = (item.data as any) ?? {}
+      if (data.isChrome || data.isPreview || data.isGuide || data.annotation) return
+      if (
+        item instanceof scope.Path ||
+        item instanceof scope.CompoundPath ||
+        item instanceof scope.PointText
+      ) {
+        out.push(item)
+        return
+      }
+      const children = (item as any).children as paper.Item[] | undefined
+      if (children) {
+        for (const child of children) walk(child)
+      }
+    }
+    for (const layer of this.project.layers) {
+      if (!(layer.data as any)?.isUserLayer) continue
+      for (const child of layer.children) walk(child as paper.Item)
+    }
+    return out
+  }
+
+  /** Every user item including group descendants (lock / visibility sweeps). */
+  private *walkUserItems(): Generator<paper.Item> {
+    const walk = function* (item: paper.Item): Generator<paper.Item> {
+      yield item
+      const children = (item as any).children as paper.Item[] | undefined
+      if (children) {
+        for (const child of children) yield* walk(child)
+      }
+    }
+    for (const layer of this.project.layers) {
+      if (!(layer.data as any)?.isUserLayer) continue
+      for (const child of layer.children) yield* walk(child as paper.Item)
+    }
+  }
+
   // ===== Edit operations =====
 
   copySelected(): paper.Item[] {

@@ -1068,23 +1068,35 @@ export class SelectController {
       tolerance: 3 / scope.view.zoom,
     })
     const item = hit?.item
+    if ((item as any)?.locked) return null
     if (item instanceof scope.PointText && !(item as any).data?.annotation) {
       return item as paper.PointText
     }
     return null
   }
 
+  /**
+   * Topmost selectable artwork under a point. Editing chrome, guide lines
+   * and locked items never block: the search continues underneath them.
+   */
   private hitTest(point: paper.Point): paper.HitResult | null {
     const engine = this.engine
     if (!engine) return null
     const scope = engine.scope
-    const hitResult = engine.project.hitTest(point, {
+    const hits = engine.project.hitTestAll(point, {
       fill: true,
       stroke: true,
       segments: false,
       tolerance: 3 / scope.view.zoom,
     })
-    return hitResult as paper.HitResult
+    for (const hit of hits) {
+      const item = hit.item
+      const data = (item.data as any) ?? {}
+      if (data.isChrome || data.isPreview || data.isGuide) continue
+      if ((item as any).locked) continue
+      return hit as paper.HitResult
+    }
+    return null
   }
 
   private createMarquee(x: number, y: number) {

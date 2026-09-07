@@ -883,6 +883,7 @@ export class TextController {
       tolerance: 3 / scope.view.zoom,
     })
     const item = hit?.item
+    if ((item as any)?.locked) return null
     if (item instanceof scope.PointText && !(item as any).data?.annotation) {
       return item as paper.PointText
     }

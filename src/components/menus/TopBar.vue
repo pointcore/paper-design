@@ -38,9 +38,17 @@
             <el-dropdown-menu>
               <el-dropdown-item command="transform" :disabled="!store.hasSelection">Transform</el-dropdown-item>
               <el-dropdown-item command="bringToFront" :disabled="!store.hasSelection">Bring to Front</el-dropdown-item>
+              <el-dropdown-item command="bringForward" :disabled="!store.hasSelection">Bring Forward</el-dropdown-item>
+              <el-dropdown-item command="sendBackward" :disabled="!store.hasSelection">Send Backward</el-dropdown-item>
               <el-dropdown-item command="sendToBack" :disabled="!store.hasSelection">Send to Back</el-dropdown-item>
               <el-dropdown-item command="group" divided :disabled="!store.hasSelection">Group</el-dropdown-item>
               <el-dropdown-item command="ungroup" :disabled="!store.hasSelection">Ungroup</el-dropdown-item>
+              <el-dropdown-item command="lock" divided :disabled="!store.hasSelection">Lock</el-dropdown-item>
+              <el-dropdown-item command="unlockAll">Unlock All</el-dropdown-item>
+              <el-dropdown-item command="hide" divided :disabled="!store.hasSelection">Hide</el-dropdown-item>
+              <el-dropdown-item command="showAll">Show All</el-dropdown-item>
+              <el-dropdown-item command="sameFill" divided :disabled="!store.hasSelection">Select Same Fill</el-dropdown-item>
+              <el-dropdown-item command="sameStroke" :disabled="!store.hasSelection">Select Same Stroke</el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
@@ -487,6 +495,34 @@ function onObjectCmd(cmd: string) {
       e.clearSelection()
       e.pushHistory('Ungroup')
       e.scope.view.update()
+      break
+    }
+    case 'bringForward':
+      e.bringForward()
+      break
+    case 'sendBackward':
+      e.sendBackward()
+      break
+    case 'lock':
+      e.setSelectedLocked(true)
+      break
+    case 'unlockAll':
+      e.unlockAll()
+      break
+    case 'hide':
+      e.setSelectedVisible(false)
+      break
+    case 'showAll':
+      e.showAll()
+      break
+    case 'sameFill': {
+      const count = e.selectSame('fill')
+      store.setStatusMessage(`Selected ${count} items with the same fill`)
+      break
+    }
+    case 'sameStroke': {
+      const count = e.selectSame('stroke')
+      store.setStatusMessage(`Selected ${count} items with the same stroke`)
       break
     }
   }
