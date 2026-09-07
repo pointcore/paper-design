@@ -15,6 +15,7 @@ import { AnchorController } from './path-drawing/anchor-controller'
 import { ShapeController } from './shapes/shape-controller'
 import { TextController } from './text/text-controller'
 import { CalloutController } from './annotation/callout-controller'
+import { MeasureController } from './annotation/measure-controller'
 import { ViewController } from './view-controller'
 
 export function registerAllControllers(engine: EditorEngine) {
@@ -71,6 +72,7 @@ export function registerAllControllers(engine: EditorEngine) {
 
   // Annotation tools
   engine.registerController('callout', new CalloutController())
+  engine.registerController('measure', new MeasureController())
 
   // View tools (hand / zoom share the same controller)
   const viewCtrl = new ViewController()

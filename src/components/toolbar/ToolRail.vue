@@ -51,7 +51,7 @@ import {
   Pointer, Aim, EditPen, Edit, MagicStick,
   Position, ZoomIn, Setting, Brush, BrushFilled, Star, Operation, ChatLineRound,
   CirclePlus, Remove, Tickets, Link, Document, CopyDocument, Delete, Stamp, Scissor, Crop,
-  Discount, Loading, Lollipop
+  Discount, Loading, Lollipop, Coordinate
 } from '@element-plus/icons-vue'
 import { useEditorStore } from '../../editor/store'
 import type { ToolName } from '../../editor/types'
@@ -98,6 +98,7 @@ const drawTools: ToolDef[] = [
 
 const annotTools: ToolDef[] = [
   { name: 'callout', tip: 'Callout Tool', icon: ChatLineRound },
+  { name: 'measure', tip: 'Measure Tool (drag for length and angle)', icon: Coordinate },
 ]
 
 function selectTool(name: ToolName) {
