@@ -84,6 +84,22 @@
           <el-button size="small" :type="store.transform.flipV ? 'primary' : ''" @click="onFlipV">Flip V</el-button>
         </div>
       </div>
+
+      <div class="prop-section">
+        <div class="prop-label">Align</div>
+        <div class="align-row">
+          <el-button size="small" :disabled="store.selectedItemIds.length < 2" @click="onAlign('left', 'Align Left')">Left</el-button>
+          <el-button size="small" :disabled="store.selectedItemIds.length < 2" @click="onAlign('centerX', 'Align Center')">Center</el-button>
+          <el-button size="small" :disabled="store.selectedItemIds.length < 2" @click="onAlign('right', 'Align Right')">Right</el-button>
+          <el-button size="small" :disabled="store.selectedItemIds.length < 2" @click="onAlign('top', 'Align Top')">Top</el-button>
+          <el-button size="small" :disabled="store.selectedItemIds.length < 2" @click="onAlign('centerY', 'Align Middle')">Middle</el-button>
+          <el-button size="small" :disabled="store.selectedItemIds.length < 2" @click="onAlign('bottom', 'Align Bottom')">Bottom</el-button>
+        </div>
+        <div class="align-row">
+          <el-button size="small" :disabled="store.selectedItemIds.length < 3" @click="onDistribute('horizontal')">Distribute H</el-button>
+          <el-button size="small" :disabled="store.selectedItemIds.length < 3" @click="onDistribute('vertical')">Distribute V</el-button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -92,7 +108,7 @@
 import { ref, watch, inject, type Ref } from 'vue'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
-import type { ReferencePoint, TextAlign } from '../../editor/types'
+import type { AlignMode, DistributeAxis, ReferencePoint, TextAlign } from '../../editor/types'
 
 const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
@@ -343,6 +359,20 @@ function onFlipV() {
   e.pushHistory('Flip Vertical')
 }
 
+function onAlign(mode: AlignMode, label: string) {
+  const e = getEngine()
+  if (!e) return
+  e.alignSelection(mode)
+  e.pushHistory(label)
+}
+
+function onDistribute(axis: DistributeAxis) {
+  const e = getEngine()
+  if (!e) return
+  e.distributeSelection(axis)
+  e.pushHistory(axis === 'horizontal' ? 'Distribute Horizontally' : 'Distribute Vertically')
+}
+
 /** Read the first selected item bounds into the transform fields. */
 function syncTransformFromSelection() {
   const e = getEngine()
@@ -460,5 +490,12 @@ watch(() => store.selectedItemIds, () => {
 .ref-cell.active {
   background: #4a90d9;
   border-color: #4a90d9;
+}
+
+.align-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
 }
 </style>

@@ -2,7 +2,7 @@
  * EditorEngine - Vue/Pinia ↔ Paper.js bridge hub
  */
 import paper from 'paper'
-import type { ToolName, StyleState, LayerMeta, HistoryEntry, GuideOrientation, ProjectFileData, ReferencePoint } from './types'
+import type { ToolName, StyleState, LayerMeta, HistoryEntry, GuideOrientation, ProjectFileData, ReferencePoint, AlignMode, DistributeAxis } from './types'
 import { createDefaultStyle } from './store'
 import type { EditorStore } from './store-types'
 
@@ -763,8 +763,11 @@ export class EditorEngine {
 
   /** United axis-aligned bounds of the current selection, or null. */
   getSelectionBounds(): paper.Rectangle | null {
-    const items = this.getSelection()
-    if (items.length === 0) return null
+    return this.unitedBoundsOf(this.getSelection())
+  }
+
+  /** United axis-aligned bounds of the given items, or null. */
+  private unitedBoundsOf(items: paper.Item[]): paper.Rectangle | null {
     let rect: paper.Rectangle | null = null
     for (const item of items) {
       const b = item.bounds
@@ -843,6 +846,74 @@ export class EditorEngine {
     } else {
       this.store.updateTransform({ flipV: !this.store.transform.flipV })
     }
+    this.scope.view.update()
+  }
+
+  /**
+   * Align every unlocked selected item to an edge or center of the united
+   * bounds of the unlocked selection. Needs at least two unlocked items.
+   * Callers record history.
+   */
+  alignSelection(mode: AlignMode): void {
+    const items = this.getSelection().filter((item) => !item.locked)
+    if (items.length < 2) return
+    const bounds = this.unitedBoundsOf(items)
+    if (!bounds) return
+    const targetLeft = bounds.x
+    const targetCenterX = bounds.x + bounds.width / 2
+    const targetRight = bounds.x + bounds.width
+    const targetTop = bounds.y
+    const targetCenterY = bounds.y + bounds.height / 2
+    const targetBottom = bounds.y + bounds.height
+    for (const item of items) {
+      const b = item.bounds
+      if (!b) continue
+      let dx = 0
+      let dy = 0
+      switch (mode) {
+        case 'left': dx = targetLeft - b.x; break
+        case 'centerX': dx = targetCenterX - (b.x + b.width / 2); break
+        case 'right': dx = targetRight - (b.x + b.width); break
+        case 'top': dy = targetTop - b.y; break
+        case 'centerY': dy = targetCenterY - (b.y + b.height / 2); break
+        case 'bottom': dy = targetBottom - (b.y + b.height); break
+      }
+      if (dx !== 0 || dy !== 0) {
+        item.position = item.position.add(new this.scope.Point(dx, dy))
+      }
+    }
+    this.scope.view.update()
+  }
+
+  /**
+   * Spread unlocked selected items evenly along an axis by distributing
+   * their centers between the extreme centers. The extreme items stay in
+   * place. Needs at least three unlocked items with distinct extremes.
+   * Callers record history.
+   */
+  distributeSelection(axis: DistributeAxis): void {
+    const items = this.getSelection().filter((item) => !item.locked && item.bounds)
+    if (items.length < 3) return
+    const horizontal = axis === 'horizontal'
+    const centers = items.map((item) => {
+      const b = item.bounds
+      return horizontal ? b.x + b.width / 2 : b.y + b.height / 2
+    })
+    const order = items.map((_, index) => index).sort((a, b) => centers[a] - centers[b])
+    const first = centers[order[0]]
+    const last = centers[order[order.length - 1]]
+    if (!Number.isFinite(first) || !Number.isFinite(last)) return
+    if (Math.abs(last - first) < 1e-9) return
+    const step = (last - first) / (items.length - 1)
+    order.forEach((itemIndex, rank) => {
+      const delta = first + step * rank - centers[itemIndex]
+      if (Math.abs(delta) < 1e-9) return
+      const item = items[itemIndex]
+      const shift = horizontal
+        ? new this.scope.Point(delta, 0)
+        : new this.scope.Point(0, delta)
+      item.position = item.position.add(shift)
+    })
     this.scope.view.update()
   }
 

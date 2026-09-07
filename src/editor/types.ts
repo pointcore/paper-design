@@ -174,6 +174,14 @@ export type ReferencePoint =
   | 'middle-left' | 'center' | 'middle-right'
   | 'bottom-left' | 'bottom-center' | 'bottom-right'
 
+/** Alignment edge for align-to-selection operations. */
+export type AlignMode =
+  | 'left' | 'centerX' | 'right'
+  | 'top' | 'centerY' | 'bottom'
+
+/** Axis for even distribution of selection centers. */
+export type DistributeAxis = 'horizontal' | 'vertical'
+
 /** Ruler unit */
 export type RulerUnit = 'px' | 'pt' | 'mm' | 'cm' | 'in'
 
