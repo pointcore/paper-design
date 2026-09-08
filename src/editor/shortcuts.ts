@@ -191,13 +191,22 @@ export function handleGlobalKeydown(
       engine?.selectAllArtwork()
       e.preventDefault()
     } else if (key === 'g' && !e.shiftKey && !e.altKey) {
-      // Group only claims the key with 2+ selected (browser find-again
-      // keeps working otherwise, same conditional pattern as paste).
-      if ((engine?.getSelection().length ?? 0) > 1 && engine?.groupSelection()) {
+      // Group claims the key whenever anything is selected (failing still
+      // blocks the browser's find-next, which would otherwise pop up when
+      // fewer than two top-level items are selected).
+      if ((engine?.getSelection().length ?? 0) > 0) {
+        if (!engine?.groupSelection()) {
+          store.setStatusMessage('Select 2 or more objects to group')
+        }
         e.preventDefault()
       }
     } else if (key === 'g' && e.shiftKey && !e.altKey) {
-      if (engine?.ungroupSelection()) e.preventDefault()
+      if ((engine?.getSelection().length ?? 0) > 0) {
+        if (!engine?.ungroupSelection()) {
+          store.setStatusMessage('Select a group to ungroup')
+        }
+        e.preventDefault()
+      }
     } else if (key === '2' && !e.shiftKey && !e.altKey) {
       if ((engine?.getSelection().length ?? 0) > 0) {
         engine?.setSelectedLocked(true)

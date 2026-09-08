@@ -50,6 +50,9 @@
               <el-dropdown-item command="sendToBack" :disabled="!store.hasSelection">Send to Back</el-dropdown-item>
               <el-dropdown-item command="group" divided :disabled="!store.hasSelection">Group</el-dropdown-item>
               <el-dropdown-item command="ungroup" :disabled="!store.hasSelection">Ungroup</el-dropdown-item>
+              <el-dropdown-item command="newSublayer">New Sublayer</el-dropdown-item>
+              <el-dropdown-item command="collect" :disabled="!store.hasSelection">Collect in New Layer</el-dropdown-item>
+              <el-dropdown-item command="releaseLayers" :disabled="!store.hasSelection">Release to Layers</el-dropdown-item>
               <el-dropdown-item command="isolate" :disabled="!store.hasSelection">Isolate</el-dropdown-item>
               <el-dropdown-item command="exitIsolation" :disabled="!store.isolationActive">Exit Isolation</el-dropdown-item>
               <el-dropdown-item command="makeCompound" divided :disabled="!store.hasSelection">Make Compound Path</el-dropdown-item>
@@ -699,6 +702,21 @@ function onObjectCmd(cmd: string) {
       break
     case 'ungroup':
       e.ungroupSelection()
+      break
+    case 'newSublayer':
+      if (!e.createSublayer()) {
+        store.setStatusMessage('Cannot create sublayer here')
+      }
+      break
+    case 'collect':
+      if (!e.collectInNewLayer()) {
+        store.setStatusMessage('Nothing to collect')
+      }
+      break
+    case 'releaseLayers':
+      if (!e.releaseToLayers()) {
+        store.setStatusMessage('Select a group to release')
+      }
       break
     case 'isolate': {
       const groups = e.getSelection().filter(
