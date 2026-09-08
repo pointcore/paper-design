@@ -50,6 +50,11 @@ const SCISSORS_SVG = `<svg xmlns='http://www.w3.org/2000/svg' width='24' height=
 
 const EYEDROPPER_SVG = `<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'><path d='M14 3 L21 10 L11 20 L9 18 L17 10 L14 7 L6 15 L4 13 Z' fill='white' stroke='black' stroke-width='1.3' stroke-linejoin='round'/><path d='M4 13 L2 22 L11 20 L9 18 L6 15 Z' fill='white' stroke='black' stroke-width='1.3' stroke-linejoin='round'/></svg>`
 
+// Tilted-frame affordances (32px): black fill with a thin white outline —
+// black core underneath, white edge on top. Strokes stay chunky enough to
+// rasterize smooth; hairlines shimmer and alias at cursor size.
+const ROTATE_SVG = `<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32' shape-rendering='geometricPrecision'><path d='M26 16 A10 10 0 1 1 16 6' fill='none' stroke='white' stroke-width='4.2' stroke-linecap='round'/><path d='M26 16 A10 10 0 1 1 16 6' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round'/><path d='M21.5 6 L16.3 2.6 L16.3 9.4 Z' fill='black' stroke='white' stroke-width='1' stroke-linejoin='round'/></svg>`
+
 // ------------------------------------------------------------------
 // Named cursors (CSS value ready to assign to canvas.style.cursor)
 // ------------------------------------------------------------------
@@ -74,6 +79,8 @@ export const CURSOR_PENCIL = svgCursor(PENCIL_SVG, 4, 20, 'crosshair')
 export const CURSOR_SCISSORS = svgCursor(SCISSORS_SVG, 12, 12, 'pointer')
 /** Eyedropper tool icon (hotspot at the dropper tip). */
 export const CURSOR_EYEDROPPER = svgCursor(EYEDROPPER_SVG, 2, 22, 'crosshair')
+/** Rotate affordance: circular arrow (32px black, thin white edge), hotspot at center. */
+export const CURSOR_ROTATE = svgCursor(ROTATE_SVG, 16, 16, 'grab')
 
 /**
  * Precision ring cursor for size-based tools (brush / blob-brush / eraser).
@@ -101,6 +108,66 @@ export function ringCursor(diameterPx: number, fallback = 'crosshair'): string {
 export const BRUSH_RING_PX = 20
 export const BLOB_RING_PX = 20
 export const ERASER_RING_PX = 20
+
+// ------------------------------------------------------------------
+// Exact-angle resize arrows (tilted-frame corners)
+// ------------------------------------------------------------------
+
+/** Cache of exact-angle resize cursors by folded integer degree. */
+const arrowCursorCache = new Map<number, string>()
+
+function fmt1(n: number): number {
+  return Math.round(n * 10) / 10
+}
+
+/**
+ * Double-headed straight-arrow cursor pointing exactly along `angleDeg`
+ * (clockwise degrees from east, screen coords). Corners of a tilted
+ * selection resize along their 45° bisector, which rarely lands on one of
+ * the four native resize cursors — this arrow matches it exactly at 32px:
+ * black fill with a thin white outline. Hotspot sits at the arrow center.
+ * Results cache by integer degree.
+ */
+export function arrowResizeCursor(angleDeg: number, fallback = 'nwse-resize'): string {
+  const folded = ((angleDeg % 180) + 180) % 180
+  const key = Math.round(folded) % 180
+  const hit = arrowCursorCache.get(key)
+  if (hit) return hit
+  const a = (key * Math.PI) / 180
+  const ux = Math.cos(a)
+  const uy = Math.sin(a)
+  const nx = -uy
+  const ny = ux
+  const cx = 16
+  const cy = 16
+  const shaft = 8.5
+  const tip = 11.5
+  const base = 7
+  const half = 3.4
+  const pt = (x: number, y: number) => `${fmt1(x)},${fmt1(y)}`
+  const x1 = cx - ux * shaft
+  const y1 = cy - uy * shaft
+  const x2 = cx + ux * shaft
+  const y2 = cy + uy * shaft
+  const heads = [1, -1]
+    .map((s) => {
+      const tx = cx + s * ux * tip
+      const ty = cy + s * uy * tip
+      const bx = cx + s * ux * base
+      const by = cy + s * uy * base
+      return `<polygon points='${pt(tx, ty)} ${pt(bx + nx * half, by + ny * half)} ${pt(bx - nx * half, by - ny * half)}' fill='black' stroke='white' stroke-width='1' stroke-linejoin='round'/>`
+    })
+    .join('')
+  const svg =
+    `<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32' shape-rendering='geometricPrecision'>` +
+    `<line x1='${fmt1(x1)}' y1='${fmt1(y1)}' x2='${fmt1(x2)}' y2='${fmt1(y2)}' stroke='white' stroke-width='3.6' stroke-linecap='round'/>` +
+    `<line x1='${fmt1(x1)}' y1='${fmt1(y1)}' x2='${fmt1(x2)}' y2='${fmt1(y2)}' stroke='black' stroke-width='2' stroke-linecap='round'/>` +
+    heads +
+    `</svg>`
+  const cursor = svgCursor(svg, cx, cy, fallback)
+  arrowCursorCache.set(key, cursor)
+  return cursor
+}
 
 // ------------------------------------------------------------------
 // Tool -> default cursor (AI-aligned)

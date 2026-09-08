@@ -203,6 +203,17 @@ export class EditorEngine {
 
   setTool(tool: ToolName) {
     this.toolName = tool
+    // Leaving the selection tools: hand paper.js back its native decoration
+    // first, otherwise suppressed items would stay invisible (no native blue
+    // and no custom chrome) until the next select-tool activation.
+    if (tool !== 'select' && tool !== 'direct-select') {
+      const selectCtrl = this.controllers.get('select') as { releaseNativeSuppressions?: () => void } | undefined
+      try {
+        selectCtrl?.releaseNativeSuppressions?.()
+      } catch {
+        // Never block tool switches on chrome bookkeeping.
+      }
+    }
     // Remove any transient editing chrome (e.g. anchor overlays) left over
     // by the previously active tool so it does not linger after switching.
     this.clearTransientChrome()
@@ -266,6 +277,7 @@ export class EditorEngine {
   clearSelection() {
     this.project.deselectAll()
     this.store.clearSelection()
+    this.refreshSelectionChrome()
   }
 
   selectItem(item: paper.Item, addToSelection = false) {
@@ -281,6 +293,23 @@ export class EditorEngine {
       (item) => (item as any).data?.id as string
     )
     this.store.setSelection(ids.filter(Boolean))
+    this.refreshSelectionChrome()
+  }
+
+  /**
+   * Repaint the select / direct-select chrome after a selection change that
+   * bypassed the tool's own mouse handlers (Layers panel, undo/redo,
+   * shortcuts, history jumps). No-op unless a selection tool is active so
+   * pen / shape previews are never clobbered.
+   */
+  refreshSelectionChrome() {
+    if (this.toolName !== 'select' && this.toolName !== 'direct-select') return
+    const ctrl = this.controllers.get(this.toolName) as { refreshSelectionChrome?: () => void } | undefined
+    try {
+      ctrl?.refreshSelectionChrome?.()
+    } catch {
+      // Chrome repaint must never break document ops.
+    }
   }
 
   syncLayersToStore() {
@@ -951,10 +980,38 @@ export class EditorEngine {
     this.clearIsolationState()
     this.project.clear()
     this.project.importJSON(snapshot)
+    this.geometryVersion++
     this.syncLayersToStore()
     this.syncSelectionToStore()
     this.refreshArtboards()
     this.scope.view.update()
+  }
+
+  /**
+   * Monotonic document-geometry version. The select tool's oriented bbox
+   * frame is only ever rebuilt from the axis-aligned bounds when this
+   * counter (or the selection identity) no longer matches the frame's
+   * snapshot — so any same-selection geometry change that the frame cannot
+   * track incrementally must bump it (see pushHistory / restoreSnapshot).
+   */
+  geometryVersion = 0
+
+  /** History entries that provably preserve selection geometry (no reset). */
+  private static readonly FRAME_SAFE_HISTORY = new Set([
+    'Add Guide', 'Move Guide', 'Delete Guide',
+    'Change Fill', 'Clear Fill', 'Change Stroke', 'Clear Stroke',
+    'Change Stroke Style', 'Change Dash Pattern', 'Change Blend Mode',
+    'Eyedropper',
+    'Bring to Front', 'Bring Forward', 'Send Backward', 'Send to Back',
+    'Rearrange',
+    'Lock', 'Unlock', 'Show', 'Hide', 'Show All', 'Unlock All',
+    'New Sublayer', 'Duplicate Layer', 'Merge Layer Below', 'Rename',
+    'Duplicate',
+  ])
+
+  /** Bump the geometry version (invalidates untracked selection frames). */
+  bumpGeometryVersion() {
+    this.geometryVersion++
   }
 
   pushHistory(name: string, icon: string = '') {
@@ -971,6 +1028,9 @@ export class EditorEngine {
     this.historyIndex = this.history.length - 1
     this.store.setHistory(this.history, this.historyIndex)
     this.store.lastOperation = name
+    if (!EditorEngine.FRAME_SAFE_HISTORY.has(name)) {
+      this.geometryVersion++
+    }
   }
 
   undo() {
@@ -1934,13 +1994,25 @@ export class EditorEngine {
    */
   rotateSelection(angleDeg: number, pivot?: paper.Point): void {
     if (!Number.isFinite(angleDeg) || Math.abs(angleDeg) < 1e-9) return
-    const items = this.getSelection().filter((item) => !item.locked)
+    const full = this.getSelection()
+    const items = full.filter((item) => !item.locked)
     if (items.length === 0) return
     const center = pivot ?? this.getSelectionBounds()?.center
     if (!center) return
     for (const item of items) {
       item.rotate(angleDeg, center)
       this.refreshItemGradient(item)
+    }
+    // The select tool's oriented frame rigidly follows (canvas drags and
+    // the Properties panel share this path, so both stay in sync). When
+    // locked members stay behind, the frame can't track — drop it so the
+    // next paint rebuilds upright instead of drifting.
+    const selectCtrl = this.controllers.get('select') as { frameRotated?: (delta: number, p: paper.Point) => void; dropFrame?: () => void } | undefined
+    try {
+      if (items.length !== full.length) selectCtrl?.dropFrame?.()
+      else selectCtrl?.frameRotated?.(angleDeg, center)
+    } catch {
+      // Frame bookkeeping must never break document ops.
     }
     const next = (this.store.transform.rotation + angleDeg) % 360
     this.store.updateTransform({ rotation: (next + 360) % 360 })
@@ -1972,7 +2044,8 @@ export class EditorEngine {
    * reference-point pivot. Callers record history.
    */
   flipSelection(direction: 'horizontal' | 'vertical', pivot?: paper.Point): void {
-    const items = this.getSelection().filter((item) => !item.locked)
+    const full = this.getSelection()
+    const items = full.filter((item) => !item.locked)
     if (items.length === 0) return
     const center = pivot ?? this.selectionReferencePivot()
     if (!center) return
@@ -1981,12 +2054,47 @@ export class EditorEngine {
       else item.scale(1, -1, center)
       this.refreshItemGradient(item)
     }
+    // Mirroring negates the oriented frame's angle (both flip axes map
+    // θ → −θ) and mirrors its center about the pivot — unless locked
+    // members stay behind, in which case the frame is dropped.
+    const selectCtrl = this.controllers.get('select') as { frameMirrored?: (p: paper.Point) => void; dropFrame?: () => void } | undefined
+    try {
+      if (items.length !== full.length) selectCtrl?.dropFrame?.()
+      else selectCtrl?.frameMirrored?.(center)
+    } catch {
+      // Frame bookkeeping must never break document ops.
+    }
     if (direction === 'horizontal') {
       this.store.updateTransform({ flipH: !this.store.transform.flipH })
     } else {
       this.store.updateTransform({ flipV: !this.store.transform.flipV })
     }
     this.scope.view.update()
+  }
+
+  /**
+   * Revalidate the select tool's oriented frame against the current
+   * geometry version (call after a tracked drag records history: the frame
+   * already matches the final artwork, so only the version stamp updates
+   * instead of rebuilding the frame axis-aligned).
+   */
+  stampSelectionFrame() {
+    const selectCtrl = this.controllers.get('select') as { frameStamped?: () => void } | undefined
+    try {
+      selectCtrl?.frameStamped?.()
+    } catch {
+      // Frame bookkeeping must never break document ops.
+    }
+  }
+
+  /** Drop the select tool's oriented frame (it rebuilds on next paint). */
+  dropSelectionFrame() {
+    const selectCtrl = this.controllers.get('select') as { dropFrame?: () => void } | undefined
+    try {
+      selectCtrl?.dropFrame?.()
+    } catch {
+      // Frame bookkeeping must never break document ops.
+    }
   }
 
   /**
@@ -1998,13 +2106,23 @@ export class EditorEngine {
   nudgeSelection(dx: number, dy: number): boolean {
     if (!Number.isFinite(dx) || !Number.isFinite(dy)) return false
     if (dx === 0 && dy === 0) return false
-    const items = this.getSelection().filter((item) => !item.locked)
+    const full = this.getSelection()
+    const items = full.filter((item) => !item.locked)
     if (items.length === 0) return false
     const delta = new this.scope.Point(dx, dy)
     items.forEach((item) => {
       item.position = item.position.add(delta)
       this.refreshItemGradient(item)
     })
+    // Pure translation: the oriented frame slides along untouched — unless
+    // locked members stay behind, in which case the frame is dropped.
+    const selectCtrl = this.controllers.get('select') as { frameTranslated?: (dx: number, dy: number) => void; frameStamped?: () => void; dropFrame?: () => void } | undefined
+    try {
+      if (items.length !== full.length) selectCtrl?.dropFrame?.()
+      else selectCtrl?.frameTranslated?.(dx, dy)
+    } catch {
+      // Frame bookkeeping must never break document ops.
+    }
     this.scope.view.update()
     const now = Date.now()
     const last = this.history[this.historyIndex]
@@ -2014,6 +2132,11 @@ export class EditorEngine {
       this.store.setHistory(this.history, this.historyIndex)
     } else {
       this.pushHistory('Nudge')
+    }
+    try {
+      selectCtrl?.frameStamped?.()
+    } catch {
+      // Frame bookkeeping must never break document ops.
     }
     return true
   }

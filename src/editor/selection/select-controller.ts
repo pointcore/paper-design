@@ -10,14 +10,15 @@
 import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
 import { AnchorChrome } from '../path-drawing/anchor-chrome'
+import { selectionColorForItem, selectionColorForItems } from './selection-style'
 import { GuideController } from '../guides/guide-controller'
 import { SnapService } from '../snap/snap-service'
-import { applyToolCursor, cursorForTool } from '../cursors'
+import { applyToolCursor, cursorForTool, CURSOR_ROTATE, arrowResizeCursor } from '../cursors'
 import type { TextController } from '../text/text-controller'
 
 type EditMode = 'select' | 'direct-select'
 
-/** Bounding-box transform handle in select mode (plus the rotate knob). */
+/** Bounding-box transform handle in select mode (corners double as rotate zones). */
 type TransformHandle =
   | 'none'
   | 'topLeft' | 'topCenter' | 'topRight'
@@ -25,17 +26,66 @@ type TransformHandle =
   | 'bottomLeft' | 'bottomCenter' | 'bottomRight'
   | 'rotate'
 
-/** Hover / drag cursor per transform handle. */
-const TRANSFORM_CURSORS: Record<Exclude<TransformHandle, 'none'>, string> = {
-  topLeft: 'nwse-resize',
-  bottomRight: 'nwse-resize',
-  topRight: 'nesw-resize',
-  bottomLeft: 'nesw-resize',
-  topCenter: 'ns-resize',
-  bottomCenter: 'ns-resize',
-  middleLeft: 'ew-resize',
-  middleRight: 'ew-resize',
-  rotate: 'grab',
+/** Scale-handle names (everything except none / rotate). */
+type FrameHandle = Exclude<TransformHandle, 'none' | 'rotate'>
+
+/**
+ * Persistent oriented selection frame: center + size + clockwise degrees.
+ * Unlike the axis-aligned bounds, it survives rotation — the box never
+ * snaps back upright while the selection is intact.
+ */
+interface SelectionFrame {
+  cx: number
+  cy: number
+  w: number
+  h: number
+  angle: number
+  selKey: string
+  version: number
+}
+
+/** Normalize degrees into (-180, 180]. */
+function normAngle180(deg: number): number {
+  return ((deg + 540) % 360) - 180
+}
+
+/**
+ * Outward heading of each scale handle in frame-local space, clockwise
+ * degrees from east (screen coords, y down): E=0, SE=45, S=90, SW=135,
+ * W=180, NW=225, N=270, NE=315.
+ */
+const HANDLE_HEADINGS: Record<FrameHandle, number> = {
+  middleRight: 0,
+  bottomRight: 45,
+  bottomCenter: 90,
+  bottomLeft: 135,
+  middleLeft: 180,
+  topLeft: 225,
+  topCenter: 270,
+  topRight: 315,
+}
+
+/**
+ * Resize cursor for a bidirectional axis heading (CSS resize cursors point
+ * both ways, so the heading folds modulo 180° into the nearest of the
+ * four axes). At angle 0 this reproduces the classic mapping exactly.
+ */
+function resizeCursorForHeading(headingDeg: number): string {
+  const h = ((headingDeg % 180) + 180) % 180
+  if (h < 22.5 || h >= 157.5) return 'ew-resize'
+  if (h < 67.5) return 'nwse-resize'
+  if (h < 112.5) return 'ns-resize'
+  return 'nesw-resize'
+}
+
+/**
+ * Diagonal-only cursor for corner handles: a corner resizes along its
+ * right-angle bisector (45°), so it always shows a diagonal arrow — the
+ * nearer of the two diagonals — never an axis arrow.
+ */
+function diagonalCursorForHeading(headingDeg: number): string {
+  const h = ((headingDeg % 180) + 180) % 180
+  return Math.abs(h - 45) <= Math.abs(h - 135) ? 'nwse-resize' : 'nesw-resize'
 }
 
 export class SelectController {
@@ -77,41 +127,232 @@ export class SelectController {
   // Reference point for group anchor translation.
   private dragStartPoint: { x: number; y: number } | null = null
 
-  // Bounding-box transform drag state (select mode).
+  // Bounding-box transform drag state (select mode). Scaling is AI-aligned
+  // absolute: totals are always measured from the grab-time snapshot
+  // (start point / frame base / fixed pivots) and applied as
+  // total/lastTotal steps, so edge drags never leak into the locked axis,
+  // Shift-uniform never drifts, and crossing the pivot flips cleanly.
+  // Scaling runs in the frame's local space (grab-time orientation), so
+  // handles on a tilted box scale along the box axes, not the screen axes.
   private transformHandle: TransformHandle = 'none'
   private transformKind: 'scale' | 'rotate' | 'none' = 'none'
   private transformItems: paper.Item[] = []
   private transformPivot: paper.Point | null = null
   private transformCenter: paper.Point | null = null
+  private transformOpposite: paper.Point | null = null
+  private transformScaleBase: { cx: number; cy: number; w: number; h: number; angle: number } | null = null
+  private transformStartPoint: { x: number; y: number } | null = null
+  private transformLastTotalFx = 1
+  private transformLastTotalFy = 1
+  private transformUseCenter = false
   private transformLastPoint: { x: number; y: number } | null = null
-  private transformLastAngle = 0
+  // AI-aligned rotate bookkeeping: the pivot follows the 9-point reference
+  // proxy (frozen at grab), while the angle accumulates unsnapped so Shift
+  // snaps the true total to 45-degree increments (snapping the per-step
+  // delta instead would drop fractions and lag behind the pointer).
+  private transformRotatePivot: paper.Point | null = null
+  private transformRotateLastRaw = 0
+  private transformRotateAccum = 0
+  private transformRotateApplied = 0
   private transformMoved = false
 
-  // Paths whose native paper.js selected-item decoration (the blue bounding
-  // box + solid corner/segment squares) we suppress while they are shown via
-  // the direct-select AnchorChrome. The app draws its own hollow / filled
-  // anchor markers, so paper's native squares would otherwise render on top of
-  // (or through) them and look like stray solid-blue boxes.
-  private chromeSuppressed = new Set<paper.Path>()
+  // Persistent oriented selection frame (center + size + clockwise angle).
+  // Rebuilt from the axis-aligned bounds only when the selection identity
+  // or the engine geometry version drifts — every other mutation (move /
+  // scale / rotate / nudge / flip) advances it incrementally in place.
+  private frame: SelectionFrame | null = null
+  // Frame center at object-drag grab time (move replays from here).
+  private dragStartFrame: { x: number; y: number } | null = null
 
-  /** Disable paper.js's native selected decoration on one path. */
-  private suppressNativeSelection(path: paper.Path) {
-    if (!path.selected || (path as any)._drawSelected === false) return
-    ;(path as any)._drawSelected = false
-    this.chromeSuppressed.add(path)
+  // Items whose native paper.js selected-item decoration we suppress while
+  // they are shown via our own AI-aligned AnchorChrome (layer-color outlines
+  // + white / solid anchors). Paper's native blue squares would otherwise
+  // render on top of (or through) our markers and look like stray boxes, and
+  // its native bounds would double-draw our own bbox outline in select mode.
+  private chromeSuppressed = new Set<paper.Item>()
+
+  /** Disable paper.js's native selected decoration on one item. */
+  private suppressNativeSelection(item: paper.Item) {
+    if (!item.selected || (item as any)._drawSelected === false) return
+    ;(item as any)._drawSelected = false
+    this.chromeSuppressed.add(item)
   }
 
-  /** Re-enable paper.js's native selected decoration on one path. */
-  private restoreNativeSelection(path: paper.Path) {
-    if (!this.chromeSuppressed.has(path)) return
-    delete (path as any)._drawSelected
-    this.chromeSuppressed.delete(path)
+  /** Re-enable paper.js's native selected decoration on one item. */
+  private restoreNativeSelection(item: paper.Item) {
+    if (!this.chromeSuppressed.has(item)) return
+    delete (item as any)._drawSelected
+    this.chromeSuppressed.delete(item)
   }
 
-  /** Re-enable native selection decoration for every suppressed path. */
+  /** Re-enable native selection decoration for every suppressed item. */
   private restoreAllNativeSelections() {
-    for (const path of Array.from(this.chromeSuppressed)) {
-      this.restoreNativeSelection(path)
+    for (const item of Array.from(this.chromeSuppressed)) {
+      this.restoreNativeSelection(item)
+    }
+  }
+
+  /** Public entry so panel / undo / engine selection changes repaint chrome. */
+  refreshSelectionChrome() {
+    this.refreshChrome()
+  }
+
+  /** Give paper.js back its native decoration (called when leaving select tools). */
+  releaseNativeSuppressions() {
+    this.restoreAllNativeSelections()
+  }
+
+  /** Sorted selection-identity key (frame rebuilds when this changes). */
+  private selectionKey(): string {
+    const engine = this.engine
+    if (!engine) return ''
+    return engine
+      .getSelection()
+      .map((i) => ((i.data as any)?.id as string | undefined) ?? '')
+      .sort()
+      .join('|')
+  }
+
+  /**
+   * Ensure the oriented frame matches the live selection: rebuild upright
+   * from the axis-aligned bounds only when the selection identity or the
+   * engine geometry version drifted. Everything else advances the frame
+   * incrementally, so rotation never snaps back.
+   */
+  private ensureFrame(): void {
+    const engine = this.engine
+    if (!engine) {
+      this.frame = null
+      return
+    }
+    const items = engine.getSelection()
+    if (items.length === 0) {
+      this.frame = null
+      return
+    }
+    const key = items
+      .map((i) => ((i.data as any)?.id as string | undefined) ?? '')
+      .sort()
+      .join('|')
+    if (this.frame && this.frame.selKey === key && this.frame.version === engine.geometryVersion) return
+    const bounds = engine.getSelectionBounds()
+    if (!bounds || bounds.width <= 0 || bounds.height <= 0) {
+      this.frame = null
+      return
+    }
+    this.frame = {
+      cx: bounds.center.x,
+      cy: bounds.center.y,
+      w: bounds.width,
+      h: bounds.height,
+      angle: 0,
+      selKey: key,
+      version: engine.geometryVersion,
+    }
+  }
+
+  /** Whether the frame currently tracks the live selection. */
+  private frameTracking(): boolean {
+    const engine = this.engine
+    if (!engine || !this.frame) return false
+    return this.frame.selKey === this.selectionKey()
+  }
+
+  /**
+   * Rigidly rotate the tracked frame (called by engine.rotateSelection, so
+   * canvas drags and the Properties panel stay in sync).
+   */
+  frameRotated(deltaDeg: number, pivot: paper.Point) {
+    if (!this.frameTracking() || !this.frame) return
+    const f = this.frame
+    const c = new (this.engine!.scope.Point)(f.cx, f.cy).rotate(deltaDeg, pivot)
+    f.cx = c.x
+    f.cy = c.y
+    f.angle = normAngle180(f.angle + deltaDeg)
+  }
+
+  /** Slide the tracked frame (called by engine.nudgeSelection). */
+  frameTranslated(dx: number, dy: number) {
+    if (!this.frameTracking() || !this.frame) return
+    this.frame.cx += dx
+    this.frame.cy += dy
+  }
+
+  /**
+   * Mirror the tracked frame (called by engine.flipSelection: both flip
+   * axes map θ → −θ, and the center mirrors about the pivot).
+   */
+  frameMirrored(pivot: paper.Point) {
+    if (!this.frameTracking() || !this.frame) return
+    const f = this.frame
+    f.cx = 2 * pivot.x - f.cx
+    f.cy = 2 * pivot.y - f.cy
+    f.angle = normAngle180(-f.angle)
+  }
+
+  /** Revalidate the tracked frame after its drag records history. */
+  frameStamped() {
+    const engine = this.engine
+    if (!engine || !this.frameTracking() || !this.frame) return
+    this.frame.version = engine.geometryVersion
+  }
+
+  /**
+   * Drop the tracked frame (partial-lock mutations the frame cannot
+   * follow). The next paint rebuilds it upright from live bounds.
+   */
+  dropFrame() {
+    this.frame = null
+  }
+
+  /** World-space corner / edge positions of an oriented frame. */
+  private frameCorners(f: SelectionFrame): Record<FrameHandle, paper.Point> {
+    const scope = this.engine!.scope
+    const c = new scope.Point(f.cx, f.cy)
+    const at = (ox: number, oy: number) =>
+      new scope.Point(f.cx + ox, f.cy + oy).rotate(f.angle, c)
+    const hw = f.w / 2
+    const hh = f.h / 2
+    const TL = at(-hw, -hh)
+    const TR = at(hw, -hh)
+    const BR = at(hw, hh)
+    const BL = at(-hw, hh)
+    const mid = (a: paper.Point, b: paper.Point) =>
+      new scope.Point((a.x + b.x) / 2, (a.y + b.y) / 2)
+    return {
+      topLeft: TL,
+      topCenter: mid(TL, TR),
+      topRight: TR,
+      middleLeft: mid(TL, BL),
+      middleRight: mid(TR, BR),
+      bottomLeft: BL,
+      bottomCenter: mid(BL, BR),
+      bottomRight: BR,
+    }
+  }
+
+  /** Map a world point into the frame's local (unrotated) space. */
+  private frameToLocal(p: paper.Point, f: SelectionFrame): paper.Point {
+    const scope = this.engine!.scope
+    return p.clone().rotate(-f.angle, new scope.Point(f.cx, f.cy))
+  }
+
+  /** Local (axis-aligned) position of a named handle at grab time. */
+  private localHandlePoint(
+    base: { cx: number; cy: number; w: number; h: number },
+    name: FrameHandle
+  ): { x: number; y: number } {
+    const hw = base.w / 2
+    const hh = base.h / 2
+    switch (name) {
+      case 'topLeft': return { x: base.cx - hw, y: base.cy - hh }
+      case 'topCenter': return { x: base.cx, y: base.cy - hh }
+      case 'topRight': return { x: base.cx + hw, y: base.cy - hh }
+      case 'middleLeft': return { x: base.cx - hw, y: base.cy }
+      case 'middleRight': return { x: base.cx + hw, y: base.cy }
+      case 'bottomLeft': return { x: base.cx - hw, y: base.cy + hh }
+      case 'bottomCenter': return { x: base.cx, y: base.cy + hh }
+      case 'bottomRight': return { x: base.cx + hw, y: base.cy + hh }
     }
   }
 
@@ -140,6 +381,7 @@ export class SelectController {
     this.isDragging = false
     this.isMarquee = false
     this.dragItems = []
+    this.dragStartFrame = null
     this.removeMarquee()
     this.grabGuide = null
     this.guideOriginalPos = 0
@@ -150,6 +392,10 @@ export class SelectController {
     this.guides.clearSelection()
     this.chrome.clear()
     this.setupTool()
+    // Repaint AI chrome for any pre-existing selection (panel select, undo
+    // restore, or tool switch-back) so the canvas never falls back to
+    // paper.js native blue until the next mouse event.
+    this.refreshChrome()
   }
 
   private clearAnchorState() {
@@ -168,8 +414,17 @@ export class SelectController {
     this.transformItems = []
     this.transformPivot = null
     this.transformCenter = null
+    this.transformOpposite = null
+    this.transformScaleBase = null
+    this.transformStartPoint = null
+    this.transformLastTotalFx = 1
+    this.transformLastTotalFy = 1
+    this.transformUseCenter = false
     this.transformLastPoint = null
-    this.transformLastAngle = 0
+    this.transformRotatePivot = null
+    this.transformRotateLastRaw = 0
+    this.transformRotateAccum = 0
+    this.transformRotateApplied = 0
     this.transformMoved = false
   }
 
@@ -324,6 +579,7 @@ export class SelectController {
         )
         this.dragPointerStart = this.snapService.snapPoint(event.point, this.dragItems).clone()
         this.dragStartBounds = engine.getSelectionBounds()?.clone() ?? null
+        this.dragStartFrame = this.frame ? { x: this.frame.cx, y: this.frame.cy } : null
         this.dragStart = { x: event.point.x, y: event.point.y }
         this.grab = 'object'
         // Move cue while the object follows the pointer (AI keeps the arrow,
@@ -370,6 +626,10 @@ export class SelectController {
         if (this.transformMoved) {
           engine.pushHistory(this.transformKind === 'rotate' ? 'Rotate' : 'Scale')
         }
+        // The frame already matches the final artwork — revalidate it
+        // against the (possibly bumped) version instead of rebuilding it
+        // upright.
+        engine.stampSelectionFrame()
         this.resetTransformDrag()
       } else if (this.grab === 'guide' && this.grabGuide) {
         this.finishGuideDrag(event)
@@ -382,6 +642,7 @@ export class SelectController {
       } else if (this.isDragging && this.grab === 'object') {
         this.isDragging = false
         engine.pushHistory('Move')
+        engine.stampSelectionFrame()
       } else if (this.grab === 'anchor' || this.grab === 'anchor-group' || this.grab === 'handle') {
         engine.pushHistory('Edit Path')
       }
@@ -828,7 +1089,6 @@ export class SelectController {
   /** Redraw editing chrome: bbox handles in select mode, anchors in direct-select. */
   private refreshChrome() {
     if (this.mode !== 'direct-select') {
-      this.restoreAllNativeSelections()
       this.drawSelectionBounds()
       return
     }
@@ -847,15 +1107,16 @@ export class SelectController {
       if (path) paths.push(path)
     }
     if (paths.length === 0) {
-      this.restoreAllNativeSelections()
-      this.chrome.clear()
+      // No direct-edit target: fall back to select-style chrome so a plain
+      // object selection still shows AI outlines instead of native blue.
+      this.drawSelectionBounds()
       return
     }
     // Only our AnchorChrome should paint the anchor markers of the paths we
-    // are editing: restore native decoration for paths no longer part of the
+    // are editing: restore native decoration for items no longer part of the
     // chrome and suppress it for the ones we are about to draw.
-    for (const path of Array.from(this.chromeSuppressed)) {
-      if (!paths.includes(path)) this.restoreNativeSelection(path)
+    for (const item of Array.from(this.chromeSuppressed)) {
+      if (!paths.includes(item as paper.Path)) this.restoreNativeSelection(item)
     }
     for (const path of paths) {
       if (path.selected) this.suppressNativeSelection(path)
@@ -864,63 +1125,41 @@ export class SelectController {
     const scope = engine.scope
     this.chrome.clear()
     for (const path of paths) {
+      const color = selectionColorForItem(engine, path)
+      // AI order: path outline beneath, then handle lines/dots, anchors on top.
+      this.chrome.drawItemOutline(path, color)
       const segs = path.segments
-      for (let i = 0; i < segs.length; i++) {
-        const seg = segs[i]
-        const isSelectedAnchor = this.isAnchorSelected(path, i) ||
-          (this.grabSegmentIndex === i && path === (this.grabPath ?? this.getEditPath()) &&
-            (this.grab === 'anchor' || this.grab === 'handle'))
-        this.chrome.drawAnchor(seg.point, isSelectedAnchor)
-      }
-      // Draw handles (two passes so handle lines are beneath the markers).
       for (let i = 0; i < segs.length; i++) {
         const seg = segs[i]
         const hi = seg.handleIn as paper.Point | null
         const ho = seg.handleOut as paper.Point | null
         if (hi && !(Math.abs(hi.x) < 1e-6 && Math.abs(hi.y) < 1e-6)) {
-          this.chrome.drawHandle(seg.point, seg.point.add(hi))
+          this.chrome.drawHandle(seg.point, seg.point.add(hi), color)
         }
         if (ho && !(Math.abs(ho.x) < 1e-6 && Math.abs(ho.y) < 1e-6)) {
-          this.chrome.drawHandle(seg.point, seg.point.add(ho))
+          this.chrome.drawHandle(seg.point, seg.point.add(ho), color)
         }
+      }
+      for (let i = 0; i < segs.length; i++) {
+        const seg = segs[i]
+        const isSelectedAnchor = this.isAnchorSelected(path, i) ||
+          (this.grabSegmentIndex === i && path === (this.grabPath ?? this.getEditPath()) &&
+            (this.grab === 'anchor' || this.grab === 'handle'))
+        // AI: unselected = hollow white, selected = solid layer color.
+        this.chrome.drawAnchor(seg.point, isSelectedAnchor, color)
       }
     }
     scope.view.update()
   }
 
   // ------------------------------------------------------------------
-  // Bounding-box transform (select mode)
+  // Bounding-box transform (select mode): hit-testing and pivots run off
+  // the persistent oriented frame, never the axis-aligned bounds, so a
+  // tilted selection keeps tilted handles.
   // ------------------------------------------------------------------
 
-  /** Corner / edge / rotate-knob positions for a bounds rectangle. */
-  private boundsHandlePositions(
-    bounds: paper.Rectangle
-  ): Record<Exclude<TransformHandle, 'none'>, paper.Point> {
-    const engine = this.engine
-    const scope = engine!.scope
-    const x = bounds.x
-    const y = bounds.y
-    const w = bounds.width
-    const h = bounds.height
-    const cx = x + w / 2
-    const cy = y + h / 2
-    // The rotate knob floats above the top edge with a stem line.
-    const rotateOffset = 22 / scope.view.zoom
-    return {
-      topLeft: new scope.Point(x, y),
-      topCenter: new scope.Point(cx, y),
-      topRight: new scope.Point(x + w, y),
-      middleLeft: new scope.Point(x, cy),
-      middleRight: new scope.Point(x + w, cy),
-      bottomLeft: new scope.Point(x, y + h),
-      bottomCenter: new scope.Point(cx, y + h),
-      bottomRight: new scope.Point(x + w, y + h),
-      rotate: new scope.Point(cx, y - rotateOffset),
-    }
-  }
-
-  /** Opposite pivot for a scale handle (the point that stays fixed). */
-  private oppositeHandle(handle: TransformHandle): Exclude<TransformHandle, 'none'> {
+  /** Opposite pivot name for a scale handle (the corner that stays fixed). */
+  private oppositeHandle(handle: FrameHandle): FrameHandle {
     switch (handle) {
       case 'topLeft': return 'bottomRight'
       case 'topRight': return 'bottomLeft'
@@ -930,7 +1169,6 @@ export class SelectController {
       case 'bottomCenter': return 'topCenter'
       case 'middleLeft': return 'middleRight'
       case 'middleRight': return 'middleLeft'
-      default: return 'rotate'
     }
   }
 
@@ -943,15 +1181,20 @@ export class SelectController {
     )
   }
 
-  /** Handle under a point within tolerance (rotate knob wins ties). */
-  private transformHandleAt(
-    point: paper.Point,
-    bounds: paper.Rectangle,
-    tol: number
-  ): TransformHandle {
-    const positions = this.boundsHandlePositions(bounds)
-    if (point.getDistance(positions.rotate) <= tol) return 'rotate'
-    const order: Exclude<TransformHandle, 'none' | 'rotate'>[] = [
+  /**
+   * Handle under a point within tolerance, measured on the oriented frame.
+   * AI-aligned: exactly on a handle scales; just outside a corner (wider
+   * band, outside the quad) rotates — the corner itself always wins so
+   * scaling stays easy to grab.
+   */
+  private transformHandleAt(point: paper.Point, tol: number): TransformHandle {
+    const engine = this.engine
+    if (!engine) return 'none'
+    this.ensureFrame()
+    const f = this.frame
+    if (!f) return 'none'
+    const positions = this.frameCorners(f)
+    const order: FrameHandle[] = [
       'topLeft', 'topCenter', 'topRight',
       'middleLeft', 'middleRight',
       'bottomLeft', 'bottomCenter', 'bottomRight',
@@ -959,7 +1202,44 @@ export class SelectController {
     for (const handle of order) {
       if (point.getDistance(positions[handle]) <= tol) return handle
     }
+    // Rotate band around the four corners (outside the quad only, so clicks
+    // on artwork / marquee starts inside never misfire into a rotation).
+    const local = this.frameToLocal(point, f)
+    const hw = f.w / 2
+    const hh = f.h / 2
+    const outside =
+      local.x < f.cx - hw || local.x > f.cx + hw ||
+      local.y < f.cy - hh || local.y > f.cy + hh
+    if (outside) {
+      const rotateTol = tol * 2
+      const corners: FrameHandle[] = [
+        'topLeft', 'topRight', 'bottomLeft', 'bottomRight',
+      ]
+      for (const corner of corners) {
+        if (point.getDistance(positions[corner]) <= rotateTol) return 'rotate'
+      }
+    }
     return 'none'
+  }
+
+  /** Nearest frame corner to a point (labels a corner-started rotate drag). */
+  private nearestCorner(
+    point: paper.Point,
+    positions: Record<FrameHandle, paper.Point>
+  ): FrameHandle {
+    const corners: FrameHandle[] = [
+      'topLeft', 'topRight', 'bottomLeft', 'bottomRight',
+    ]
+    let best = corners[0]
+    let bestDist = point.getDistance(positions[best])
+    for (const corner of corners) {
+      const d = point.getDistance(positions[corner])
+      if (d < bestDist) {
+        best = corner
+        bestDist = d
+      }
+    }
+    return best
   }
 
   /** Clockwise pointer angle in degrees around a center point. */
@@ -972,21 +1252,48 @@ export class SelectController {
     const engine = this.engine
     if (!engine || this.mode !== 'select') return false
     if (engine.getSelection().length === 0) return false
-    const bounds = engine.getSelectionBounds()
-    if (!bounds || bounds.width <= 0 || bounds.height <= 0) return false
     const tol = 7 / engine.scope.view.zoom
-    const handle = this.transformHandleAt(event.point, bounds, tol)
-    if (handle === 'none') return false
-    const positions = this.boundsHandlePositions(bounds)
-    this.transformHandle = handle
+    const handle = this.transformHandleAt(event.point, tol)
+    if (handle === 'none' || !this.frame) return false
+    const f = this.frame
+    const positions = this.frameCorners(f)
     this.transformKind = handle === 'rotate' ? 'rotate' : 'scale'
     this.transformItems = engine.getSelection()
-    this.transformCenter = bounds.center.clone()
     if (handle === 'rotate') {
+      // AI corner rotation: the grab started just outside this corner; the
+      // corner handle itself is highlighted while the reference pivot stays
+      // the rotation origin. The live frame follows via engine.rotateSelection.
+      this.transformHandle = this.nearestCorner(event.point, positions)
+      this.transformScaleBase = null
+      this.transformStartPoint = null
+      this.transformLastTotalFx = 1
+      this.transformLastTotalFy = 1
+      this.transformUseCenter = false
+      this.transformOpposite = null
       this.transformPivot = null
-      this.transformLastAngle = this.pointerAngle(event.point, bounds.center)
+      // AI Transform proxy governs the origin: canvas rotation honors the
+      // same 9-point reference pivot the Properties panel uses (frozen for
+      // the whole drag so the origin never wanders).
+      const pivot = engine.selectionReferencePivot() ?? new engine.scope.Point(f.cx, f.cy)
+      this.transformRotatePivot = pivot.clone()
+      this.transformCenter = pivot.clone()
+      const startRaw = this.pointerAngle(event.point, pivot)
+      this.transformRotateLastRaw = startRaw
+      this.transformRotateAccum = 0
+      this.transformRotateApplied = 0
     } else {
-      this.transformPivot = positions[this.oppositeHandle(handle)].clone()
+      this.transformHandle = handle
+      // AI: Alt scales about the center, otherwise the opposite handle stays
+      // fixed. Base frame + pivots freeze at grab time; Alt toggles mid-drag
+      // re-baseline onto the live frame so the switch never jumps.
+      this.transformScaleBase = { cx: f.cx, cy: f.cy, w: f.w, h: f.h, angle: f.angle }
+      this.transformOpposite = positions[this.oppositeHandle(handle)].clone()
+      this.transformCenter = new engine.scope.Point(f.cx, f.cy)
+      this.transformUseCenter = !!(event.modifiers as any)?.alt
+      this.transformPivot = (this.transformUseCenter ? this.transformCenter : this.transformOpposite).clone()
+      this.transformStartPoint = { x: event.point.x, y: event.point.y }
+      this.transformLastTotalFx = 1
+      this.transformLastTotalFy = 1
     }
     this.transformLastPoint = { x: event.point.x, y: event.point.y }
     this.transformMoved = false
@@ -1000,63 +1307,206 @@ export class SelectController {
   private dragTransform(point: paper.Point, modifiers: any) {
     const engine = this.engine
     if (!engine) return
-    if (this.transformKind === 'rotate' && this.transformCenter) {
-      const raw = this.pointerAngle(point, this.transformCenter)
-      let delta = raw - this.transformLastAngle
-      if (modifiers && modifiers.shift) {
-        // Snap the swept angle to 45-degree increments while Shift is held.
-        delta = snapAngle45(raw) - snapAngle45(this.transformLastAngle)
-      }
-      // Normalize across the +/-180 branch cut for smooth dragging.
-      delta = ((delta + 540) % 360) - 180
-      if (Math.abs(delta) > 1e-9) {
-        engine.rotateSelection(delta, this.transformCenter)
-        this.transformMoved = true
-      }
-      this.transformLastAngle = raw
-    } else if (this.transformKind === 'scale' && this.transformPivot && this.transformLastPoint) {
-      const px = this.transformPivot.x
-      const py = this.transformPivot.y
-      const dx0 = this.transformLastPoint.x - px
-      const dy0 = this.transformLastPoint.y - py
-      let fx = Math.abs(dx0) > 1e-6 ? (point.x - px) / dx0 : 1
-      let fy = Math.abs(dy0) > 1e-6 ? (point.y - py) / dy0 : 1
-      if (!Number.isFinite(fx)) fx = 1
-      if (!Number.isFinite(fy)) fy = 1
-      fx = Math.max(-100, Math.min(100, fx))
-      fy = Math.max(-100, Math.min(100, fy))
-      if (modifiers && modifiers.shift && this.isCornerHandle(this.transformHandle)) {
-        // Constrain corner drags to uniform proportions (dominant axis wins).
-        const uniform = Math.abs(fx - 1) > Math.abs(fy - 1) ? fx : fy
-        fx = uniform
-        fy = uniform
-      }
-      if (Math.abs(fx - 1) > 1e-9 || Math.abs(fy - 1) > 1e-9) {
-        const pivot = new engine.scope.Point(px, py)
-        for (const item of this.transformItems) {
-          if (!item.parent || item.locked) continue
-          item.scale(fx, fy, pivot)
-          engine.refreshItemGradient(item)
-        }
-        this.transformMoved = true
-      }
-      this.transformLastPoint = { x: point.x, y: point.y }
+    if (this.transformKind === 'rotate' && this.transformRotatePivot) {
+      this.dragRotateAbsolute(point, modifiers)
+    } else if (this.transformKind === 'scale') {
+      this.dragScaleAbsolute(point, modifiers)
     }
     engine.store.setCursorPos(point.x, point.y)
     this.refreshChrome()
     engine.scope.view.update()
   }
 
-  /** Hover cursor for the bbox handle under a point, or null. */
+  /**
+   * AI-aligned canvas rotation: sweeps the pointer angle around the frozen
+   * reference pivot. The unsnapped total accumulates every step (branch-cut
+   * normalized, so multi-turn drags keep counting); Shift constrains the
+   * total to 45-degree increments, snapping on the very next move when
+   * pressed mid-drag — like Illustrator's constraint.
+   */
+  private dragRotateAbsolute(point: paper.Point, modifiers: any) {
+    const engine = this.engine
+    const pivot = this.transformRotatePivot
+    if (!engine || !pivot) return
+    const raw = this.pointerAngle(point, pivot)
+    const stepRaw = ((raw - this.transformRotateLastRaw + 540) % 360) - 180
+    this.transformRotateAccum += stepRaw
+    this.transformRotateLastRaw = raw
+    const target = (modifiers as any)?.shift
+      ? snapAngle45(this.transformRotateAccum)
+      : this.transformRotateAccum
+    const delta = target - this.transformRotateApplied
+    if (Math.abs(delta) > 1e-9) {
+      engine.rotateSelection(delta, pivot)
+      this.transformRotateApplied = target
+      this.transformMoved = true
+    }
+    // Live readout (status bar), matching the measure tool's convention.
+    const shown = ((this.transformRotateApplied % 360) + 540) % 360 - 180
+    engine.showStatus(`Rotate ${Math.round(shown * 10) / 10}° (Shift: 45°)`)
+  }
+
+  /**
+   * AI-aligned absolute bbox scaling, measured in the frame's local space
+   * (grab-time orientation): the math is identical to axis-aligned scaling
+   * there, so handles on a tilted box scale along the box axes. Totals
+   * apply as total/lastTotal steps composed as unrotate → scale → re-rotate
+   * about the frozen world pivot (exact for fixed pivot + angle). Edge
+   * handles lock the orthogonal axis, Shift on corners equalizes magnitude
+   * while preserving each axis sign, and totals clamp off zero so pivot
+   * crossing flips in one bounded step.
+   */
+  private dragScaleAbsolute(point: paper.Point, modifiers: any) {
+    const engine = this.engine
+    if (!engine) return
+    const base = this.transformScaleBase
+    if (!base || !this.transformStartPoint) return
+    if (this.transformHandle === 'none' || this.transformHandle === 'rotate') return
+
+    // Alt toggles the pivot mid-drag. Re-baseline onto the live frame so
+    // the switch keeps the current size instead of jumping (Shift snaps, so
+    // it intentionally does not re-baseline).
+    const wantCenter = !!(modifiers as any)?.alt
+    if (wantCenter !== this.transformUseCenter && this.frame) {
+      const f = this.frame
+      this.transformScaleBase = { cx: f.cx, cy: f.cy, w: f.w, h: f.h, angle: f.angle }
+      const corners = this.frameCorners(f)
+      this.transformOpposite = corners[this.oppositeHandle(this.transformHandle)].clone()
+      this.transformCenter = new engine.scope.Point(f.cx, f.cy)
+      this.transformUseCenter = wantCenter
+      this.transformPivot = (wantCenter ? this.transformCenter : this.transformOpposite).clone()
+      this.transformStartPoint = { x: point.x, y: point.y }
+      this.transformLastTotalFx = 1
+      this.transformLastTotalFy = 1
+      return
+    }
+    if (!this.transformOpposite || !this.transformCenter) return
+
+    const scope = engine.scope
+    const centerW = new scope.Point(base.cx, base.cy)
+    const toLocal = (p: paper.Point) => p.rotate(-base.angle, centerW)
+    const pivotW = wantCenter ? this.transformCenter : this.transformOpposite
+    const pL = wantCenter
+      ? { x: base.cx, y: base.cy }
+      : this.localHandlePoint(base, this.oppositeHandle(this.transformHandle))
+    const sL = toLocal(new scope.Point(this.transformStartPoint.x, this.transformStartPoint.y))
+    const qL = toLocal(point.clone())
+    const dxs = sL.x - pL.x
+    const dys = sL.y - pL.y
+    const corner = this.isCornerHandle(this.transformHandle)
+    const horizontalEdge = this.transformHandle === 'middleLeft' || this.transformHandle === 'middleRight'
+    const verticalEdge = this.transformHandle === 'topCenter' || this.transformHandle === 'bottomCenter'
+
+    let fx = 1
+    let fy = 1
+    if (corner || horizontalEdge) {
+      fx = Math.abs(dxs) > 1e-9 ? (qL.x - pL.x) / dxs : 1
+    }
+    if (corner || verticalEdge) {
+      fy = Math.abs(dys) > 1e-9 ? (qL.y - pL.y) / dys : 1
+    }
+    if (!Number.isFinite(fx)) fx = 1
+    if (!Number.isFinite(fy)) fy = 1
+
+    if (modifiers && modifiers.shift && corner) {
+      // Uniform proportions: dominant magnitude wins, each axis keeps its
+      // own flip sign so Shift never invents a new mirror.
+      const mag = Math.max(Math.abs(fx), Math.abs(fy))
+      fx = (fx < 0 ? -1 : 1) * mag
+      fy = (fy < 0 ? -1 : 1) * mag
+    }
+
+    // Clamp totals: cap runaway zoom, floor off zero so pivot crossing flips
+    // in one bounded step instead of dividing by ~0.
+    const startW = Math.max(base.w, 1e-9)
+    const startH = Math.max(base.h, 1e-9)
+    const MIN_SIZE = 0.5
+    const MAX_SCALE = 100
+    const minFx = MIN_SIZE / startW
+    const minFy = MIN_SIZE / startH
+    if (corner || horizontalEdge) {
+      const s = fx < 0 ? -1 : 1
+      const a = Math.abs(fx)
+      fx = s * Math.max(minFx, Math.min(MAX_SCALE, a))
+    }
+    if (corner || verticalEdge) {
+      const s = fy < 0 ? -1 : 1
+      const a = Math.abs(fy)
+      fy = s * Math.max(minFy, Math.min(MAX_SCALE, a))
+    }
+
+    const lastFx = Math.abs(this.transformLastTotalFx) < 1e-12 ? 1 : this.transformLastTotalFx
+    const lastFy = Math.abs(this.transformLastTotalFy) < 1e-12 ? 1 : this.transformLastTotalFy
+    let stepFx = fx / lastFx
+    let stepFy = fy / lastFy
+    if (!Number.isFinite(stepFx)) stepFx = 1
+    if (!Number.isFinite(stepFy)) stepFy = 1
+    if (Math.abs(stepFx - 1) < 1e-9 && Math.abs(stepFy - 1) < 1e-9) return
+
+    const P = new scope.Point(pivotW.x, pivotW.y)
+    const th = base.angle
+    const skipSpin = Math.abs(th) < 1e-9
+    let applied = false
+    let skippedLocked = false
+    for (const item of this.transformItems) {
+      if (!item.parent || item.locked) {
+        if (item.locked) skippedLocked = true
+        continue
+      }
+      if (!skipSpin) item.rotate(-th, P)
+      item.scale(stepFx, stepFy, P)
+      if (!skipSpin) item.rotate(th, P)
+      engine.refreshItemGradient(item)
+      applied = true
+    }
+    if (!applied) return
+    this.transformLastTotalFx = fx
+    this.transformLastTotalFy = fy
+    this.transformMoved = true
+    // Locked members staying behind break rigid tracking — drop the frame
+    // so the next paint rebuilds it from live bounds.
+    if (skippedLocked) {
+      this.frame = null
+      return
+    }
+    // Advance the tracked frame from the totals (signed factors keep flips
+    // honest); the angle never changes under scaling.
+    if (this.frame) {
+      const f = this.frame
+      f.w = base.w * Math.abs(fx)
+      f.h = base.h * Math.abs(fy)
+      const clx = pL.x + (base.cx - pL.x) * fx
+      const cly = pL.y + (base.cy - pL.y) * fy
+      const cw = new scope.Point(clx, cly).rotate(base.angle, centerW)
+      f.cx = cw.x
+      f.cy = cw.y
+    }
+  }
+
+  /**
+   * Hover cursor for the bbox handle under a point, or null. Cursors follow
+   * the frame's live tilt: corners resize along the corner's 45° bisector —
+   * a native diagonal only when the bisector lands exactly on one,
+   * otherwise an exact-angle double arrow in native white-core style —
+   * while edges show the arrow perpendicular to the edge.
+   */
   private cursorForHandleAt(point: paper.Point): string | null {
     const engine = this.engine
     if (!engine || engine.getSelection().length === 0) return null
-    const bounds = engine.getSelectionBounds()
-    if (!bounds || bounds.width <= 0 || bounds.height <= 0) return null
     const tol = 7 / engine.scope.view.zoom
-    const handle = this.transformHandleAt(point, bounds, tol)
+    const handle = this.transformHandleAt(point, tol)
     if (handle === 'none') return null
-    return TRANSFORM_CURSORS[handle]
+    if (handle === 'rotate') return CURSOR_ROTATE
+    const tilt = this.frame ? this.frame.angle : 0
+    const heading = HANDLE_HEADINGS[handle] + tilt
+    if (this.isCornerHandle(handle)) {
+      const native = diagonalCursorForHeading(heading)
+      const folded = ((heading % 180) + 180) % 180
+      const nearDiag = Math.min(Math.abs(folded - 45), Math.abs(folded - 135))
+      if (nearDiag < 0.5) return native
+      return arrowResizeCursor(heading, native)
+    }
+    return resizeCursorForHeading(heading)
   }
 
   /**
@@ -1088,24 +1538,52 @@ export class SelectController {
     return this.anchorHitAt(point, tol) ? 'pointer' : null
   }
 
-  /** Draw the selection bounding box with scale handles + rotate knob. */
+  /** Draw the AI-style selection: outlines + oriented frame + 8 handles. */
   private drawSelectionBounds() {
     const engine = this.engine
     this.chrome.clear()
     if (!engine || this.isMarquee) return
-    const bounds = engine.getSelectionBounds()
-    if (!bounds || bounds.width <= 0 || bounds.height <= 0) return
-    const positions = this.boundsHandlePositions(bounds)
-    const order: Exclude<TransformHandle, 'none' | 'rotate'>[] = [
+    const items = engine.getSelection()
+    if (items.length === 0) {
+      this.restoreAllNativeSelections()
+      return
+    }
+    // Our chrome owns the visuals: silence paper.js native blue everywhere.
+    for (const stale of Array.from(this.chromeSuppressed)) {
+      if (!items.includes(stale)) this.restoreNativeSelection(stale)
+    }
+    for (const item of items) this.suppressNativeSelection(item)
+    // The oriented frame persists across rotation (never snaps back); it
+    // rebuilds upright only when the selection or untracked geometry drifts.
+    this.ensureFrame()
+    const f = this.frame
+    if (!f) return
+    // Per-object outlines keep their own layer color (AI); the frame uses
+    // the first item's layer color.
+    for (const item of items) {
+      this.chrome.drawItemOutline(item, selectionColorForItem(engine, item))
+    }
+    const bboxColor = selectionColorForItems(engine, items)
+    const order: FrameHandle[] = [
       'topLeft', 'topCenter', 'topRight',
       'middleLeft', 'middleRight',
       'bottomLeft', 'bottomCenter', 'bottomRight',
     ]
+    const positions = this.frameCorners(f)
+    this.chrome.drawPolygonOutline(
+      [positions.topLeft, positions.topRight, positions.bottomRight, positions.bottomLeft],
+      bboxColor
+    )
     for (const handle of order) {
-      this.chrome.drawAnchor(positions[handle], handle === this.transformHandle)
+      // Active drag handle fills solid so the grab reads clearly (a
+      // corner-started rotation highlights its corner the same way).
+      this.chrome.drawAnchor(positions[handle], handle === this.transformHandle, bboxColor)
     }
-    // Stem line plus knob for rotation.
-    this.chrome.drawHandle(positions.topCenter, positions.rotate)
+    // While rotating, mark the frozen reference pivot (AI's transform
+    // origin) so the rotation center is explicit.
+    if (this.grab === 'transform' && this.transformKind === 'rotate' && this.transformRotatePivot) {
+      this.chrome.drawPivotMarker(this.transformRotatePivot, bboxColor)
+    }
     engine.scope.view.update()
   }
 
@@ -1137,13 +1615,27 @@ export class SelectController {
       else totalX = 0
     }
     const shift = new engine.scope.Point(totalX, totalY)
+    let moved = false
+    let skippedLocked = false
     this.dragItems.forEach((item, index) => {
-      if (item.locked) return
+      if (item.locked) {
+        skippedLocked = true
+        return
+      }
       const start = this.dragItemStartPositions[index]
       if (!start) return
       item.position = start.add(shift)
       engine.refreshItemGradient(item)
+      moved = true
     })
+    // Pure translation: the oriented frame slides along untouched — unless
+    // locked members stay behind, in which case the frame is dropped.
+    if (skippedLocked) {
+      if (moved) this.frame = null
+    } else if (moved && this.frame && this.dragStartFrame) {
+      this.frame.cx = this.dragStartFrame.x + totalX
+      this.frame.cy = this.dragStartFrame.y + totalY
+    }
     engine.store.setCursorPos(point.x, point.y)
     this.refreshChrome()
     // Smart alignment guides draw above the bbox chrome.

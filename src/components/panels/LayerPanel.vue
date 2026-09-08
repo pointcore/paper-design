@@ -141,6 +141,7 @@ import { Plus, CopyDocument, Delete, Files, Search, Filter, MoreFilled, FolderAd
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
 import type { LayerItemNode } from '../../editor/types'
+import { LAYER_COLORS } from '../../editor/selection/selection-style'
 
 const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
@@ -235,7 +236,6 @@ function thumbOf(id: string): string {
 }
 
 /** Stable accent color per layer, mimicking AI's layer color strip. */
-const LAYER_COLORS = ['#e04c4c', '#4a90d9', '#7ac943', '#e6a23c', '#9b59b6', '#1abc9c']
 function layerColor(id: string): string {
   const idx = store.layers.findIndex((l) => l.id === id)
   return LAYER_COLORS[((idx % LAYER_COLORS.length) + LAYER_COLORS.length) % LAYER_COLORS.length]

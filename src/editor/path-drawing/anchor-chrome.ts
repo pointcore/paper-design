@@ -70,11 +70,11 @@ export class AnchorChrome {
   }
 
   /**
-   * Draw one anchor marker. Unselected anchors are filled, selected ones
-   * become hollow — matching Illustrator so selected anchors read as
-   * "picked up" regardless of how many anchors are selected at once.
+   * Draw one anchor marker, AI-aligned:
+   * - unselected: white fill + layer-color stroke (hollow)
+   * - selected: solid layer-color fill (same-color stroke)
    */
-  drawAnchor(point: paper.Point, selected = false): AnchorVisual | null {
+  drawAnchor(point: paper.Point, selected = false, color = '#4a90d9'): AnchorVisual | null {
     const engine = this.engine
     const layer = this.ensureLayer()
     if (!engine || !layer) return null
@@ -84,12 +84,12 @@ export class AnchorChrome {
       new scope.Rectangle(point.x - size, point.y - size, size * 2, size * 2)
     ) as paper.Path
     if (selected) {
-      rect.fillColor = null
-      rect.strokeColor = new scope.Color('#4a90d9')
-      rect.strokeWidth = 1.2 / scope.view.zoom
+      rect.fillColor = new scope.Color(color)
+      rect.strokeColor = new scope.Color(color)
+      rect.strokeWidth = 1 / scope.view.zoom
     } else {
       rect.fillColor = new scope.Color('#ffffff')
-      rect.strokeColor = new scope.Color('#4a90d9')
+      rect.strokeColor = new scope.Color(color)
       rect.strokeWidth = 1 / scope.view.zoom
     }
     rect.data.isChrome = true
@@ -100,29 +100,151 @@ export class AnchorChrome {
 
   /**
    * Draw a control handle line between an anchor and its control handle point,
-   * plus a circular handle marker at the free end.
+   * plus a circular handle marker at the free end. AI-aligned: thin
+   * layer-color line with a small solid layer-color dot.
    */
-  drawHandle(anchor: paper.Point, handle: paper.Point): paper.Path | null {
+  drawHandle(anchor: paper.Point, handle: paper.Point, color = '#4a90d9'): paper.Path | null {
     const engine = this.engine
     const layer = this.ensureLayer()
     if (!engine || !layer) return null
     const scope = engine.scope
     const line = new scope.Path.Line(anchor, handle) as paper.Path
-    line.strokeColor = new scope.Color('#4a90d9')
+    line.strokeColor = new scope.Color(color)
     line.strokeWidth = 1 / scope.view.zoom
     line.data.isChrome = true
     layer.addChild(line)
 
-    // Circle marker for the control handle itself.
-    const r = 3.5 / scope.view.zoom
+    // Circle marker for the control handle itself (solid, smaller than anchors).
+    const r = 3 / scope.view.zoom
     const circle = new scope.Path.Circle(handle, r) as paper.Path
-    circle.fillColor = new scope.Color('#ffffff')
-    circle.strokeColor = new scope.Color('#4a90d9')
+    circle.fillColor = new scope.Color(color)
+    circle.strokeColor = new scope.Color(color)
     circle.strokeWidth = 1 / scope.view.zoom
     circle.data.isChrome = true
     layer.addChild(circle)
     layer.bringToFront()
     return line
+  }
+
+  /**
+   * Draw the AI-style selection bounding-box outline (thin solid layer-color
+   * rectangle, no fill). Handles themselves are drawn via drawAnchor().
+   */
+  drawBounds(bounds: paper.Rectangle, color = '#4a90d9'): paper.Path | null {
+    const engine = this.engine
+    const layer = this.ensureLayer()
+    if (!engine || !layer) return null
+    const scope = engine.scope
+    const rect = new scope.Path.Rectangle(bounds.clone()) as paper.Path
+    rect.fillColor = null
+    rect.strokeColor = new scope.Color(color)
+    rect.strokeWidth = 1 / scope.view.zoom
+    rect.data.isChrome = true
+    layer.addChild(rect)
+    layer.bringToFront()
+    return rect
+  }
+
+  /**
+   * Draw a polygon outline through the given points (used for the rigid
+   * rotating bbox frame while rotating). Thin solid layer-color stroke,
+   * no fill.
+   */
+  drawPolygonOutline(points: paper.Point[], color = '#4a90d9'): paper.Path | null {
+    const engine = this.engine
+    const layer = this.ensureLayer()
+    if (!engine || !layer || points.length < 3) return null
+    const scope = engine.scope
+    const poly = new scope.Path({ insert: false }) as paper.Path
+    for (const pt of points) poly.add(new scope.Segment(pt.clone()))
+    poly.closed = true
+    poly.fillColor = null
+    poly.strokeColor = new scope.Color(color)
+    poly.strokeWidth = 1 / scope.view.zoom
+    poly.data.isChrome = true
+    layer.addChild(poly)
+    layer.bringToFront()
+    return poly
+  }
+
+  /**
+   * Draw the transform-origin marker (AI's reference pivot): a small target
+   * ring with a center dot in the selection color, shown while rotating so
+   * the rotation origin never reads as ambiguous.
+   */
+  drawPivotMarker(position: paper.Point, color = '#4a90d9'): void {
+    const engine = this.engine
+    const layer = this.ensureLayer()
+    if (!engine || !layer) return
+    const scope = engine.scope
+    const ring = new scope.Path.Circle(position, 4.5 / scope.view.zoom) as paper.Path
+    ring.fillColor = new scope.Color('#ffffff')
+    ring.strokeColor = new scope.Color(color)
+    ring.strokeWidth = 1 / scope.view.zoom
+    ring.data.isChrome = true
+    layer.addChild(ring)
+    const dot = new scope.Path.Circle(position, 1.3 / scope.view.zoom) as paper.Path
+    dot.fillColor = new scope.Color(color)
+    dot.strokeColor = null
+    dot.data.isChrome = true
+    layer.addChild(dot)
+    layer.bringToFront()
+  }
+
+  /**
+   * Draw an AI-style selected-path outline: a thin layer-color stroke tracing
+   * the path centerline on the chrome layer (fill never painted).
+   */
+  drawPathOutline(path: paper.Path, color = '#4a90d9'): paper.Path | null {
+    const engine = this.engine
+    const layer = this.ensureLayer()
+    if (!engine || !layer) return null
+    const scope = engine.scope
+    if (!path.segments || path.segments.length === 0) return null
+    const hl = new scope.Path({ insert: false }) as paper.Path
+    for (const seg of path.segments) {
+      const hi = (seg.handleIn as paper.Point | null)?.clone() ?? null
+      const ho = (seg.handleOut as paper.Point | null)?.clone() ?? null
+      hl.add(new scope.Segment(seg.point.clone(), hi as any, ho as any))
+    }
+    hl.closed = !!path.closed
+    hl.fillColor = null
+    hl.strokeColor = new scope.Color(color)
+    hl.strokeWidth = 1 / scope.view.zoom
+    hl.data.isChrome = true
+    layer.addChild(hl)
+    layer.bringToFront()
+    return hl
+  }
+
+  /**
+   * Draw the AI-style outline for any selected item: every Path leaf gets a
+   * centerline trace in its own layer color; non-path leaves (text, raster,
+   * symbols) fall back to a thin bounds rectangle.
+   */
+  drawItemOutline(item: paper.Item, color = '#4a90d9'): void {
+    const engine = this.engine
+    if (!engine || !item) return
+    const scope = engine.scope
+    if (item instanceof scope.CompoundPath) {
+      for (const child of (item as paper.CompoundPath).children) {
+        if (child instanceof scope.Path) this.drawPathOutline(child as paper.Path, color)
+      }
+      return
+    }
+    if (item instanceof scope.Path) {
+      this.drawPathOutline(item as paper.Path, color)
+      return
+    }
+    const children = (item as any).children as paper.Item[] | undefined
+    if (children && children.length > 0) {
+      for (const child of children) this.drawItemOutline(child as paper.Item, color)
+      return
+    }
+    const bounds = (item as any).bounds as paper.Rectangle | undefined
+    if (bounds && bounds.width > 0 && bounds.height > 0) {
+      this.drawBounds(bounds, color)
+    }
   }
 
   /**

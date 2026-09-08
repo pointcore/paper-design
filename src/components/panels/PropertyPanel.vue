@@ -875,6 +875,7 @@ function onRotateByChange(val: number | undefined) {
   }
   e.rotateSelection(val, pivot)
   e.pushHistory('Rotate')
+  e.stampSelectionFrame()
   rotateBy.value = 0
 }
 
@@ -898,6 +899,7 @@ function onFlipH() {
   if (!pivot) return
   e.flipSelection('horizontal', pivot)
   e.pushHistory('Flip Horizontal')
+  e.stampSelectionFrame()
 }
 
 function onFlipV() {
@@ -907,6 +909,7 @@ function onFlipV() {
   if (!pivot) return
   e.flipSelection('vertical', pivot)
   e.pushHistory('Flip Vertical')
+  e.stampSelectionFrame()
 }
 
 function onAlign(mode: AlignMode, label: string) {
