@@ -124,9 +124,9 @@ export function resolveToolShortcut(e: KeyboardEvent): ToolName | null {
  * Global keydown handler for editor shortcuts.
  *
  * Three groups live here:
- * - Clipboard, history, fit, select, arrange, group, lock and hide
- *   shortcuts (Ctrl+C / X / V / F / B / A / G / Shift+G / 2 / Alt+2 / 3 /
- *   Alt+3 / Z / Shift+Z / Y / 0 / brackets). Copy also mirrors the selection to the OS clipboard
+ * - Clipboard, history, fit, select, arrange, group, lock, hide, save
+ *   and invert shortcuts (Ctrl+C / X / V / F / B / A / G / Shift+G /
+ *   Shift+I / S / 2 / Alt+2 / 3 / Alt+3 / Z / Shift+Z / Y / 0 / brackets). Copy also mirrors the selection to the OS clipboard
  *   as SVG (best effort); paste prefers OS clipboard SVG and falls back to
  *   the internal clipboard. They work in every tool context, matching
  *   Illustrator; the text edit overlay is exempt via the editable-target
@@ -175,6 +175,17 @@ export function handleGlobalKeydown(
       e.preventDefault()
     } else if (key === '0') {
       engine?.fitToContent()
+      e.preventDefault()
+    } else if (key === 's') {
+      try {
+        engine?.downloadProjectFile()
+      } catch {
+        store.setStatusMessage('Project save failed')
+      }
+      e.preventDefault()
+    } else if (key === 'i' && e.shiftKey) {
+      // Browsers may reserve this for devtools; the menu always works.
+      engine?.invertSelection()
       e.preventDefault()
     } else if (key === 'a') {
       engine?.selectAllArtwork()

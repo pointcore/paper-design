@@ -927,6 +927,22 @@ export class EditorEngine {
   }
 
   /**
+   * Download the current document as a versioned project file. Shared by
+   * File > Save and the Ctrl+S shortcut.
+   */
+  downloadProjectFile(): void {
+    const fileText = this.exportProjectFile()
+    const blob = new Blob([fileText], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'project.vec.json'
+    a.click()
+    URL.revokeObjectURL(url)
+    this.showStatus('Project saved')
+  }
+
+  /**
    * Replace the current document with the content of a project file string.
    * Throws an Error with an English message when the file is invalid.
    */

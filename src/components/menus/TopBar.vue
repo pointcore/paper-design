@@ -379,15 +379,7 @@ function onFileCmd(cmd: string) {
     case 'save': {
       if (!e) break
       try {
-        const fileText = e.exportProjectFile()
-        const blob = new Blob([fileText], { type: 'application/json' })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = 'project.vec.json'
-        a.click()
-        URL.revokeObjectURL(url)
-        store.setStatusMessage('Project saved')
+        e.downloadProjectFile()
       } catch (err) {
         store.setStatusMessage('Project save failed')
       }
@@ -968,7 +960,7 @@ function onNudgeStepChange(val: number | undefined) {
 }
 
 function onHelp() {
-  store.setStatusMessage('Shortcuts: V Select | A Direct Select | P Pen | N Pencil | Shift+E Eraser | Shift+B Blob | B Brush | C Scissors | Curvature | +/- & C Anchor Tools | Space Pan | Ctrl+0 Fit | Arrows Nudge | Ctrl+A Select | Ctrl+G Group | Ctrl+2 Lock | Ctrl+3 Hide | Ctrl+F/B Paste | Ctrl+[ Order | Esc Cancel')
+  store.setStatusMessage('Shortcuts: V Select | A Direct Select | P Pen | N Pencil | Shift+E Eraser | Shift+B Blob | B Brush | C Scissors | Curvature | +/- & C Anchor Tools | Space Pan | Ctrl+0 Fit | Arrows Nudge | Ctrl+A Select | Ctrl+G Group | Ctrl+2 Lock | Ctrl+3 Hide | Ctrl+F/B Paste | Ctrl+[ Order | Ctrl+S Save | Ctrl+Shift+I Invert | Esc Cancel')
 }
 </script>
 
