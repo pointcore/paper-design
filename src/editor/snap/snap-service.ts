@@ -214,6 +214,19 @@ export class SnapService {
       if (!(layer.data as any)?.isUserLayer || !layer.visible || layer.locked) continue
       for (const child of layer.children) walk(child as paper.Item)
     }
+    // Artboard corners and centers snap like anchors (placement aid).
+    for (const board of engine.store.artboards) {
+      if (board.width <= 0 || board.height <= 0) continue
+      const cx = board.x + board.width / 2
+      const cy = board.y + board.height / 2
+      out.push(
+        new scope.Point(board.x, board.y),
+        new scope.Point(board.x + board.width, board.y),
+        new scope.Point(board.x, board.y + board.height),
+        new scope.Point(board.x + board.width, board.y + board.height),
+        new scope.Point(cx, cy)
+      )
+    }
     return out
   }
 
@@ -221,6 +234,7 @@ export class SnapService {
   private collectTargetRects(excluded: Set<paper.Item>): paper.Rectangle[] {
     const engine = this.engine
     if (!engine) return []
+    const scope = engine.scope
     const out: paper.Rectangle[] = []
     for (const layer of engine.project.layers) {
       if (!(layer.data as any)?.isUserLayer || !layer.visible) continue
@@ -233,6 +247,11 @@ export class SnapService {
         if (!b) continue
         out.push(b.clone())
       }
+    }
+    // Artboard edges participate in smart alignment like any bounds.
+    for (const board of engine.store.artboards) {
+      if (board.width <= 0 || board.height <= 0) continue
+      out.push(new scope.Rectangle(board.x, board.y, board.width, board.height))
     }
     return out
   }
