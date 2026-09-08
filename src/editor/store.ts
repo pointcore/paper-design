@@ -174,8 +174,6 @@ export const useEditorStore = defineStore('editor', {
       settingsOpen: false,
       showNavigator: true,
     },
-    /** Whether previewing (during Live Shape drag) */
-    isPreviewing: false,
     /** Whether isolated group editing is active */
     isolationActive: false,
   }),
@@ -347,11 +345,6 @@ export const useEditorStore = defineStore('editor', {
     /** Mark dragging state */
     setDragging(val: boolean) {
       this.isDragging = val
-    },
-
-    /** Toggle preview mode */
-    setPreviewing(val: boolean) {
-      this.isPreviewing = val
     },
 
     /** Update panel UI state */
