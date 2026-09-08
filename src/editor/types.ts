@@ -151,6 +151,14 @@ export interface LayerItemNode {
   collapsible: boolean
   /** Whether a foldable entry currently hides its children. */
   collapsed: boolean
+  /** AI-style entry kind (drives icons + sublayer styling). */
+  kind: 'sublayer' | 'group' | 'clip' | 'compound' | 'path' | 'text' | 'image' | 'symbol' | 'object'
+  /** Owning user-layer id (top-level parent layer). */
+  layerId: string
+  /** Direct parent group id, or '' when the entry sits at layer top level. */
+  parentId: string
+  /** Nested children (populated by listLayerTree; flat list leaves it empty). */
+  children: LayerItemNode[]
 }
 
 /** Artboard (page sheet) metadata; visuals derive from this list. */

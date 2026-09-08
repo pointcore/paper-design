@@ -100,9 +100,19 @@ export class EyedropperController {
     }
 
     const scope = engine.scope
-    const selection = engine
-      .getSelection()
-      .filter((item) => !item.locked && !(item instanceof scope.Group))
+    // The engine selection is top-most (a selected group counts as one
+    // unit), so descend into groups to reach the paintable leaves, exactly
+    // as before when descendants arrived in the raw selection.
+    const selection: paper.Item[] = []
+    const collect = (item: paper.Item): void => {
+      if (item.locked) return
+      if (item instanceof scope.Group) {
+        for (const child of item.children) collect(child as paper.Item)
+        return
+      }
+      selection.push(item)
+    }
+    for (const item of engine.getSelection()) collect(item)
     for (const item of selection) {
       // Gradient paints stay on paths; text keeps its solid fill instead
       // of risking an unreadable gradient run.

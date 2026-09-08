@@ -213,8 +213,30 @@ export class EditorEngine {
     return this.controllers.get(toolName) ?? null
   }
 
+  /**
+   * Current selection reduced to top-most members. Paper groups propagate
+   * the selected flag to their whole subtree (`_selectChildren`), so the
+   * raw list contains every descendant — operating on those as well would
+   * apply every transform/copy/order op twice (once via the group, once
+   * directly). All document ops go through here and therefore treat a
+   * selected group as one unit, like Illustrator.
+   */
   getSelection(): paper.Item[] {
-    return this.project.selectedItems as paper.Item[]
+    return this.topmostItems(this.project.selectedItems as paper.Item[])
+  }
+
+  /** Drop items nested inside another included item (selection de-dup). */
+  private topmostItems(items: paper.Item[]): paper.Item[] {
+    if (items.length < 2) return items.slice()
+    const set = new Set(items)
+    return items.filter((item) => {
+      let at = item.parent
+      while (at) {
+        if (set.has(at as paper.Item)) return false
+        at = at.parent
+      }
+      return true
+    })
   }
 
   clearSelection() {
@@ -231,22 +253,28 @@ export class EditorEngine {
   }
 
   syncSelectionToStore() {
-    const ids = this.project.selectedItems.map((item) => (item as any).data?.id as string)
+    const ids = this.topmostItems(this.project.selectedItems as paper.Item[]).map(
+      (item) => (item as any).data?.id as string
+    )
     this.store.setSelection(ids.filter(Boolean))
   }
 
   syncLayersToStore() {
+    const prevExpand = new Map(this.store.layers.map((l) => [l.id, l.expand]))
     const layers: LayerMeta[] = []
     for (const layer of this.project.layers) {
       if (layer.data?.isUserLayer) {
+        const id = layer.data.layerId as string
         layers.push({
-          id: layer.data.layerId as string,
+          id,
           name: layer.name || 'Layer',
           visible: layer.visible,
           locked: layer.locked,
           opacity: layer.opacity,
           isUserLayer: true,
-          expand: true,
+          // Keep the panel fold state across syncs (undo/import/duplicates
+          // rebuild the list from the project and would expand everything).
+          expand: prevExpand.get(id) ?? true,
         })
       }
     }
@@ -263,14 +291,43 @@ export class EditorEngine {
     return userLayers[userLayers.length - 1]
   }
 
-  createLayer(name = 'Layer'): paper.Layer {
+  createLayer(name?: string): paper.Layer {
     const layer = new this.scope.Layer()
-    layer.name = name
+    layer.name = (name ?? '').trim() || this.nextUserLayerName()
     layer.data.isUserLayer = true
     layer.data.layerId = this.genId()
+    // `new Layer()` appends at the very top of the stack (above guides and
+    // overlay chrome, which would bury interaction feedback). Park the layer
+    // on top of the user band instead.
+    this.parkUserLayer(layer)
     layer.activate()
     this.syncLayersToStore()
     return layer
+  }
+
+  /** First unused "Layer N" name across user layers. */
+  private nextUserLayerName(): string {
+    const users = this.project.layers.filter((l) => (l.data as any)?.isUserLayer)
+    const names = new Set(users.map((l) => l.name))
+    let n = users.length + 1
+    while (names.has(`Layer ${n}`)) n++
+    return `Layer ${n}`
+  }
+
+  /**
+   * Keep a newborn user layer inside the user band: directly above the
+   * topmost user layer (project order is bottom-first), or below the
+   * first chrome layer when no user band exists yet.
+   */
+  private parkUserLayer(layer: paper.Layer): void {    const users = this.project.layers.filter(
+      (l) => (l.data as any)?.isUserLayer && l !== layer
+    )
+    if (users.length > 0) {
+      layer.insertAbove(users[users.length - 1])
+      return
+    }
+    const chrome = this.project.layers.find((l) => !(l.data as any)?.isUserLayer && l !== layer)
+    if (chrome) layer.insertBelow(chrome)
   }
 
   /**
@@ -305,29 +362,46 @@ export class EditorEngine {
     if (layer) {
       layer.remove()
       this.syncLayersToStore()
+      this.pointActiveLayerAtRestoredStack()
     }
   }
 
   getOverlayLayer(): paper.Layer {
-    if (!this.overlayLayer || !this.overlayLayer.parent) {
-      this.overlayLayer = new this.scope.Layer()
-      this.overlayLayer.name = 'overlay'
-      this.overlayLayer.locked = true
+    if (this.overlayLayer && this.project.layers.includes(this.overlayLayer)) {
+      return this.overlayLayer
     }
+    // Top-level layers never carry .parent (they sit directly on the
+    // project), so a parent check would recreate the layer on every call.
+    // Reuse the existing overlay by name instead, like the guide layer does.
+    const existing = this.project.layers.find(
+      (l) => l.name === 'overlay' && !(l.data as any)?.isUserLayer
+    ) as paper.Layer | undefined
+    this.overlayLayer = existing ?? new this.scope.Layer()
+    this.overlayLayer.name = 'overlay'
+    this.overlayLayer.locked = true
+    this.overlayLayer.data.isUserLayer = false
     return this.overlayLayer
   }
 
   getAnnotationLayer(): paper.Layer {
-    if (!this.annotationLayer || !this.annotationLayer.parent) {
-      this.annotationLayer = new this.scope.Layer()
-      this.annotationLayer.name = 'annotation'
-      this.annotationLayer.locked = true
+    if (this.annotationLayer && this.project.layers.includes(this.annotationLayer)) {
+      return this.annotationLayer
     }
+    const existing = this.project.layers.find(
+      (l) => l.name === 'annotation' && !(l.data as any)?.isUserLayer
+    ) as paper.Layer | undefined
+    this.annotationLayer = existing ?? new this.scope.Layer()
+    this.annotationLayer.name = 'annotation'
+    this.annotationLayer.locked = true
+    this.annotationLayer.data.isUserLayer = false
     return this.annotationLayer
   }
 
   getGuideLayer(): paper.Layer {
-    if (!this.guideLayer || !this.guideLayer.parent) {
+    if (this.guideLayer && this.project.layers.includes(this.guideLayer)) {
+      return this.guideLayer
+    }
+    {
       // After an import/undo the layer object may have been replaced;
       // locate the existing guides layer by name if present.
       const existing = this.project.layers.find(
@@ -1136,65 +1210,189 @@ export class EditorEngine {
     return true
   }
 
-  // ===== Layer object tree =====
+  // ===== Layer object tree (AI-style nested hierarchy) =====
+  //
+  // Paper `project.layers` stays flat (sync/export/order depend on it), so
+  // Illustrator sublayers are emulated as groups flagged with
+  // `data.isSublayer`. They render like layers in the panel, nest freely,
+  // and survive snapshots/exports because they are plain groups.
+
+  /** Kind discriminator for one tree entry (drives panel icons). */
+  private itemTreeKind(item: paper.Item): LayerItemNode['kind'] {
+    const scope = this.scope
+    const data = (item.data as any) ?? {}
+    if (item instanceof scope.Group && (data as any).isSublayer) return 'sublayer'
+    if (data.textMode === 'path' || data.textMode === 'area' || data.textMode === 'vertical') {
+      return item instanceof scope.Group ? 'group' : 'text'
+    }
+    if (item instanceof scope.Group && this.isClipGroup(item)) return 'clip'
+    if (item instanceof scope.PointText) return 'text'
+    if (item instanceof scope.CompoundPath) return 'compound'
+    if (item instanceof scope.SymbolItem) return 'symbol'
+    if (item instanceof scope.Raster) return 'image'
+    if (item instanceof scope.Group) return 'group'
+    if (item instanceof scope.Path) return 'path'
+    return 'object'
+  }
+
+  /** Build one tree node (children attached recursively). */
+  private buildTreeNode(item: paper.Item, layerId: string, parentId: string, depth: number): LayerItemNode | null {
+    const scope = this.scope
+    const data = (item.data as any) ?? {}
+    if (data.isChrome || data.isPreview || data.isGuide || data.annotation) return null
+    if (
+      item instanceof scope.CompoundPath ||
+      item instanceof scope.Path ||
+      item instanceof scope.PointText ||
+      item instanceof scope.SymbolItem ||
+      item instanceof scope.Raster
+    ) {
+      if (!data.id) return null
+      return {
+        id: data.id as string,
+        name: this.itemTreeLabel(item),
+        depth,
+        visible: item.visible,
+        locked: item.locked,
+        collapsible: false,
+        collapsed: false,
+        kind: this.itemTreeKind(item),
+        layerId,
+        parentId,
+        children: [],
+      }
+    }
+    if (item instanceof scope.Group) {
+      // Tagged groups (artwork groups, sublayers, clip groups, path-text
+      // runs) are entries; untagged wrappers are never passed here — the
+      // append walker splices those before calling this method.
+      if (!data.id) return null
+      const foldable = data.textMode !== 'path' && item.children.length > 0
+      const collapsed = foldable && (data.treeCollapsed as boolean | undefined) === true
+      const node: LayerItemNode = {
+        id: data.id as string,
+        name: this.itemTreeLabel(item),
+        depth,
+        visible: item.visible,
+        locked: item.locked,
+        collapsible: foldable,
+        collapsed,
+        kind: this.itemTreeKind(item),
+        layerId,
+        parentId,
+        children: [],
+      }
+      if (data.textMode === 'path') return node
+      this.appendGroupChildren(item, layerId, node.id, depth + 1, node.children)
+      return node
+    }
+    if (data.id) {
+      return {
+        id: data.id as string,
+        name: this.itemTreeLabel(item),
+        depth,
+        visible: (item as paper.Item).visible,
+        locked: (item as paper.Item).locked,
+        collapsible: false,
+        collapsed: false,
+        kind: this.itemTreeKind(item),
+        layerId,
+        parentId,
+        children: [],
+      }
+    }
+    return null
+  }
+
+  /**
+   * Append one item's tree representation (0..n nodes: untagged groups
+   * splice their children through). Single funnel for layer tops and group
+   * interiors so transparent wrappers never drop siblings at any depth.
+   */
+  private appendTreeNodes(
+    item: paper.Item,
+    layerId: string,
+    parentId: string,
+    depth: number,
+    out: LayerItemNode[]
+  ): void {
+    const scope = this.scope
+    const data = (item.data as any) ?? {}
+    if (data.isChrome || data.isPreview || data.isGuide || data.annotation) return
+    if (item instanceof scope.Group && !data.id) {
+      this.appendGroupChildren(item, layerId, parentId, depth, out)
+      return
+    }
+    const children = (item as any).children as paper.Item[] | undefined
+    const isLeafType =
+      item instanceof scope.CompoundPath ||
+      item instanceof scope.Path ||
+      item instanceof scope.PointText ||
+      item instanceof scope.SymbolItem ||
+      item instanceof scope.Raster
+    if (children && !isLeafType && !(item instanceof scope.Group)) {
+      this.appendGroupChildren(item as unknown as paper.Group, layerId, parentId, depth, out)
+      return
+    }
+    const node = this.buildTreeNode(item, layerId, parentId, depth)
+    if (node) out.push(node)
+  }
+
+  /** Append every child of a container (bottom-first paper order). */
+  private appendGroupChildren(
+    container: paper.Group | paper.Item,
+    layerId: string,
+    parentId: string,
+    depth: number,
+    out: LayerItemNode[]
+  ): void {
+    const children = ((container as any).children as paper.Item[] | undefined) ?? []
+    for (const child of children) {
+      this.appendTreeNodes(child as paper.Item, layerId, parentId, depth, out)
+    }
+  }
+
+  /**
+   * Nested AI-style object tree for one user layer. Collapsed groups keep
+   * their children attached (the panel decides whether to render them), so
+   * expanding never needs a document rescan.
+   */
+  listLayerTree(layerId: string): LayerItemNode[] {
+    const out: LayerItemNode[] = []
+    const layer = this.project.layers.find((l) => (l.data as any)?.layerId === layerId)
+    if (!layer) return out
+    for (const child of layer.children) {
+      this.appendTreeNodes(child as paper.Item, layerId, '', 0, out)
+    }
+    // Render top-first like Illustrator (paper children are bottom-first).
+    out.reverse()
+    const reverseChildren = (nodes: LayerItemNode[]): void => {
+      for (const node of nodes) {
+        if (node.children.length > 1) node.children.reverse()
+        if (node.children.length > 0) reverseChildren(node.children)
+      }
+    }
+    reverseChildren(out)
+    return out
+  }
 
   /**
    * Flat depth-first object entries for one user layer. Path-text glyph
    * runs stay whole (their group is the entry); untagged plain groups are
    * transparent containers whose children list at the same depth.
+   * Collapsed groups hide their descendants (panel fold state).
    */
   listLayerItems(layerId: string): LayerItemNode[] {
     const out: LayerItemNode[] = []
-    const scope = this.scope
-    const layer = this.project.layers.find((l) => (l.data as any)?.layerId === layerId)
-    if (!layer) return out
-    const walk = (item: paper.Item, depth: number): void => {
-      const data = (item.data as any) ?? {}
-      if (data.isChrome || data.isPreview || data.isGuide || data.annotation) return
-      if (
-        item instanceof scope.CompoundPath ||
-        item instanceof scope.Path ||
-        item instanceof scope.PointText
-      ) {
-        if (data.id) {
-          out.push({
-            id: data.id as string,
-            name: this.itemTreeLabel(item),
-            depth,
-            visible: item.visible,
-            locked: item.locked,
-            collapsible: false,
-            collapsed: false,
-          })
-        }
-        return
-      }
-      if (item instanceof scope.Group) {
-        if (data.id) {
-          const foldable = data.textMode !== 'path' && item.children.length > 0
-          const collapsed = foldable && (data.treeCollapsed as boolean | undefined) === true
-          out.push({
-            id: data.id as string,
-            name: this.itemTreeLabel(item),
-            depth,
-            visible: item.visible,
-            locked: item.locked,
-            collapsible: foldable,
-            collapsed,
-          })
-          if (data.textMode === 'path' || collapsed) return
-          for (const child of item.children) walk(child as paper.Item, depth + 1)
-        } else {
-          for (const child of item.children) walk(child as paper.Item, depth)
-        }
-        return
-      }
-      const children = (item as any).children as paper.Item[] | undefined
-      if (children) {
-        for (const child of children) walk(child, depth)
+    const flatten = (nodes: LayerItemNode[]): void => {
+      for (const node of nodes) {
+        out.push(node)
+        if (node.collapsible && node.collapsed) continue
+        if (node.children.length > 0) flatten(node.children)
       }
     }
-    for (const child of layer.children) walk(child as paper.Item, 0)
+    // listLayerTree is top-first; the legacy flat list is also top-first.
+    flatten(this.listLayerTree(layerId))
     return out
   }
 
@@ -1202,11 +1400,12 @@ export class EditorEngine {
   private itemTreeLabel(item: paper.Item): string {
     const scope = this.scope
     const data = (item.data as any) ?? {}
-    const named = (item as any).name as string | undefined
+    const named = ((item as any).name as string | undefined)?.trim()
     let kind: string
     if (data.textMode === 'path') kind = 'Path Text'
     else if (data.textMode === 'area') kind = 'Area Text'
     else if (data.textMode === 'vertical') kind = 'Vertical Text'
+    else if ((data as any).isSublayer) kind = 'Sublayer'
     else if (item instanceof scope.Group && this.isClipGroup(item)) kind = 'Clipping Mask'
     else if (item instanceof scope.PointText) kind = 'Text'
     else if (item instanceof scope.CompoundPath) kind = 'Compound Path'
@@ -1216,6 +1415,98 @@ export class EditorEngine {
     else if (item instanceof scope.Path) kind = item.closed ? 'Closed Path' : 'Path'
     else kind = 'Object'
     return named ? `${named} (${kind})` : kind
+  }
+
+  /** Thumbnail cache: `${historyIndex}:${isolation}:${itemId}` -> data URL. */
+  private thumbCache = new Map<string, string>()
+
+  /**
+   * Small SVG preview of one object-tree entry for the Layers panel.
+   * Exported nodes live in the item's parent frame, so nested items are
+   * wrapped in the parent chain matrix to land inside the global viewBox.
+   * Returns null when there is nothing renderable (panel shows a glyph).
+   */
+  thumbnailForItem(id: string, maxSize = 44): string | null {
+    const item = this.getItemById(id)
+    if (!item || !item.parent) return null
+    const scope = this.scope
+    // Symbol <use> nodes need definition context that a lone export cannot
+    // guarantee; the panel falls back to a glyph for those.
+    if (item instanceof scope.SymbolItem) return null
+    const key = `${this.historyIndex}:${this.store.isolationActive ? 1 : 0}:${id}`
+    const hit = this.thumbCache.get(key)
+    if (hit !== undefined) return hit || null
+    if (this.thumbCache.size > 500) this.thumbCache.clear()
+    const url = this.renderItemThumbnail(item, maxSize)
+    this.thumbCache.set(key, url ?? '')
+    return url
+  }
+
+  /** Build the data URL (no caching); null when not renderable. */
+  private renderItemThumbnail(item: paper.Item, maxSize: number): string | null {
+    const scope = this.scope
+    let bounds: paper.Rectangle
+    try {
+      bounds = (item as any).strokeBounds as paper.Rectangle
+    } catch {
+      return null
+    }
+    if (!bounds || !(bounds.width > 0) || !(bounds.height > 0)) return null
+    const fit = maxSize / Math.max(bounds.width, bounds.height)
+    const scale = Math.min(8, fit)
+    const w = Math.max(1, Math.round(bounds.width * scale * 10) / 10)
+    const h = Math.max(1, Math.round(bounds.height * scale * 10) / 10)
+    let node: string
+    try {
+      const exported = (item as any).exportSVG({ asString: true, precision: 2 }) as unknown
+      if (!exported || typeof exported !== 'string') return null
+      node = exported
+    } catch {
+      return null
+    }
+    // Unwrap paper's definitions wrapper (<svg><defs/>…</svg> has no
+    // viewBox); the inner markup stays in the item's parent frame.
+    const wrapped = node.match(/^\s*<svg[^>]*>([\s\S]*)<\/svg>\s*$/i)
+    const inner = wrapped ? wrapped[1] : node
+    if (!inner || !/<[a-z][a-z0-9]*[\s/>]/i.test(inner)) return null
+    // Parent-chain placement so nested items land in the global viewBox.
+    let placed = inner
+    const parent = item.parent
+    if (parent && !(parent instanceof scope.Layer)) {
+      try {
+        const m = (parent as paper.Item).globalMatrix as any
+        if (m && typeof m.a === 'number') {
+          const fmt = (n: number): number => Math.round(n * 1000) / 1000
+          placed = `<g transform="matrix(${fmt(m.a)} ${fmt(m.b)} ${fmt(m.c)} ${fmt(m.d)} ${fmt(m.tx)} ${fmt(m.ty)})">${inner}</g>`
+        }
+      } catch {
+        // Fall through with unplaced markup (still roughly right).
+      }
+    }
+    const fmt1 = (n: number): number => Math.round(n * 10) / 10
+    const svg =
+      `<svg xmlns="http://www.w3.org/2000/svg" ` +
+      `viewBox="${fmt1(bounds.x)} ${fmt1(bounds.y)} ${fmt1(bounds.width)} ${fmt1(bounds.height)}" ` +
+      `width="${w}" height="${h}">${placed}</svg>`
+    // Slim metadata + hidden-state flags: hidden rows still preview (AI-like).
+    // An empty dasharray would blank unfilled outlines in Blink, so drop it.
+    let slim = svg
+      .replace(/ data-paper-data="[^"]*"/g, '')
+      .replace(/ visibility="hidden"/g, '')
+      .replace(/ stroke-dasharray=""/g, '')
+    // Hairlines vanish at thumbnail scale: enforce a minimum stroke width
+    // (~1.3 CSS px on the chip) so unfilled outlines stay legible like AI.
+    const minW = Math.round((2.6 / scale) * 10) / 10
+    slim = slim.replace(/stroke-width="([\d.]+)"/g, (m, v) => {
+      const n = parseFloat(v)
+      return n < minW ? `stroke-width="${minW}"` : m
+    })
+    if (slim.length > 60000) return null
+    try {
+      return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(slim)}`
+    } catch {
+      return null
+    }
   }
 
   /** Find any user-layer item by its document id (depth-first). */
@@ -1305,6 +1596,255 @@ export class EditorEngine {
     if (!item || !(item instanceof this.scope.Group)) return
     if (collapsed) (item.data as any).treeCollapsed = true
     else delete (item.data as any).treeCollapsed
+  }
+
+  /** Fold or unfold every group/sublayer in the document (panel menu). */
+  setAllTreeCollapsed(collapsed: boolean): void {
+    for (const item of this.walkUserItems()) {
+      if (item instanceof this.scope.Group && (item.data as any)?.id) {
+        if (collapsed) (item.data as any).treeCollapsed = true
+        else delete (item.data as any).treeCollapsed
+      }
+    }
+    this.scope.view.update()
+  }
+
+  /** First unused "Sublayer N" name inside a parent container. */
+  private nextSublayerName(parent: paper.Item): string {
+    const names = new Set(
+      ((parent as any).children as paper.Item[]).map(
+        (c) => ((c as any).name as string | undefined) ?? ''
+      )
+    )
+    let n = (parent as any).children.length + 1
+    while (names.has(`Sublayer ${n}`)) n++
+    return `Sublayer ${n}`
+  }
+
+  /**
+   * Create an empty AI-style sublayer (a flagged group) inside the active
+   * layer — or inside the selected group/sublayer when one is selected, so
+   * nesting works like Illustrator. Selects the new sublayer.
+   */
+  createSublayer(): paper.Group | null {
+    const scope = this.scope
+    let parent: paper.Item = this.getActiveLayer()
+    const sel = this.getSelection()
+    if (sel.length === 1 && sel[0] instanceof scope.Group && sel[0].parent) {
+      const data = (sel[0].data as any) ?? {}
+      if (data.id && data.textMode !== 'path' && !this.isClipGroup(sel[0] as paper.Group)) {
+        parent = sel[0]
+      }
+    }
+    if ((parent as any).locked) {
+      this.showStatus('Target is locked')
+      return null
+    }
+    const group = new scope.Group({ insert: false }) as paper.Group
+    group.data.id = this.genId()
+    group.data.isUserItem = true
+    group.data.isSublayer = true
+    ;(group as any).name = this.nextSublayerName(parent)
+    ;(parent as any).addChild(group)
+    this.clearSelection()
+    group.selected = true
+    this.syncSelectionToStore()
+    this.pushHistory('New Sublayer')
+    this.scope.view.update()
+    return group
+  }
+
+  /**
+   * Collect the selection into a brand-new top user layer (AI's Collect in
+   * New Layer). Works across layers; the new layer activates and the moved
+   * artwork becomes the selection.
+   */
+  collectInNewLayer(): boolean {
+    const items = this.getSelection().filter((item) => !item.locked && item.parent)
+    if (items.length === 0) return false
+    const ordered = items
+      .slice()
+      .sort((a, b) => (a.isBelow(b) ? -1 : a.isAbove(b) ? 1 : 0))
+    const layer = new this.scope.Layer()
+    const id = this.genId()
+    layer.name = this.nextUserLayerName()
+    layer.data.isUserLayer = true
+    layer.data.layerId = id
+    this.parkUserLayer(layer)
+    for (const node of ordered) layer.addChild(node)
+    layer.activate()
+    this.syncLayersToStore()
+    this.store.setActiveLayer(id)
+    this.syncSelectionToStore()
+    this.pushHistory('Collect in New Layer')
+    this.scope.view.update()
+    return true
+  }
+
+  /**
+   * Release selected groups/sublayers to layers (AI's Release to Layers):
+   * every direct child of each selected container moves into its own new
+   * user layer named after the child. Empty containers dissolve.
+   */
+  releaseToLayers(): boolean {
+    const scope = this.scope
+    const groups = this.getSelection().filter(
+      (item) =>
+        !item.locked &&
+        item.parent &&
+        item instanceof scope.Group &&
+        (item.data as any)?.id &&
+        (item.data as any)?.textMode !== 'path' &&
+        !this.isClipGroup(item as paper.Group)
+    ) as paper.Group[]
+    if (groups.length === 0) return false
+    const released: paper.Item[] = []
+    for (const group of groups) {
+      const kids = group.children.slice() as paper.Item[]
+      if (kids.length === 0) {
+        group.remove()
+        continue
+      }
+      for (const kid of kids) {
+        const layer = new scope.Layer()
+        const id = this.genId()
+        const label = ((kid as any).name as string | undefined)?.trim()
+        layer.name = label || this.nextUserLayerName()
+        layer.data.isUserLayer = true
+        layer.data.layerId = id
+        this.parkUserLayer(layer)
+        layer.addChild(kid)
+        released.push(kid)
+      }
+      group.remove()
+    }
+    this.syncLayersToStore()
+    const users = this.project.layers.filter((l) => (l.data as any)?.isUserLayer)
+    const last = users[users.length - 1]
+    if (last) this.store.setActiveLayer((last.data as any)?.layerId as string)
+    this.clearSelection()
+    released.forEach((item) => {
+      item.selected = true
+    })
+    this.syncSelectionToStore()
+    this.pushHistory('Release to Layers')
+    this.scope.view.update()
+    return true
+  }
+
+  /** Rename one object-tree entry (groups, sublayers and leaves). */
+  renameTreeItem(id: string, name: string): boolean {
+    const item = this.getItemById(id)
+    if (!item) return false
+    const clean = name.trim()
+    if (!clean) return false
+    // Labels render as `name (Kind)`; strip a pasted kind suffix so the
+    // kind never doubles up after repeated renames.
+    const bare = clean.replace(/\s*\((Sublayer|Group|Clipping Mask|Compound Path|Closed Path|Path|Path Text|Area Text|Vertical Text|Text|Image|Symbol|Object)\)\s*$/i, '').trim()
+    if (!bare) return false
+    ;(item as any).name = bare
+    this.pushHistory('Rename')
+    this.scope.view.update()
+    return true
+  }
+
+  /** Whether `node` sits inside `ancestor` (cycle guard for moves). */
+  private isDescendantOf(node: paper.Item, ancestor: paper.Item): boolean {
+    let at = node.parent
+    while (at) {
+      if (at === ancestor) return true
+      at = at.parent
+    }
+    return false
+  }
+
+  /**
+   * Move one tree entry to a new parent / position (panel drag-drop).
+   * `destParentId` is a group id, or '' for layer top level (then
+   * `destLayerId` picks the layer, defaulting to the item's own layer).
+   * `destIndex` counts in bottom-first paper order; omitted means append on
+   * top. Returns false when the move is illegal (locked target, cycles).
+   */
+  moveTreeItem(
+    itemId: string,
+    destParentId: string,
+    destLayerId: string,
+    destIndex?: number
+  ): boolean {
+    const scope = this.scope
+    const item = this.getItemById(itemId)
+    if (!item || !item.parent) return false
+    if ((item as any).locked) {
+      this.showStatus('Item is locked')
+      return false
+    }
+    let destParent: paper.Item
+    if (destParentId) {
+      const group = this.getItemById(destParentId)
+      if (!group || !(group instanceof scope.Group) || !group.parent) return false
+      const data = (group.data as any) ?? {}
+      if (data.textMode === 'path' || this.isClipGroup(group)) return false
+      if (group === item || this.isDescendantOf(group, item)) return false
+      destParent = group
+    } else {
+      const layerId = destLayerId || this.getItemLayerId(itemId)
+      const layer = this.project.layers.find((l) => (l.data as any)?.layerId === layerId)
+      if (!layer || !(layer.data as any)?.isUserLayer) return false
+      destParent = layer
+    }
+    if ((destParent as any).locked) {
+      this.showStatus('Target is locked')
+      return false
+    }
+    const kids = (destParent as any).children as paper.Item[]
+    const sameParent = (item.parent as unknown) === (destParent as unknown)
+    const from = sameParent ? kids.indexOf(item) : -1
+    let at: number
+    if (typeof destIndex === 'number' && Number.isFinite(destIndex)) {
+      at = Math.min(kids.length, Math.max(0, Math.floor(destIndex)))
+      // Same-parent moves: removing first shifts later slots down by one.
+      if (from >= 0 && from < at) at--
+    } else {
+      at = kids.length
+      if (from >= 0 && from < at) at--
+    }
+    // Dropping back onto the same slot changes nothing: skip history.
+    if (from >= 0 && from === at) {
+      this.syncSelectionToStore()
+      return true
+    }
+    ;(destParent as any).insertChild(at, item)
+    // Keep the layer activation in sync when crossing layers.
+    const layerId = this.getItemLayerId(itemId)
+    if (layerId) this.store.setActiveLayer(layerId)
+    this.syncSelectionToStore()
+    this.pushHistory('Rearrange')
+    this.scope.view.update()
+    return true
+  }
+
+  /** Owning user-layer id of one tree entry (follows parents up). */
+  getItemLayerId(id: string): string {
+    const item = this.getItemById(id)
+    if (!item) return ''
+    let at: paper.Item | null = item
+    while (at) {
+      if (at instanceof this.scope.Layer && (at.data as any)?.isUserLayer) {
+        return (at.data as any)?.layerId as string
+      }
+      at = at.parent
+    }
+    return ''
+  }
+
+  /** Direct parent group id of one tree entry ('' at layer top level). */
+  getItemParentId(id: string): string {
+    const item = this.getItemById(id)
+    if (!item || !item.parent) return ''
+    if (item.parent instanceof this.scope.Group) {
+      return ((item.parent.data as any)?.id as string | undefined) ?? ''
+    }
+    return ''
   }
 
   // ===== Selection transform =====
@@ -1809,36 +2349,66 @@ export class EditorEngine {
   }
 
   /**
-   * Group the selection (needs 2+ items). Returns false when grouped
-   * nothing, so callers can leave browser keys alone.
+   * Group the selection (needs 2+ top-level members). The group is placed
+   * explicitly — never via `new Group(items)`, which paper inserts into
+   * `project.activeLayer` (often a chrome layer, hiding the group from the
+   * panel). Shared parents keep the back-most member's slot so contiguous
+   * ranges never jump; cross-parent selections collect into the front-most
+   * member's parent, like Illustrator. Returns false when grouped nothing.
    */
   groupSelection(): boolean {
-    const items = this.getSelection()
+    const items = this.getSelection().filter((item) => item.parent)
     if (items.length < 2) return false
-    const group = new this.scope.Group(items) as paper.Group
+    // Back-to-front document order (isAbove/isBelow span layers).
+    const ordered = items
+      .slice()
+      .sort((a, b) => (a.isBelow(b) ? -1 : a.isAbove(b) ? 1 : 0))
+    const shared = ordered.every((item) => item.parent === ordered[0].parent)
+    const anchor = shared ? ordered[0] : ordered[ordered.length - 1]
+    const parent = anchor.parent ?? this.getActiveLayer()
+    let at = parent.children.indexOf(anchor)
+    if (at < 0) at = parent.children.length
+    const group = new this.scope.Group({ insert: false }) as paper.Group
+    for (const node of ordered) group.addChild(node)
+    parent.insertChild(Math.min(at, parent.children.length), group)
     group.data.id = this.genId()
     group.data.isUserItem = true
     this.selectItem(group)
     this.pushHistory('Group')
+    this.scope.view.update()
     return true
   }
 
   /**
-   * Ungroup selected groups (children keep slot, selection clears).
-   * Returns false when nothing ungrouped.
+   * Ungroup selected groups/sublayers (children keep slot, selection
+   * clears). Clipping masks and path-text runs are skipped — they have
+   * dedicated release commands. Returns false when nothing ungrouped.
    */
   ungroupSelection(): boolean {
-    const groups = this.getSelection().filter((i) => i instanceof this.scope.Group)
+    const groups = this.getSelection().filter(
+      (i) =>
+        i instanceof this.scope.Group &&
+        (i.data as any)?.id &&
+        (i.data as any)?.textMode !== 'path' &&
+        !this.isClipGroup(i as paper.Group)
+    ) as paper.Group[]
     if (groups.length === 0) return false
+    const released: paper.Item[] = []
     groups.forEach((g) => {
-      const children = (g as paper.Group).children.slice()
+      const children = g.children.slice()
       const parent = g.parent
+      const at = parent ? parent.children.indexOf(g) : -1
       children.forEach((c: any) => {
-        if (parent) parent.addChild(c)
+        if (parent) parent.insertChild(at < 0 ? parent.children.length : at, c)
+        released.push(c)
       })
       g.remove()
     })
     this.clearSelection()
+    released.forEach((item) => {
+      item.selected = true
+    })
+    this.syncSelectionToStore()
     this.pushHistory('Ungroup')
     this.scope.view.update()
     return true
@@ -1891,9 +2461,14 @@ export class EditorEngine {
     }
   }
 
-  /** Lock or unlock the current selection (locked items skip most tools). */
+  /**
+   * Lock or unlock the current selection (locked items skip most tools).
+   * Uses the raw flagged set (not the top-most selection): lock checks
+   * throughout the tools are per-item, so group members need their own
+   * flags to actually stay unselectable.
+   */
   setSelectedLocked(locked: boolean): void {
-    const items = this.getSelection()
+    const items = this.project.selectedItems as paper.Item[]
     if (items.length === 0) return
     items.forEach((item) => {
       item.locked = locked
