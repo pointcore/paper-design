@@ -466,6 +466,10 @@ function hideMenu() {
  */
 function onRulerMouseDown(e: MouseEvent, orientation: 'horizontal' | 'vertical') {
   if (!engine) return
+  if (store.view.guidesLocked) {
+    store.setStatusMessage('Guides are locked')
+    return
+  }
   guideDragActive = true
   guideDragOrientation = orientation
   guideDragStartClient = { x: e.clientX, y: e.clientY }

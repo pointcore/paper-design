@@ -118,6 +118,7 @@ export const useEditorStore = defineStore('editor', {
       rulersVisible: true,
       showGrid: false,
       showGuides: true,
+      guidesLocked: true,
       transparentBackground: false,
     } as ViewSettings,
     /** Snap settings */

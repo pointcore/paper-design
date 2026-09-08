@@ -89,6 +89,9 @@
               <el-dropdown-item command="guides" :icon="store.view.showGuides ? Check : undefined">
                 Guides
               </el-dropdown-item>
+              <el-dropdown-item command="lockGuides" :icon="store.view.guidesLocked ? Check : undefined">
+                Lock Guides
+              </el-dropdown-item>
               <el-dropdown-item command="transparentBg" :icon="store.view.transparentBackground ? Check : undefined">
                 Transparent Background
               </el-dropdown-item>
@@ -817,6 +820,9 @@ function onViewCmd(cmd: string) {
       break
     case 'guides':
       store.updateView({ showGuides: !store.view.showGuides })
+      break
+    case 'lockGuides':
+      store.updateView({ guidesLocked: !store.view.guidesLocked })
       break
     case 'transparentBg':
       toggleTransparent()

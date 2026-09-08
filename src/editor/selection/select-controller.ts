@@ -211,8 +211,8 @@ export class SelectController {
         return
       }
 
-      // ---- Guide interaction ----
-      if (engine.store.view.showGuides) {
+      // ---- Guide interaction (skipped while guides are locked) ----
+      if (engine.store.view.showGuides && !engine.store.view.guidesLocked) {
         const guideHit = this.guides.hitTest(event.point)
         if (guideHit) {
           this.clearAnchorSelection()
@@ -382,8 +382,11 @@ export class SelectController {
       if (handleCursor) {
         engine.canvas.style.cursor = handleCursor
       } else {
-        // Show a move cursor when hovering over a guide.
-        const guide = engine.store.view.showGuides ? this.guides.hitTest(event.point) : null
+        // Show a move cursor when hovering over a draggable guide.
+        const guide =
+          engine.store.view.showGuides && !engine.store.view.guidesLocked
+            ? this.guides.hitTest(event.point)
+            : null
         engine.canvas.style.cursor = guide ? 'move' : ''
       }
       this.refreshChrome()
@@ -395,7 +398,7 @@ export class SelectController {
       switch (event.key) {
         case 'delete':
         case 'backspace':
-          if (this.guides.hasSelection()) {
+          if (!engine.store.view.guidesLocked && this.guides.hasSelection()) {
             this.guides.deleteSelectedGuides()
           } else if (this.mode === 'direct-select' && this.hasAnchorSelection()) {
             this.deleteSelectedAnchors()
