@@ -5,6 +5,7 @@ import paper from 'paper'
 import { PaperOffset } from 'paperjs-offset'
 import type { ToolName, StyleState, LayerMeta, LayerItemNode, ArtboardMeta, SymbolEntry, HistoryEntry, GuideOrientation, ProjectFileData, ReferencePoint, AlignMode, DistributeAxis, BooleanOperation, RasterExportOptions, GradientState } from './types'
 import { createDefaultStyle } from './store'
+import { cursorForTool } from './cursors'
 import type { EditorStore } from './store-types'
 
 /** Identifier stamped into every saved project file. */
@@ -56,6 +57,9 @@ export class EditorEngine {
       this.store.setActiveArtboard(id)
     }
     this.refreshArtboards()
+    // Seed the cached transform from Paper's authoritative view so the
+    // first pan/zoom never starts from a stale (0,0) origin.
+    this.syncViewBookkeeping()
   }
 
   private setupProject() {
@@ -173,9 +177,28 @@ export class EditorEngine {
   /** Center the view on a document point (artboard activation). */
   panViewTo(point: paper.Point): void {
     this.scope.view.center = point.clone()
+    this.syncViewBookkeeping()
     this.refreshGrid()
     this.scope.view.update()
     this.emitViewChange()
+  }
+
+  /**
+   * Mirror Paper's authoritative view state (center / zoom) into the
+   * engine's cached `center` (document-space top-left) + `zoom`.
+   * All view mutations must go through here so later pan/zoom steps,
+   * rulers and grid never operate on a stale transform (stale caches
+   * made post-zoom pans crawl or jump).
+   */
+  syncViewBookkeeping(): void {
+    const v = this.scope.view
+    const zoom = v.zoom || 1
+    const bounds = v.bounds
+    this.zoom = zoom
+    this.center = {
+      x: v.center.x - bounds.width / 2,
+      y: v.center.y - bounds.height / 2,
+    }
   }
 
   setTool(tool: ToolName) {
@@ -183,9 +206,10 @@ export class EditorEngine {
     // Remove any transient editing chrome (e.g. anchor overlays) left over
     // by the previously active tool so it does not linger after switching.
     this.clearTransientChrome()
-    // Reset an inline cursor left by the previous tool so the canvas returns
-    // to its default (CSS-driven) cursor for the newly activated tool.
-    this.canvas.style.cursor = ''
+    // Park the AI-aligned default cursor for the new tool; the controller's
+    // activate() may refine it (e.g. zoom-out with Alt, brush ring sizes).
+    // Setting it here covers controllers that never touch the cursor.
+    this.canvas.style.cursor = cursorForTool(tool)
     const controller = this.controllers.get(tool)
     if (controller) {
       controller.activate?.()
@@ -696,34 +720,43 @@ export class EditorEngine {
   }
 
   screenToCanvas(point: paper.Point): paper.Point {
+    // Screen (canvas pixel) -> document: top-left cache + pixel / zoom.
+    const zoom = this.zoom || 1
     return new this.scope.Point(
-      point.x - this.center.x,
-      point.y - this.center.y
+      this.center.x + point.x / zoom,
+      this.center.y + point.y / zoom
     )
   }
 
   canvasToScreen(point: paper.Point): paper.Point {
+    // Document -> screen (canvas pixel).
+    const zoom = this.zoom || 1
     return new this.scope.Point(
-      point.x + this.center.x,
-      point.y + this.center.y
+      (point.x - this.center.x) * zoom,
+      (point.y - this.center.y) * zoom
     )
   }
 
   panBy(dx: number, dy: number) {
-    this.center.x -= dx / this.zoom
-    this.center.y -= dy / this.zoom
-    this.updateViewCenter()
+    // dx/dy arrive in document units (hand tool + middle-drag both diff
+    // viewToProject points). The view center lives in the same space, so
+    // shift it 1:1 — dividing by zoom again would shrink post-zoom pans
+    // toward zero and feel like a freeze when zoomed in.
+    const v = this.scope.view
+    v.center = v.center.subtract(new this.scope.Point(dx, dy))
+    this.syncViewBookkeeping()
     this.refreshGrid()
     this.emitViewChange()
   }
 
   private updateViewCenter() {
     const v = this.scope.view
-    // Compute the document coordinates of the canvas center
+    // engine.center is the document-space top-left; the Paper center sits
+    // half a viewport (already in document units via bounds) to its right.
     const bounds = v.bounds
     const center = new this.scope.Point(
-      this.center.x + bounds.width / 2 / this.zoom,
-      this.center.y + bounds.height / 2 / this.zoom
+      this.center.x + bounds.width / 2,
+      this.center.y + bounds.height / 2
     )
     v.center = center
   }
@@ -762,12 +795,9 @@ export class EditorEngine {
     }
 
     this.zoom = newZoom
-    // Sync this.center (view top-left in document coords) with view.center.
-    const bounds = v.bounds
-    this.center = {
-      x: v.center.x - bounds.width / 2 / newZoom,
-      y: v.center.y - bounds.height / 2 / newZoom,
-    }
+    // Mirror the authoritative Paper transform (bounds are already in
+    // document units — no extra division by zoom here).
+    this.syncViewBookkeeping()
 
     v.update()
     this.refreshGrid()
@@ -793,10 +823,11 @@ export class EditorEngine {
       (this.canvas.height - padding * 2) / bounds.height,
       100
     )
-    this.zoom = zoom
-    this.scope.view.zoom = zoom
-    this.center = { x: -bounds.center.x * zoom + this.canvas.width / 2, y: -bounds.center.y * zoom + this.canvas.height / 2 }
-    this.scope.view.update()
+    const v = this.scope.view
+    v.zoom = zoom
+    v.center = bounds.center.clone()
+    this.syncViewBookkeeping()
+    v.update()
     this.refreshGrid()
     this.store.updateView({ zoom: this.zoom })
     this.emitViewChange()
@@ -2299,6 +2330,7 @@ export class EditorEngine {
       view.zoom = prevZoom
       view.center = prevCenter
       view.update()
+      this.syncViewBookkeeping()
       this.refreshGrid()
       this.emitViewChange()
     }

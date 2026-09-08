@@ -17,6 +17,7 @@
 import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
 import { AnchorChrome } from './anchor-chrome'
+import { applyToolCursor } from '../cursors'
 
 export type AnchorToolMode = 'add-anchor' | 'delete-anchor' | 'convert-anchor'
 
@@ -73,6 +74,7 @@ export class AnchorController {
     if (tool === 'add-anchor' || tool === 'delete-anchor' || tool === 'convert-anchor') {
       this.mode = tool
     }
+    applyToolCursor(this.engine.canvas, this.mode)
     this.setupTool()
   }
 

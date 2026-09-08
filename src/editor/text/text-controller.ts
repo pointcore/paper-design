@@ -17,6 +17,7 @@
  */
 import { EditorEngine } from '../engine'
 import { SnapService } from '../snap/snap-service'
+import { applyToolCursor } from '../cursors'
 import type { TextAlign } from '../types'
 
 /** Text creation / editing mode, resolved from the active text tool. */
@@ -109,7 +110,8 @@ export class TextController {
     if (this.isEditing) this.commit()
     this.clearFrameDrag()
     this.setupTool()
-    this.engine.canvas.style.cursor = 'text'
+    // AI: I-beam for horizontal text variants, vertical I-beam for vertical.
+    applyToolCursor(this.engine.canvas, this.engine.store.tool)
   }
 
   /** Resolve the active text tool to its editing mode. */

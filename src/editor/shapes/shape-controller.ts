@@ -11,6 +11,7 @@
 import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
 import { SnapService } from '../snap/snap-service'
+import { applyToolCursor } from '../cursors'
 import type { LiveShapeParams } from '../types'
 
 export class ShapeController {
@@ -29,6 +30,7 @@ export class ShapeController {
   activate() {
     if (!this.engine) return
     this.shapeKind = this.getShapeKind()
+    applyToolCursor(this.engine.canvas, this.engine.store.tool)
     this.setupTool()
   }
 

@@ -10,6 +10,7 @@
  */
 import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
+import { applyToolCursor } from '../cursors'
 
 export class PencilController {
   engine: EditorEngine | null = null
@@ -24,7 +25,7 @@ export class PencilController {
     if (!this.engine) return
     this.cancelStroke()
     this.setupTool()
-    this.engine.canvas.style.cursor = 'crosshair'
+    applyToolCursor(this.engine.canvas, 'pencil')
   }
 
   private getNativeEvent(event: paper.ToolEvent): MouseEvent | null {

@@ -8,6 +8,7 @@
  */
 import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
+import { applyToolCursor } from '../cursors'
 
 /** CSS pixels per inch underpinning the ruler unit conversion. */
 const PX_PER_INCH = 96
@@ -26,7 +27,7 @@ export class MeasureController {
     if (!this.engine) return
     this.cancelMeasure()
     this.setupTool()
-    this.engine.canvas.style.cursor = 'crosshair'
+    applyToolCursor(this.engine.canvas, 'measure')
   }
 
   private setupTool() {

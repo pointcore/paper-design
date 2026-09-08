@@ -14,6 +14,7 @@
  */
 import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
+import { applyToolCursor } from '../cursors'
 
 export class CurvatureController {
   engine: EditorEngine | null = null
@@ -30,6 +31,7 @@ export class CurvatureController {
 
   activate() {
     if (!this.engine) return
+    applyToolCursor(this.engine.canvas, 'curvature')
     this.setupTool()
   }
 

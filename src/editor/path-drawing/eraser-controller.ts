@@ -10,6 +10,7 @@
 import { PaperOffset } from 'paperjs-offset'
 import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
+import { applyToolCursor } from '../cursors'
 
 /** Eraser diameter in screen pixels (stays constant across zoom). */
 const ERASER_SCREEN_SIZE = 20
@@ -27,7 +28,7 @@ export class EraserController {
     if (!this.engine) return
     this.cancelStroke()
     this.setupTool()
-    this.engine.canvas.style.cursor = 'cell'
+    applyToolCursor(this.engine.canvas, 'eraser')
   }
 
   private getNativeEvent(event: paper.ToolEvent): MouseEvent | null {

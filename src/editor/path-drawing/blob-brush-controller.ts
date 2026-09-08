@@ -10,6 +10,7 @@
 import { PaperOffset } from 'paperjs-offset'
 import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
+import { applyToolCursor } from '../cursors'
 
 /** Blob diameter in screen pixels (stays constant across zoom). */
 const BLOB_SCREEN_SIZE = 20
@@ -27,7 +28,7 @@ export class BlobBrushController {
     if (!this.engine) return
     this.cancelStroke()
     this.setupTool()
-    this.engine.canvas.style.cursor = 'crosshair'
+    applyToolCursor(this.engine.canvas, 'blob-brush')
   }
 
   private getNativeEvent(event: paper.ToolEvent): MouseEvent | null {

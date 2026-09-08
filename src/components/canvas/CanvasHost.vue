@@ -45,6 +45,7 @@ import { useEditorStore } from '../../editor/store'
 import { EditorEngine } from '../../editor/engine'
 import { registerAllControllers } from '../../editor/register-controllers'
 import { handleGlobalKeydown, handleGlobalKeyUp } from '../../editor/shortcuts'
+import { cursorForTool } from '../../editor/cursors'
 import NavigatorPanel from './NavigatorPanel.vue'
 
 const store = useEditorStore()
@@ -214,23 +215,13 @@ function onGlobalKeydown(e: KeyboardEvent) {
   handleGlobalKeydown(e, store, engine)
 }
 
-/** Convert a client position to document space through the paper view. */
-function clientToDocument(clientX: number, clientY: number): { x: number; y: number } | null {
-  if (!engine || !canvasRef.value) return null
-  const rect = canvasRef.value.getBoundingClientRect()
-  const point = engine.scope.view.viewToProject(
-    new engine.scope.Point(clientX - rect.left, clientY - rect.top)
-  )
-  return { x: point.x, y: point.y }
-}
-
 /** Middle-button drag pans in every tool (paper tools ignore button 1). */
 function onCanvasMouseDown(e: MouseEvent) {
   if (!engine || e.button !== 1 || middlePanActive) return
-  const start = clientToDocument(e.clientX, e.clientY)
-  if (!start) return
   middlePanActive = true
-  middlePanLast = start
+  // Screen-space anchor: doc-space diffs would feed the just-moved view back
+  // into the next measurement and make the pan judder in place.
+  middlePanLast = { x: e.clientX, y: e.clientY }
   if (canvasRef.value) {
     middlePanPrevCursor = canvasRef.value.style.cursor
     canvasRef.value.style.cursor = 'grabbing'
@@ -242,11 +233,13 @@ function onCanvasMouseDown(e: MouseEvent) {
 
 function onMiddlePanMove(e: MouseEvent) {
   if (!middlePanActive || !engine || !middlePanLast) return
-  const current = clientToDocument(e.clientX, e.clientY)
-  if (!current) return
-  // Same document-space deltas the hand tool feeds to panBy.
-  engine.panBy(current.x - middlePanLast.x, current.y - middlePanLast.y)
-  middlePanLast = current
+  const zoom = engine.scope.view.zoom || 1
+  engine.panBy(
+    (e.clientX - middlePanLast.x) / zoom,
+    (e.clientY - middlePanLast.y) / zoom
+  )
+  middlePanLast = { x: e.clientX, y: e.clientY }
+  engine.scope.view.update()
 }
 
 function onMiddlePanEnd() {
@@ -256,7 +249,13 @@ function onMiddlePanEnd() {
   window.removeEventListener('mousemove', onMiddlePanMove)
   window.removeEventListener('mouseup', onMiddlePanEnd)
   if (canvasRef.value) {
-    canvasRef.value.style.cursor = middlePanPrevCursor
+    // Restore the pre-pan cursor; an empty inline value means the tool
+    // default was CSS-driven, so re-apply the AI-aligned tool cursor.
+    if (middlePanPrevCursor) {
+      canvasRef.value.style.cursor = middlePanPrevCursor
+    } else if (engine) {
+      canvasRef.value.style.cursor = cursorForTool(store.tool)
+    }
   }
 }
 
@@ -277,6 +276,9 @@ function onResize() {
   canvasRef.value.height = Math.max(1, rect.height - rulerOffset)
 
   engine.scope.view.update()
+  // Canvas backing-store size changed -> Paper's bounds changed with it.
+  // Re-mirror the transform so the next pan starts from the live view.
+  engine.syncViewBookkeeping()
   engine.refreshGrid()
   setupRulerCanvases()
   drawRulers()
@@ -611,7 +613,7 @@ function removeGuideGhost() {
   position: absolute;
   top: 0;
   left: 0;
-  cursor: crosshair;
+  cursor: default;
   display: block;
 }
 
@@ -624,8 +626,12 @@ function removeGuideGhost() {
   cursor: default;
 }
 
-.ruler:hover {
-  cursor: crosshair;
+.ruler-h {
+  cursor: ns-resize;
+}
+
+.ruler-v {
+  cursor: ew-resize;
 }
 
 .ruler-h {

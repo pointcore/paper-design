@@ -11,6 +11,7 @@
  */
 import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
+import { applyToolCursor } from '../cursors'
 
 /** Nib width in screen pixels (stays constant across zoom). */
 const NIB_SCREEN_SIZE = 20
@@ -33,7 +34,7 @@ export class BrushController {
     if (!this.engine) return
     this.cancelStroke()
     this.setupTool()
-    this.engine.canvas.style.cursor = 'crosshair'
+    applyToolCursor(this.engine.canvas, 'brush')
   }
 
   private getNativeEvent(event: paper.ToolEvent): PointerEvent | null {

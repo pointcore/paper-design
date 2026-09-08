@@ -3,6 +3,7 @@
  */
 import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
+import { applyToolCursor } from '../cursors'
 
 export class CalloutController {
   engine: EditorEngine | null = null
@@ -16,6 +17,7 @@ export class CalloutController {
 
   activate() {
     if (!this.engine) return
+    applyToolCursor(this.engine.canvas, 'callout')
     this.setupTool()
   }
 

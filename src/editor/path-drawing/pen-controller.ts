@@ -23,6 +23,7 @@ import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
 import { AnchorChrome } from './anchor-chrome'
 import { SnapService } from '../snap/snap-service'
+import { CURSOR_PEN, CURSOR_PEN_CONTINUE } from '../cursors'
 
 /** What an active mouse press is doing while a pen stroke is open. */
 type PressAction =
@@ -522,7 +523,7 @@ export class PenController {
       const overlay = engine.getOverlayLayer()
       overlay.addChild(circle)
       this.resumeHint = circle
-      engine.canvas.style.cursor = 'copy'
+      engine.canvas.style.cursor = CURSOR_PEN_CONTINUE
     } else {
       this.restoreDefaultCursor()
     }
@@ -530,7 +531,7 @@ export class PenController {
 
   private restoreDefaultCursor() {
     if (this.engine?.canvas) {
-      this.engine.canvas.style.cursor = 'crosshair'
+      this.engine.canvas.style.cursor = CURSOR_PEN
     }
   }
 

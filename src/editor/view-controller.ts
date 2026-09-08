@@ -7,11 +7,15 @@
  */
 import { EditorEngine } from './engine'
 import { isEditableTarget } from './shortcuts'
+import { handCursor, zoomCursor } from './cursors'
 
 export class ViewController {
   engine: EditorEngine | null = null
   private mode: 'none' | 'pan' | 'zoom' = 'none'
   private lastPoint: { x: number; y: number } = { x: 0, y: 0 }
+  // Screen-space anchor for pan drags (client px). Doc-space diffs would feed
+  // the just-moved view back into the next measurement and judder in place.
+  private lastClient: { x: number; y: number } | null = null
   private isZoomTool = false
   // Zoom rubber band (document-space corners + preview rectangle).
   private zoomStart: { x: number; y: number } | null = null
@@ -28,6 +32,8 @@ export class ViewController {
     const store = this.engine.store
     // Determine the current tool mode
     this.isZoomTool = store.tool === 'zoom'
+    // AI-aligned defaults: open hand for pan, magnifier for zoom.
+    this.engine.canvas.style.cursor = this.isZoomTool ? zoomCursor(false) : handCursor(false)
     this.setupTool()
   }
 
@@ -53,19 +59,38 @@ export class ViewController {
         this.zoomStart = { x: event.point.x, y: event.point.y }
         this.zoomButton = native.button ?? 0
         this.zoomAlt = !!event.modifiers.alt
+        // AI: right-click / Alt previews zoom-out while pressed.
+        if (this.zoomButton === 2 || this.zoomAlt) {
+          engine.canvas.style.cursor = zoomCursor(true)
+        }
       } else {
-        // Hand / pan
+        // Hand / pan — closed fist while dragging (AI hand behavior).
         this.mode = 'pan'
         this.lastPoint = { x: event.point.x, y: event.point.y }
+        this.lastClient = { x: native.clientX, y: native.clientY }
+        engine.canvas.style.cursor = handCursor(true)
       }
     }
 
     scope.tool.onMouseDrag = (event: paper.ToolEvent) => {
       if (this.mode === 'pan') {
-        const dx = event.point.x - this.lastPoint.x
-        const dy = event.point.y - this.lastPoint.y
-        engine.panBy(dx, dy)
-        this.lastPoint = { x: event.point.x, y: event.point.y }
+        const dragNative = (event as any).event as MouseEvent | undefined
+        if (dragNative && typeof dragNative.clientX === 'number' && this.lastClient) {
+          // Screen-space deltas are immune to the view shift applied by the
+          // previous step: the canvas follows the pointer 1:1 at any zoom.
+          const zoom = engine.scope.view.zoom || 1
+          engine.panBy(
+            (dragNative.clientX - this.lastClient.x) / zoom,
+            (dragNative.clientY - this.lastClient.y) / zoom
+          )
+          this.lastClient = { x: dragNative.clientX, y: dragNative.clientY }
+        } else {
+          const dx = event.point.x - this.lastPoint.x
+          const dy = event.point.y - this.lastPoint.y
+          engine.panBy(dx, dy)
+          this.lastPoint = { x: event.point.x, y: event.point.y }
+        }
+        scope.view.update()
       } else if (this.mode === 'zoom' && this.zoomStart) {
         this.updateZoomRect(event.point.x, event.point.y)
       }
@@ -82,33 +107,43 @@ export class ViewController {
         if (moved) {
           this.zoomToRect(this.zoomStart.x, this.zoomStart.y, event.point.x, event.point.y)
         } else {
+          // zoomAt expects canvas pixels — convert the document point via
+          // the view. Passing document coords directly would teleport the
+          // center (values in the thousands as pixels) and make the next
+          // pan look frozen off-screen.
+          const screen = engine.scope.view.projectToView(event.point)
           const zoomFactor = this.zoomButton === 2 || this.zoomAlt ? 0.8 : 1.2
-          engine.zoomAt(zoomFactor, event.point.x, event.point.y)
+          engine.zoomAt(zoomFactor, screen.x, screen.y)
         }
         this.removeZoomRect()
         this.zoomStart = null
       }
       this.mode = 'none'
+      this.lastClient = null
+      // Restore the resting cursor for the active view tool.
+      engine.canvas.style.cursor = this.isZoomTool
+        ? zoomCursor(!!(event.modifiers?.alt))
+        : handCursor(false)
     }
 
     scope.tool.onMouseMove = (event: paper.ToolEvent) => {
       engine.store.setCursorPos(event.point.x, event.point.y)
+      // AI zoom convention: holding Alt flips the magnifier to zoom-out.
+      if (this.isZoomTool && this.mode === 'none') {
+        engine.canvas.style.cursor = zoomCursor(!!event.modifiers?.alt)
+      }
     }
 
     scope.tool.onKeyDown = (event: paper.KeyEvent) => {
       // Never steal keystrokes typed into panel inputs or dialogs.
       if (isEditableTarget((event as any).event as KeyboardEvent)) return
-      if (event.key === 'space') {
-        this.mode = 'pan'
-      } else if (event.key === 'escape' && this.mode === 'zoom') {
+      // NOTE: Space-pan parking is owned by the global shortcut handler
+      // (shortcuts.ts swaps in the hand tool). Toggling drag mode here as
+      // well would clobber an in-progress zoom rubber band and fight the
+      // parked tool with stale anchors, which showed up as flicker.
+      if (event.key === 'escape' && this.mode === 'zoom') {
         this.removeZoomRect()
         this.zoomStart = null
-        this.mode = 'none'
-      }
-    }
-
-    scope.tool.onKeyUp = (event: paper.KeyEvent) => {
-      if (event.key === 'space') {
         this.mode = 'none'
       }
     }
@@ -146,8 +181,8 @@ export class ViewController {
   }
 
   /**
-   * Fit a document rectangle to the canvas. Bookkeeping mirrors zoomAt
-   * so later zoom steps anchor correctly.
+   * Fit a document rectangle to the canvas. Bookkeeping goes through the
+   * engine sync so later pan/zoom steps anchor correctly.
    */
   private zoomToRect(x1: number, y1: number, x2: number, y2: number) {
     const engine = this.engine
@@ -163,12 +198,7 @@ export class ViewController {
     )
     v.zoom = newZoom
     v.center = new scope.Point(Math.min(x1, x2) + width / 2, Math.min(y1, y2) + height / 2)
-    engine.zoom = newZoom
-    const bounds = v.bounds
-    engine.center = {
-      x: v.center.x - bounds.width / 2 / newZoom,
-      y: v.center.y - bounds.height / 2 / newZoom,
-    }
+    engine.syncViewBookkeeping()
     v.update()
     engine.refreshGrid()
     engine.store.updateView({ zoom: newZoom })

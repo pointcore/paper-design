@@ -8,6 +8,7 @@
  * still share their appearance when clicked.
  */
 import { EditorEngine } from '../engine'
+import { applyToolCursor } from '../cursors'
 
 export class EyedropperController {
   engine: EditorEngine | null = null
@@ -19,7 +20,7 @@ export class EyedropperController {
   activate() {
     if (!this.engine) return
     this.setupTool()
-    this.engine.canvas.style.cursor = 'crosshair'
+    applyToolCursor(this.engine.canvas, 'eyedropper')
   }
 
   private setupTool() {

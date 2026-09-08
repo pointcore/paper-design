@@ -825,6 +825,7 @@ function onViewCmd(cmd: string) {
     case 'zoom100':
       e.zoom = 1
       e.scope.view.zoom = 1
+      e.syncViewBookkeeping()
       store.updateView({ zoom: 1 })
       e.scope.view.update()
       e.refreshGrid()

@@ -12,6 +12,7 @@ import { isEditableTarget } from '../shortcuts'
 import { AnchorChrome } from '../path-drawing/anchor-chrome'
 import { GuideController } from '../guides/guide-controller'
 import { SnapService } from '../snap/snap-service'
+import { applyToolCursor, cursorForTool } from '../cursors'
 import type { TextController } from '../text/text-controller'
 
 type EditMode = 'select' | 'direct-select'
@@ -129,8 +130,17 @@ export class SelectController {
     // re-suppresses it for the paths it is actually rendering as we edit.
     this.restoreAllNativeSelections()
     this.mode = store.tool === 'direct-select' ? 'direct-select' : 'select'
+    // AI-aligned defaults: black arrow for select, white arrow for direct.
+    applyToolCursor(this.engine.canvas, this.mode)
     this.clearAnchorState()
     this.resetTransformDrag()
+    // Drop any in-progress marquee / object drag orphaned by a mid-gesture
+    // tool swap (e.g. Space parking the hand tool mid-marquee), otherwise a
+    // stale rubber band reappears and flickers on the next mouse event.
+    this.isDragging = false
+    this.isMarquee = false
+    this.dragItems = []
+    this.removeMarquee()
     this.grabGuide = null
     this.guideOriginalPos = 0
     this.grabPath = null
@@ -207,6 +217,9 @@ export class SelectController {
       if (this.mode === 'direct-select' && this.tryGrabAnchor(event)) {
         this.guides.clearSelection()
         engine.store.setDragging(true)
+        // AI direct-select keeps the white arrow, but a move cue confirms
+        // the anchor drag started.
+        engine.canvas.style.cursor = 'move'
         this.refreshChrome()
         return
       }
@@ -249,6 +262,9 @@ export class SelectController {
           this.isDragging = true
           this.dragStart = { x: event.point.x, y: event.point.y }
           this.guideOriginalPos = engine.getGuidePosition(guideHit)
+          // Axis cue: vertical guides slide horizontally and vice versa.
+          const orientation = engine.getGuideOrientation(guideHit)
+          engine.canvas.style.cursor = orientation === 'vertical' ? 'ew-resize' : orientation === 'horizontal' ? 'ns-resize' : 'move'
           this.refreshChrome()
           engine.scope.view.update()
           return
@@ -261,6 +277,9 @@ export class SelectController {
       // object hit testing so scale / rotate drags start reliably.
       if (this.mode === 'select' && this.tryGrabTransformHandle(event)) {
         engine.store.setDragging(true)
+        // Keep the hovered resize cursor throughout the transform drag.
+        const held = this.cursorForHandleAt(event.point)
+        if (held) engine.canvas.style.cursor = held
         this.refreshChrome()
         return
       }
@@ -307,6 +326,9 @@ export class SelectController {
         this.dragStartBounds = engine.getSelectionBounds()?.clone() ?? null
         this.dragStart = { x: event.point.x, y: event.point.y }
         this.grab = 'object'
+        // Move cue while the object follows the pointer (AI keeps the arrow,
+        // but the move affordance reads better on the web canvas).
+        engine.canvas.style.cursor = 'move'
       } else {
         if (event.modifiers.shift) return
         engine.clearSelection()
@@ -369,25 +391,39 @@ export class SelectController {
       this.grabPath = null
       this.dragStartPoint = null
       engine.store.setDragging(false)
+      // Back to the AI-aligned tool default (arrow / white arrow).
+      engine.canvas.style.cursor = cursorForTool(this.mode)
       this.refreshChrome()
     }
 
     scope.tool.onMouseMove = (event: paper.ToolEvent) => {
       engine.store.setCursorPos(event.point.x, event.point.y)
-      // Transform handle hover wins over guide hover in select mode.
+      // Hover priority (select mode): transform handle > guide > tool default.
+      // Direct-select adds anchor / handle hover on top of the white arrow.
+      if (this.grab !== 'none' || this.isMarquee || this.isDragging) {
+        this.refreshChrome()
+        return
+      }
       const handleCursor =
-        this.mode === 'select' && this.grab === 'none' && !this.isMarquee
+        this.mode === 'select'
           ? this.cursorForHandleAt(event.point)
           : null
       if (handleCursor) {
         engine.canvas.style.cursor = handleCursor
       } else {
-        // Show a move cursor when hovering over a draggable guide.
         const guide =
           engine.store.view.showGuides && !engine.store.view.guidesLocked
             ? this.guides.hitTest(event.point)
             : null
-        engine.canvas.style.cursor = guide ? 'move' : ''
+        if (guide) {
+          const orientation = engine.getGuideOrientation(guide)
+          engine.canvas.style.cursor =
+            orientation === 'vertical' ? 'ew-resize' : orientation === 'horizontal' ? 'ns-resize' : 'move'
+        } else if (this.mode === 'direct-select') {
+          engine.canvas.style.cursor = this.directHoverCursor(event.point) ?? cursorForTool(this.mode)
+        } else {
+          engine.canvas.style.cursor = cursorForTool(this.mode)
+        }
       }
       this.refreshChrome()
     }
@@ -1021,6 +1057,35 @@ export class SelectController {
     const handle = this.transformHandleAt(point, bounds, tol)
     if (handle === 'none') return null
     return TRANSFORM_CURSORS[handle]
+  }
+
+  /**
+   * Hover cursor for direct-select anchor / handle targets. Returns
+   * `pointer` when the white arrow sits on a draggable anchor or handle so
+   * the hit target reads as clickable, otherwise null (keep white arrow).
+   */
+  private directHoverCursor(point: paper.Point): string | null {
+    const engine = this.engine
+    if (!engine) return null
+    const tol = 6 / engine.scope.view.zoom
+    // Handles first (they are the smaller targets).
+    const editPath = this.getEditPath()
+    const candidates: paper.Path[] = []
+    if (editPath) candidates.push(editPath)
+    for (const extra of this.userPathsAt(point)) {
+      if (!candidates.includes(extra)) candidates.push(extra)
+      if (candidates.length > 4) break
+    }
+    for (const path of candidates) {
+      for (const seg of path.segments) {
+        const anchor = seg.point
+        const hi = seg.handleIn as paper.Point | null
+        const ho = seg.handleOut as paper.Point | null
+        if (hi && anchor.add(hi).getDistance(point) <= tol) return 'pointer'
+        if (ho && anchor.add(ho).getDistance(point) <= tol) return 'pointer'
+      }
+    }
+    return this.anchorHitAt(point, tol) ? 'pointer' : null
   }
 
   /** Draw the selection bounding box with scale handles + rotate knob. */

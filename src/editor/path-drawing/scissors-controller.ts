@@ -7,6 +7,7 @@
  * non-path artwork cannot be cut.
  */
 import { EditorEngine } from '../engine'
+import { applyToolCursor } from '../cursors'
 
 export class ScissorsController {
   engine: EditorEngine | null = null
@@ -18,7 +19,7 @@ export class ScissorsController {
   activate() {
     if (!this.engine) return
     this.setupTool()
-    this.engine.canvas.style.cursor = 'crosshair'
+    applyToolCursor(this.engine.canvas, 'scissors')
   }
 
   private setupTool() {
