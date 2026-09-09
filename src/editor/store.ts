@@ -199,9 +199,9 @@ export const useEditorStore = defineStore('editor', {
     hasSelection(state): boolean {
       return state.selectedItemIds.length > 0
     },
-    /** Whether undo is available */
+    /** Whether undo is available (undo() steps back, so index 0 is inert) */
     canUndo(state): boolean {
-      return state.historyIndex >= 0
+      return state.historyIndex > 0
     },
     /** Whether redo is available */
     canRedo(state): boolean {
