@@ -1454,21 +1454,16 @@ export class EditorEngine {
   }
 
   /**
-   * Jump the document to a history entry (history panel click). Steps
-   * through every intermediate snapshot so state applies cleanly.
+   * Jump the document to a history entry. Snapshots are whole-project
+   * JSON, so a direct restore is equivalent to replaying every step and
+   * stays O(1) even for far jumps.
    */
   jumpToHistory(index: number): void {
     if (this.history.length === 0) return
     const clamped = Math.min(this.history.length - 1, Math.max(0, index))
     if (clamped === this.historyIndex) return
-    while (this.historyIndex > clamped) {
-      this.historyIndex--
-      this.restoreSnapshot(this.historySnapshots[this.historyIndex])
-    }
-    while (this.historyIndex < clamped) {
-      this.historyIndex++
-      this.restoreSnapshot(this.historySnapshots[this.historyIndex])
-    }
+    this.historyIndex = clamped
+    this.restoreSnapshot(this.historySnapshots[this.historyIndex])
     this.store.setHistoryIndex(this.historyIndex)
   }
 
