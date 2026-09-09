@@ -2656,6 +2656,39 @@ export class EditorEngine {
     return false
   }
 
+  /**
+   * Spot-color placeholder names on the selection (first item wins on read;
+   * empty strings clear). Names ride on `item.data` so they persist in
+   * project JSON; paints still render/export with their RGB preview.
+   */
+  getSpotFromSelection(): { fill: string | null; stroke: string | null } {
+    const first = this.getSelection()[0] as any
+    if (!first) return { fill: null, stroke: null }
+    const data = (first.data as any) ?? {}
+    const clean = (v: unknown): string | null =>
+      typeof v === 'string' && v.trim().length > 0 ? v.trim().slice(0, 60) : null
+    return { fill: clean(data.spotFill), stroke: clean(data.spotStroke) }
+  }
+
+  /** Stamp spot names onto every selected top-level item (one history entry). */
+  setSpotForSelection(fill: string | null, stroke: string | null): void {
+    const items = this.getSelection().filter((i) => !i.locked && i.parent)
+    if (items.length === 0) return
+    const clean = (v: string | null): string | null =>
+      typeof v === 'string' && v.trim().length > 0 ? v.trim().slice(0, 60) : null
+    const nextFill = clean(fill)
+    const nextStroke = clean(stroke)
+    for (const item of items) {
+      const data = (item.data as any) ?? ((item.data as any) = {})
+      if (nextFill) data.spotFill = nextFill
+      else delete data.spotFill
+      if (nextStroke) data.spotStroke = nextStroke
+      else delete data.spotStroke
+    }
+    this.pushHistory('Spot Color')
+    this.scope.view.update()
+  }
+
   // ===== Raster export =====
 
   /**

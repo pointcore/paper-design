@@ -103,6 +103,9 @@
               <el-dropdown-item command="transparentBg" :icon="store.view.transparentBackground ? Check : undefined">
                 Transparent Background
               </el-dropdown-item>
+              <el-dropdown-item command="cmykPreview" :icon="store.view.proofMode === 'cmyk' ? Check : undefined">
+                CMYK Preview
+              </el-dropdown-item>
               <el-dropdown-item command="navigator" :icon="store.ui.showNavigator ? Check : undefined">
                 Navigator
               </el-dropdown-item>
@@ -955,6 +958,12 @@ function onViewCmd(cmd: string) {
     case 'transparentBg':
       toggleTransparent()
       break
+    case 'cmykPreview': {
+      const next = store.view.proofMode === 'cmyk' ? 'rgb' : 'cmyk'
+      store.updateView({ proofMode: next })
+      store.setStatusMessage(next === 'cmyk' ? 'CMYK proof on (numeric preview)' : 'CMYK proof off')
+      break
+    }
     case 'navigator':
       store.setShowNavigator(!store.ui.showNavigator)
       break

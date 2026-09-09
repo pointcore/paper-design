@@ -254,6 +254,25 @@
               <el-option v-for="b in blendModes" :key="b.value" :label="b.label" :value="b.value" />
             </el-select>
           </div>
+          <div v-if="store.view.proofMode === 'cmyk'" class="proof-block">
+            <div class="prop-row">
+              <span class="prop-label-sm">F-CMYK</span>
+              <span class="cmyk-val">{{ fillCmyk }}<span v-if="fillOutOfGamut" class="oog" title="Out of CMYK gamut — expect a press shift"> ⚠</span></span>
+            </div>
+            <div class="prop-row">
+              <span class="prop-label-sm">S-CMYK</span>
+              <span class="cmyk-val">{{ strokeCmyk }}<span v-if="strokeOutOfGamut" class="oog" title="Out of CMYK gamut — expect a press shift"> ⚠</span></span>
+            </div>
+            <div class="ai-desc">Numeric preview only — the canvas still renders RGB.</div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label-sm">Spot F</span>
+            <el-input v-model="spotFillName" size="small" placeholder="e.g. PANTONE 185 C" @change="onSpotChange" />
+          </div>
+          <div class="prop-row">
+            <span class="prop-label-sm">Spot S</span>
+            <el-input v-model="spotStrokeName" size="small" placeholder="optional" @change="onSpotChange" />
+          </div>
         </div>
       </div>
 
@@ -395,6 +414,7 @@ import {
 } from '@element-plus/icons-vue'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
+import { cssToCmykString, isOutOfCmykGamut } from '../../editor/color'
 import type { AlignMode, BooleanOperation, DistributeAxis, GradientState, LineCap, LineJoin, PatternFillState, ReferencePoint, RulerUnit, TextAlign } from '../../editor/types'
 
 const store = useEditorStore()
@@ -626,6 +646,36 @@ const lineJoin = ref<LineJoin>(store.style.lineJoin)
 const miterLimit = ref(store.style.miterLimit)
 const dashPattern = ref(store.style.dashArray.join(' '))
 const blendMode = ref(store.style.blendMode)
+
+// CMYK proof readouts follow the current fill/stroke paints.
+const fillCmyk = computed(() => cssToCmykString(fillColorValue.value) ?? '—')
+const strokeCmyk = computed(() => cssToCmykString(strokeColorValue.value) ?? '—')
+const fillOutOfGamut = computed(() => isOutOfCmykGamut(fillColorValue.value))
+const strokeOutOfGamut = computed(() => isOutOfCmykGamut(strokeColorValue.value))
+
+// Spot-color placeholders (item.data metadata, persisted in project JSON).
+const spotFillName = ref('')
+const spotStrokeName = ref('')
+
+/** Read spot names from the first selected item into the panel. */
+function syncSpotFromSelection() {
+  const e = getEngine()
+  if (!e || !store.hasSelection) {
+    spotFillName.value = ''
+    spotStrokeName.value = ''
+    return
+  }
+  const spot = e.getSpotFromSelection()
+  spotFillName.value = spot.fill ?? ''
+  spotStrokeName.value = spot.stroke ?? ''
+}
+
+function onSpotChange() {
+  const e = getEngine()
+  if (!e) return
+  e.setSpotForSelection(spotFillName.value || null, spotStrokeName.value || null)
+  syncSpotFromSelection()
+}
 
 const lineCaps: Array<{ value: LineCap; label: string }> = [
   { value: 'round', label: 'Round' },
@@ -1298,6 +1348,7 @@ watch(() => store.selectedItemIds, () => {
   syncGradientFromStore()
   syncTextFromSelection()
   syncPatternFromSelection()
+  syncSpotFromSelection()
 }, { immediate: true })
 </script>
 
@@ -1475,6 +1526,30 @@ watch(() => store.selectedItemIds, () => {
   text-align: right;
   font-size: 11px;
   color: #9a9a9a;
+}
+
+/* CMYK proof readout (numeric preview, View > CMYK Preview) */
+.proof-block {
+  margin-top: 5px;
+  padding: 4px 6px;
+  background: #1a1a1a;
+  border: 1px solid #3d3d3d;
+  border-radius: 3px;
+}
+
+.proof-block .prop-row {
+  margin-top: 2px;
+}
+
+.cmyk-val {
+  font-size: 11px;
+  color: #d5d5d5;
+  font-variant-numeric: tabular-nums;
+}
+
+.cmyk-val .oog {
+  color: #e5a13d;
+  cursor: help;
 }
 
 /* Button grids that always fit the column */

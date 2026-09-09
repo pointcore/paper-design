@@ -136,12 +136,38 @@ export class EyedropperController {
       if (style.gradient && item instanceof scope.PointText) continue
       engine.applyStyleToItem(item, style)
     }
+    // Spot placeholders ride along (top-level ancestor names stamp the
+    // top-level selection inside the same history entry).
+    const pickRoot = this.topUserItem(picked)
+    const spotData = (pickRoot?.data as any) ?? {}
+    if (typeof spotData.spotFill === 'string' || typeof spotData.spotStroke === 'string') {
+      for (const item of engine.getSelection()) {
+        if (item.locked || !item.parent) continue
+        const data = (item.data as any) ?? {}
+        if (typeof spotData.spotFill === 'string' && spotData.spotFill.trim()) {
+          data.spotFill = spotData.spotFill.trim().slice(0, 60)
+        }
+        if (typeof spotData.spotStroke === 'string' && spotData.spotStroke.trim()) {
+          data.spotStroke = spotData.spotStroke.trim().slice(0, 60)
+        }
+      }
+    }
     if (selection.length > 0) engine.pushHistory('Eyedropper')
     engine.showStatus('Appearance picked')
   }
 
-  /** First style-carrying leaf under an item (itself when it is one). */
-  private resolveLeaf(item: paper.Item): paper.Item | null {
+  /** Top-level user item owning `item` (itself when already top-level). */
+  private topUserItem(item: paper.Item): paper.Item | null {
+    const engine = this.engine
+    if (!engine) return null
+    let node: paper.Item | null = item
+    while (node && node.parent && !(node.parent instanceof engine.scope.Layer)) {
+      node = node.parent
+    }
+    return node
+  }
+
+  /** First style-carrying leaf under an item (itself when it is one). */  private resolveLeaf(item: paper.Item): paper.Item | null {
     const engine = this.engine
     if (!engine) return null
     const scope = engine.scope

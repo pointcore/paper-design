@@ -321,6 +321,8 @@ export interface ViewSettings {
   guidesLocked: boolean
   /** Whether the canvas shows a transparent (checkerboard) background */
   transparentBackground: boolean
+  /** Print proof readout: rgb (default) or cmyk numeric preview + gamut flags */
+  proofMode: 'rgb' | 'cmyk'
 }
 
 /** Export format */
