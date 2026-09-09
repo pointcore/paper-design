@@ -34,9 +34,12 @@ export class GuideController {
     const layer = engine.getGuideLayer()
     if (!layer) return
     layer.locked = false
-    fn()
-    layer.locked = true
-    engine.scope.view.update()
+    try {
+      fn()
+    } finally {
+      layer.locked = true
+      engine.scope.view.update()
+    }
   }
 
   /** Check whether an item is a guide. */

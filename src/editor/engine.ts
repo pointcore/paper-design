@@ -561,10 +561,40 @@ export class EditorEngine {
   getGuidePosition(item: paper.Item): number {
     const orientation = this.getGuideOrientation(item)
     if (!orientation) return 0
+    const segs = (item as paper.Path).segments
+    if (!segs || segs.length === 0) return 0
     if (orientation === 'vertical') {
-      return ((item as paper.Path).segments[0] as any).point.x
+      return segs[0].point.x
     }
-    return ((item as paper.Path).segments[0] as any).point.y
+    return segs[0].point.y
+  }
+
+  /** Keep guide strokes at hairline width across zooms (selected = 2px). */
+  refreshGuideWidths(): void {
+    const guides = this.getGuides()
+    if (guides.length === 0) return
+    const z = this.scope.view.zoom || 1
+    const sc = this.controllers.get('select') as
+      | { guides?: { getSelectedGuides?: () => paper.Item[] } }
+      | undefined
+    let selected: paper.Item[] = []
+    try {
+      selected = sc?.guides?.getSelectedGuides?.() ?? []
+    } catch {
+      selected = []
+    }
+    const selSet = new Set(selected)
+    const layer = this.getGuideLayer()
+    if (!layer) return
+    const wasLocked = layer.locked
+    layer.locked = false
+    try {
+      for (const guide of guides) {
+        ;(guide as any).strokeWidth = (selSet.has(guide as paper.Item) ? 2 : 1) / z
+      }
+    } finally {
+      layer.locked = wasLocked
+    }
   }
 
   /** Move a guide to a new document position along its free axis. */
@@ -579,18 +609,19 @@ export class EditorEngine {
     const layer = this.getGuideLayer()
     const wasLocked = layer ? layer.locked : false
     if (layer) layer.locked = false
-
-    if (orientation === 'horizontal') {
-      // Horizontal guide: line is (a, y) - (b, y); update y.
-      ;(s0 as any).point.y = position
-      ;(s1 as any).point.y = position
-    } else if (orientation === 'vertical') {
-      ;(s0 as any).point.x = position
-      ;(s1 as any).point.x = position
+    try {
+      if (orientation === 'horizontal') {
+        // Horizontal guide: line is (a, y) - (b, y); update y.
+        ;(s0 as any).point.y = position
+        ;(s1 as any).point.y = position
+      } else if (orientation === 'vertical') {
+        ;(s0 as any).point.x = position
+        ;(s1 as any).point.x = position
+      }
+    } finally {
+      if (layer) layer.locked = wasLocked
+      this.scope.view.update()
     }
-
-    if (layer) layer.locked = wasLocked
-    this.scope.view.update()
   }
 
   /**
@@ -627,8 +658,11 @@ export class EditorEngine {
 
     // Unlock temporarily so we can add to the locked guide layer
     layer.locked = false
-    layer.addChild(line)
-    layer.locked = true
+    try {
+      layer.addChild(line)
+    } finally {
+      layer.locked = true
+    }
 
     this.scope.view.update()
     return line
@@ -639,9 +673,12 @@ export class EditorEngine {
     const layer = this.getGuideLayer()
     if (!layer) return
     layer.locked = false
-    guide.remove()
-    layer.locked = true
-    this.scope.view.update()
+    try {
+      guide.remove()
+    } finally {
+      layer.locked = true
+      this.scope.view.update()
+    }
   }
 
   /** Remove all guides from the guide layer. */
@@ -649,9 +686,12 @@ export class EditorEngine {
     const layer = this.getGuideLayer()
     if (!layer) return
     layer.locked = false
-    layer.removeChildren()
-    layer.locked = true
-    this.scope.view.update()
+    try {
+      layer.removeChildren()
+    } finally {
+      layer.locked = true
+      this.scope.view.update()
+    }
   }
 
   /** Set guide-layer visibility according to the current store setting. */
@@ -902,6 +942,7 @@ export class EditorEngine {
 
     v.update()
     this.refreshGrid()
+    this.refreshGuideWidths()
     this.store.updateView({ zoom: newZoom })
     this.emitViewChange()
   }
@@ -930,6 +971,7 @@ export class EditorEngine {
     this.syncViewBookkeeping()
     v.update()
     this.refreshGrid()
+    this.refreshGuideWidths()
     this.store.updateView({ zoom: this.zoom })
     this.emitViewChange()
   }

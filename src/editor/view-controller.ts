@@ -201,6 +201,7 @@ export class ViewController {
     engine.syncViewBookkeeping()
     v.update()
     engine.refreshGrid()
+    engine.refreshGuideWidths()
     engine.store.updateView({ zoom: newZoom })
     engine.emitViewChange()
   }
