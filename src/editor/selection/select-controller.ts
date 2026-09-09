@@ -820,6 +820,10 @@ export class SelectController {
         if (modifiers.alt) {
           targetPath = this.altDuplicatePaths(this.anchorSelectionPaths()).get(hit.path) ?? hit.path
         }
+        // Anchor business now: an explicit anchor grab always drops curve
+        // entries, otherwise a later Delete would remove curves (or whole
+        // small paths) instead of the dragged anchors.
+        this.clearCurveSelection()
         this.grab = 'anchor-group'
         this.grabPath = targetPath
         this.grabSegmentIndex = hit.index
@@ -882,10 +886,14 @@ export class SelectController {
       }
       if (modifiers.shift) {
         this.toggleAnchorSelection(targetPath, hit.index)
-      } else if (!this.isAnchorSelected(targetPath, hit.index)) {
-        this.clearAnchorSelection()
+      } else {
+        if (!this.isAnchorSelected(targetPath, hit.index)) {
+          this.clearAnchorSelection()
+          this.addAnchorToSelection(targetPath, hit.index)
+        }
+        // Plain anchor click (even on an already-selected anchor) means
+        // anchor intent: drop curve entries so Delete removes anchors.
         this.clearCurveSelection()
-        this.addAnchorToSelection(targetPath, hit.index)
       }
       this.grab = this.hasAnchorSelection() ? 'anchor-group' : 'anchor'
       this.grabPath = targetPath
@@ -1062,16 +1070,20 @@ export class SelectController {
     const scope = engine.scope
     const idx = this.grabSegmentIndex
     if (idx < 0 || idx >= path.segments.length) return
-    if (path.segments.length < (path.closed ? 4 : 3)) {
+    const remaining = path.segments.length - 1
+    const survives = path.closed ? remaining >= 2 : remaining >= 2
+    if (!survives) {
       path.remove()
       engine.clearSelection()
       this.clearAnchorState()
+      this.clearCurveSelection()
       this.chrome.clear()
       engine.pushHistory('Delete Anchor')
       scope.view.update()
       return
     }
     path.removeSegment(idx)
+    if (path.closed && path.segments.length === 2) path.closed = false
     this.grabSegmentIndex = -1
     engine.pushHistory('Delete Anchor')
     scope.view.update()
@@ -1420,7 +1432,10 @@ export class SelectController {
     this.pruneAnchorSelection()
     if (this.selectedSegments.length === 0) return
 
-    // Delete from the back so indices stay valid while removing.
+    // Delete from the back so indices stay valid while removing. AI keeps
+    // deleting while a drawable path survives: open paths need 2 anchors,
+    // closed paths stay closed down to a triangle, become a line at 2 and
+    // vanish below that.
     const byPath = new Map<paper.Path, number[]>()
     for (const s of this.selectedSegments) {
       const list = byPath.get(s.path) ?? []
@@ -1431,12 +1446,26 @@ export class SelectController {
     for (const [path, indices] of byPath) {
       indices.sort((a, b) => b - a)
       for (const idx of indices) {
-        const minSegs = path.closed ? 4 : 3
-        if (path.segments.length <= minSegs) {
-          removedAll.push(path)
-          break
+        if (idx < 0 || idx >= path.segments.length) continue
+        const remaining = path.segments.length - 1
+        if (path.closed) {
+          if (remaining >= 3) {
+            path.removeSegment(idx)
+          } else if (remaining === 2) {
+            path.removeSegment(idx)
+            path.closed = false
+          } else {
+            removedAll.push(path)
+            break
+          }
+        } else {
+          if (remaining >= 2) {
+            path.removeSegment(idx)
+          } else {
+            removedAll.push(path)
+            break
+          }
         }
-        path.removeSegment(idx)
       }
     }
     for (const path of removedAll) {
@@ -1506,14 +1535,21 @@ export class SelectController {
       path.remove()
     }
     this.clearCurveSelection()
-    this.clearAnchorSelection()
+    // Anchor entries on rebuilt/removed paths are stale — prune them, but
+    // keep entries on untouched paths so a mixed curve+anchor selection
+    // deletes the curves first and the remaining anchors right after.
+    this.pruneAnchorSelection()
     this.clearAnchorState()
     engine.clearSelection()
     selectAfter.forEach((item) => { item.selected = true })
     engine.syncSelectionToStore()
     engine.pushHistory('Delete Segment')
-    engine.scope.view.update()
-    this.refreshChrome()
+    if (this.hasAnchorSelection()) {
+      this.deleteSelectedAnchors()
+    } else {
+      engine.scope.view.update()
+      this.refreshChrome()
+    }
   }
 
   /**
