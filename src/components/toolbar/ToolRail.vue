@@ -51,7 +51,7 @@ import {
   Pointer, Aim, EditPen, Edit, MagicStick,
   Position, ZoomIn, Setting, Brush, BrushFilled, Star, Operation, ChatLineRound,
   CirclePlus, Remove, Tickets, Link, Document, CopyDocument, Delete, Stamp, Scissor, Crop,
-  Discount, Loading, Lollipop, Coordinate, Share
+  Discount, Loading, Lollipop, Coordinate, Share, Expand
 } from '@element-plus/icons-vue'
 import { useEditorStore } from '../../editor/store'
 import type { ToolName } from '../../editor/types'
@@ -81,6 +81,7 @@ const drawTools: ToolDef[] = [
   { name: 'eyedropper', tip: 'Eyedropper Tool (I)', icon: Stamp },
   { name: 'scissors', tip: 'Scissors Tool (C)', icon: Scissor },
   { name: 'shape-builder', tip: 'Shape Builder Tool (Shift+M)', icon: Share },
+  { name: 'width', tip: 'Width Tool (Shift+W)', icon: Expand },
   { name: 'curvature', tip: 'Curvature Tool (Shift+~)', icon: Operation },
   { name: 'add-anchor', tip: 'Add Anchor Point Tool (+)', icon: CirclePlus },
   { name: 'delete-anchor', tip: 'Delete Anchor Point Tool (-)', icon: Remove },

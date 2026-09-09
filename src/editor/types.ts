@@ -30,6 +30,7 @@ export type ToolName =
   | 'brush'           // Brush B
   | 'eraser'          // Eraser Shift+E
   | 'scissors'        // Scissors C
+  | 'width'             // Width tool Shift+W
   | 'rotate'          // Rotate R
   | 'scale'           // Scale S
   | 'mirror'          // Mirror O

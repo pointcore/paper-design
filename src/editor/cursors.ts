@@ -204,6 +204,7 @@ function buildToolCursors(): Record<ToolName, string> {
     brush: brushRing,
     eraser: eraserRing,
     scissors: CURSOR_SCISSORS,
+    width: crosshair,
     rotate: crosshair,
     scale: crosshair,
     mirror: crosshair,
