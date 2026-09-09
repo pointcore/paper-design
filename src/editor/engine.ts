@@ -353,7 +353,19 @@ export class EditorEngine {
       if (layer) return layer
     }
     const userLayers = this.project.layers.filter((l) => (l.data as any)?.isUserLayer)
-    return userLayers[userLayers.length - 1]
+    const found = userLayers[userLayers.length - 1]
+    if (found) return found
+    // Degenerate stacks (bad imports, cleared projects) must never hand
+    // 30+ call sites an undefined layer: rebuild one silent user layer.
+    const layer = new this.scope.Layer()
+    layer.name = 'Layer 1'
+    layer.data.isUserLayer = true
+    layer.data.layerId = this.genId()
+    this.parkUserLayer(layer)
+    layer.activate()
+    this.syncLayersToStore()
+    this.store.setActiveLayer(layer.data.layerId as string)
+    return layer
   }
 
   createLayer(name?: string): paper.Layer {
