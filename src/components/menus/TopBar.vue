@@ -552,7 +552,8 @@ function downloadHref(href: string, filename: string) {
   }
 }
 
-/** Read a file as a data URL (embeddable, unlike object URLs). */function readFileAsDataURL(file: File): Promise<string> {
+/** Read a file as a data URL (embeddable, unlike object URLs). */
+function readFileAsDataURL(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => resolve(reader.result as string)
@@ -578,7 +579,7 @@ function onExportRasterConfirm() {
       area: exportForm.area,
     })
     if (!dataUrl) {
-      store.setStatusMessage('Raster export failed')
+      store.setStatusMessage(rasterFailText(e) ?? 'Raster export failed')
       return
     }
     downloadHref(dataUrl, `export.${exportForm.format}`)
@@ -587,6 +588,18 @@ function onExportRasterConfirm() {
   } catch (err) {
     store.setStatusMessage('Raster export failed')
   }
+}
+
+/**
+ * Precise raster-failure reason: oversized output names its pixels and the
+ * guard, so users know to lower the scale instead of retrying blindly.
+ */
+function rasterFailText(e: EditorEngine): string | null {
+  const size = e.estimateRasterSize(exportForm.area, exportForm.scale)
+  if (!size) return null
+  return size.width > 16384 || size.height > 16384
+    ? `Too large (${size.width}x${size.height}px, 16384 max) — lower the scale`
+    : null
 }
 
 /**
@@ -605,7 +618,12 @@ async function onExportPdf() {
   try {
     const dataUrl = e.exportRaster({ format: 'png', scale: 2, area: 'page' })
     if (!dataUrl) {
-      store.setStatusMessage('PDF export failed')
+      const size = e.estimateRasterSize('page', 2)
+      store.setStatusMessage(
+        size && (size.width > 16384 || size.height > 16384)
+          ? `Board too large for raster PDF (${size.width}x${size.height}px) — try Vector PDF`
+          : 'PDF export failed'
+      )
       return
     }
     const { jsPDF } = await import('jspdf')
@@ -640,10 +658,14 @@ async function onExportBoardsPdf() {
     const { jsPDF } = await import('jspdf')
     let doc = null as InstanceType<typeof jsPDF> | null
     let painted = 0
+    let skipped = 0
     for (const board of boards) {
       store.setActiveArtboard(board.id)
       const dataUrl = e.exportRaster({ format: 'png', scale: 2, area: 'page' })
-      if (!dataUrl) continue
+      if (!dataUrl) {
+        skipped++
+        continue
+      }
       const orientation = board.width >= board.height ? 'landscape' : 'portrait'
       if (!doc) {
         doc = new jsPDF({ orientation, unit: 'pt', format: [board.width, board.height], compress: true })
@@ -658,7 +680,11 @@ async function onExportBoardsPdf() {
       return
     }
     doc.save('export-boards.pdf')
-    store.setStatusMessage(`PDF exported (${painted} of ${boards.length} boards)`)
+    store.setStatusMessage(
+      skipped > 0
+        ? `PDF exported (${painted} of ${boards.length} boards, ${skipped} too large)`
+        : `PDF exported (${painted} of ${boards.length} boards)`
+    )
   } catch (err) {
     store.setStatusMessage('PDF export failed')
   } finally {

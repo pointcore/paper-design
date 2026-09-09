@@ -313,31 +313,17 @@ export const useEditorStore = defineStore('editor', {
       this.liveShape = params
     },
 
-    /** Push a history entry */
-    pushHistory(name: string, icon: string = 'history') {
-      const entry: HistoryEntry = {
-        name,
-        icon,
-        timestamp: Date.now(),
-      }
-      // Truncate the redo portion
-      this.history = this.history.slice(0, this.historyIndex + 1)
-      this.history.push(entry)
-      // Enforce the length limit
-      if (this.history.length > this.historyLimit) {
-        this.history.shift()
-      }
-      this.historyIndex = this.history.length - 1
-    },
-
     /** Set history index */
     setHistoryIndex(index: number) {
       this.historyIndex = index
     },
 
-    /** Set history list */
+    /**
+     * Mirror the engine history stack. Copied (not shared) so later engine
+     * slices never alias the panel list; the engine owns snapshots.
+     */
     setHistory(history: HistoryEntry[], index: number) {
-      this.history = history
+      this.history = history.slice()
       this.historyIndex = index
     },
 

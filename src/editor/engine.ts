@@ -2882,6 +2882,35 @@ export class EditorEngine {
 
   // ===== Raster export =====
 
+  /** Export bounds for an area keyword (selection / page / artwork). */
+  private rasterBoundsFor(area: RasterExportOptions['area']): paper.Rectangle | null {
+    if (area === 'selection') {
+      return this.getSelectionBounds()
+    } else if (area === 'page') {
+      // The active artboard is the page; older files fall back to pageSize.
+      const board =
+        this.store.artboards.find((b) => b.id === this.store.activeArtboardId) ??
+        this.store.artboards[0]
+      const page = this.store.pageSize
+      const rect = board ?? { x: 0, y: 0, width: page.width, height: page.height }
+      return Number.isFinite(rect.width) && Number.isFinite(rect.height) && rect.width > 0 && rect.height > 0
+        ? new this.scope.Rectangle(rect.x, rect.y, rect.width, rect.height)
+        : null
+    }
+    return this.unitedBoundsOf(this.getUserItems())
+  }
+
+  /**
+   * Predicted pixel size for a raster export (null when there is nothing
+   * to export). Lets callers explain size-guard failures precisely.
+   */
+  estimateRasterSize(area: RasterExportOptions['area'], scale: number): { width: number; height: number } | null {
+    const bounds = this.rasterBoundsFor(area)
+    if (!bounds || bounds.width < 1 || bounds.height < 1) return null
+    const s = Number.isFinite(scale) ? Math.min(4, Math.max(0.5, scale)) : 1
+    return { width: Math.ceil(bounds.width * s), height: Math.ceil(bounds.height * s) }
+  }
+
   /**
    * Rasterize artwork through the paper.js view into a data URL. The view
    * is pointed at the export bounds for exactly one synchronous render and
@@ -2890,23 +2919,7 @@ export class EditorEngine {
    * nothing to export or the output exceeds the size guard.
    */
   exportRaster(options: RasterExportOptions): string | null {
-    let bounds: paper.Rectangle | null
-    if (options.area === 'selection') {
-      bounds = this.getSelectionBounds()
-    } else if (options.area === 'page') {
-      // The active artboard is the page; older files fall back to pageSize.
-      const board =
-        this.store.artboards.find((b) => b.id === this.store.activeArtboardId) ??
-        this.store.artboards[0]
-      const page = this.store.pageSize
-      const rect = board ?? { x: 0, y: 0, width: page.width, height: page.height }
-      bounds =
-        Number.isFinite(rect.width) && Number.isFinite(rect.height) && rect.width > 0 && rect.height > 0
-          ? new this.scope.Rectangle(rect.x, rect.y, rect.width, rect.height)
-          : null
-    } else {
-      bounds = this.unitedBoundsOf(this.getUserItems())
-    }
+    const bounds = this.rasterBoundsFor(options.area)
     if (!bounds || bounds.width < 1 || bounds.height < 1) return null
     const scale = Number.isFinite(options.scale) ? Math.min(4, Math.max(0.5, options.scale)) : 1
     const mime =
