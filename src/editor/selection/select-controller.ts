@@ -759,6 +759,10 @@ export class SelectController {
           } else {
             engine.deleteSelected()
           }
+          // Keyboard deletes change geometry with no mouse movement: repaint
+          // the AI chrome now, or the old outlines linger until the next
+          // mousemove.
+          this.refreshChrome()
           break
         case 'escape':
           if (engine.store.isolationActive) {

@@ -264,7 +264,12 @@ export function handleGlobalKeydown(
       e.preventDefault()
       return
     }
-    if (engine?.nudgeSelection(dx, dy)) e.preventDefault()
+    if (engine?.nudgeSelection(dx, dy)) {
+      // Whole objects moved with no mouse movement: repaint the AI chrome
+      // now or stale outlines linger until the next mousemove.
+      direct?.refreshSelectionChrome()
+      e.preventDefault()
+    }
     return
   }
   if (e.repeat) return
