@@ -1315,6 +1315,8 @@ function onAlign(mode: AlignMode, label: string) {
   const target = alignTarget.value === 'board' ? e.getActiveArtboardRect() ?? undefined : undefined
   if (e.alignSelection(mode, target)) {
     e.pushHistory(label)
+  } else {
+    store.setStatusMessage('Align needs 2+ objects or the artboard target')
   }
 }
 
