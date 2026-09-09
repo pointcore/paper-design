@@ -247,6 +247,9 @@ export type DistributeAxis = 'horizontal' | 'vertical'
 /** Pathfinder boolean operation for combining paths. */
 export type BooleanOperation = 'unite' | 'subtract' | 'intersect' | 'exclude'
 
+/** Destructive envelope-distort preset (warps path geometry in place). */
+export type EnvelopePreset = 'arc-upper' | 'arc-lower' | 'bulge' | 'wave'
+
 /** Ruler unit */
 export type RulerUnit = 'px' | 'pt' | 'mm' | 'cm' | 'in'
 

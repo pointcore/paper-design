@@ -64,6 +64,10 @@
               <el-dropdown-item command="simplifyPath" :disabled="!store.hasSelection">Simplify Path</el-dropdown-item>
               <el-dropdown-item command="closePath" :disabled="!store.hasSelection">Close Path</el-dropdown-item>
               <el-dropdown-item command="openPath" :disabled="!store.hasSelection">Open Path</el-dropdown-item>
+              <el-dropdown-item command="envArcUpper" divided :disabled="!store.hasSelection">Envelope: Arc Upper</el-dropdown-item>
+              <el-dropdown-item command="envArcLower" :disabled="!store.hasSelection">Envelope: Arc Lower</el-dropdown-item>
+              <el-dropdown-item command="envBulge" :disabled="!store.hasSelection">Envelope: Bulge</el-dropdown-item>
+              <el-dropdown-item command="envWave" :disabled="!store.hasSelection">Envelope: Wave</el-dropdown-item>
               <el-dropdown-item command="makeMask" divided :disabled="!store.hasSelection">Make Clipping Mask</el-dropdown-item>
               <el-dropdown-item command="releaseMask" :disabled="!store.hasSelection">Release Clipping Mask</el-dropdown-item>
               <el-dropdown-item command="applyPattern" divided :disabled="!store.hasSelection">Apply Pattern Fill</el-dropdown-item>
@@ -882,6 +886,20 @@ function onObjectCmd(cmd: string) {
         store.setStatusMessage('No closed paths to open')
       }
       break
+    case 'envArcUpper':
+    case 'envArcLower':
+    case 'envBulge':
+    case 'envWave': {
+      const preset = (
+        cmd === 'envArcUpper' ? 'arc-upper' :
+        cmd === 'envArcLower' ? 'arc-lower' :
+        cmd === 'envBulge' ? 'bulge' : 'wave'
+      ) as 'arc-upper' | 'arc-lower' | 'bulge' | 'wave'
+      if (e.envelopeDistort(preset) === 0) {
+        store.setStatusMessage('Envelope needs a path selection')
+      }
+      break
+    }
     case 'makeMask':
       if (!e.makeClippingMask()) {
         store.setStatusMessage('Clipping needs art plus a path on top')
