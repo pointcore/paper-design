@@ -38,7 +38,7 @@
 
     <div class="tool-section">
       <div class="tool-grid">
-        <div class="tool-item" title="Settings">
+        <div class="tool-item" title="Canvas Settings" @click="openSettings">
           <el-icon :size="16"><Setting /></el-icon>
         </div>
       </div>
@@ -109,6 +109,10 @@ function selectTool(name: ToolName) {
   if (e) {
     e.setTool(name)
   }
+}
+
+function openSettings() {
+  store.setSettingsOpen(true)
 }
 </script>
 
