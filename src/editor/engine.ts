@@ -11,7 +11,7 @@ import type { EditorStore } from './store-types'
 /** Identifier stamped into every saved project file. */
 const PROJECT_FILE_APP = 'vue-vector-editor'
 /** Current project file format version. */
-const PROJECT_FILE_VERSION = 1
+const PROJECT_FILE_VERSION = 2
 
 export class EditorEngine {
   project!: paper.Project
@@ -1362,6 +1362,22 @@ export class EditorEngine {
   // ===== History =====
 
   snapshotProject(): string {
+    return this.withCleanScene(() => this.project.exportJSON({ asString: true }))
+  }
+
+  /** Snapshot as a plain object for v2 project files (no double encoding). */
+  snapshotProjectObject(): Record<string, unknown> {
+    return this.withCleanScene(
+      () => (this.project as any).exportJSON({ asString: false }) as Record<string, unknown>
+    )
+  }
+
+  /**
+   * Run `fn` with regenerable scene content detached: grid lines plus
+   * editing chrome and drag previews. Everything is re-attached in order
+   * afterwards, so history snapshots and project files stay lean.
+   */
+  private withCleanScene<T>(fn: () => T): T {
     // Grid lines are regenerable view cache: keep them out of history and
     // project files (they used to bloat snapshots and resurrect as stale
     // duplicates after undo). Children are stashed and restored in order.
@@ -1384,7 +1400,7 @@ export class EditorEngine {
     }
     for (const layer of this.project.layers.slice()) collect(layer as paper.Item)
     try {
-      return this.project.exportJSON({ asString: true })
+      return fn()
     } finally {
       if (grid && stashed) grid.addChildren(stashed)
       const byParent = new Map<paper.Item, Array<{ item: paper.Item; index: number }>>()
@@ -1402,14 +1418,14 @@ export class EditorEngine {
     }
   }
 
-  restoreSnapshot(snapshot: string) {
+  restoreSnapshot(snapshot: string | Record<string, unknown>) {
     // Project#importJSON appends a fresh layer stack whenever it runs (its
     // layer-merge path only triggers for an empty active layer of matching
     // type), so the project must be cleared first or every undo/redo would
     // duplicate the whole document.
     this.clearIsolationState()
     this.project.clear()
-    this.project.importJSON(snapshot)
+    this.project.importJSON(snapshot as string)
     // Paste offsets step from the source: restart the stepping after any
     // restore so undo/redo cannot walk pastes out of the viewport.
     this.pasteCount = 0
@@ -1526,7 +1542,7 @@ export class EditorEngine {
       version: PROJECT_FILE_VERSION,
       pageSize: { ...this.store.pageSize },
       bleed: Number(this.store.bleed) || 0,
-      snapshot: this.snapshotProject(),
+      snapshot: this.snapshotProjectObject(),
       artboards: this.store.artboards.map((board) => ({ ...board })),
       activeArtboardId: this.store.activeArtboardId,
     }
@@ -1558,13 +1574,21 @@ export class EditorEngine {
    * Throws an Error with an English message when the file is invalid.
    */
   importProjectFile(fileText: string): void {
+    if (fileText.length > 150 * 1024 * 1024) {
+      throw new Error('Project file too large (over 150 MB)')
+    }
     let parsed: ProjectFileData
     try {
       parsed = JSON.parse(fileText) as ProjectFileData
     } catch {
       throw new Error('Invalid project file: not valid JSON')
     }
-    if (!parsed || typeof parsed.snapshot !== 'string' || parsed.snapshot.length === 0) {
+    const rawSnapshot = (parsed as any)?.snapshot as unknown
+    const snapshotOk =
+      typeof rawSnapshot === 'string'
+        ? rawSnapshot.length > 0
+        : typeof rawSnapshot === 'object' && rawSnapshot !== null
+    if (!parsed || !snapshotOk) {
       throw new Error('Invalid project file: missing snapshot')
     }
     if (typeof parsed.version === 'number' && parsed.version > PROJECT_FILE_VERSION) {
@@ -1575,7 +1599,9 @@ export class EditorEngine {
     // back. Roll back to a backup snapshot when the file is unreadable.
     const backup = this.snapshotProject()
     try {
-      this.restoreSnapshot(parsed.snapshot)
+      // v1 snapshots are JSON strings, v2+ are nested objects; Paper
+      // imports both, so old files keep opening.
+      this.restoreSnapshot(rawSnapshot as string | Record<string, unknown>)
     } catch {
       try {
         this.restoreSnapshot(backup)
