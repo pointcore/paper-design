@@ -109,7 +109,7 @@ export class SelectController {
 
   // Direct-select anchor editing state.
   private mode: EditMode = 'select'
-  private grab: 'none' | 'anchor' | 'anchor-group' | 'handle' | 'object' | 'guide' | 'transform' = 'none'
+  private grab: 'none' | 'anchor' | 'anchor-group' | 'handle' | 'segment' | 'object' | 'guide' | 'transform' = 'none'
   private grabSegmentIndex = -1
   private grabIsIn = false
   private lastSegmentCount = -1
@@ -120,6 +120,13 @@ export class SelectController {
   private grabPath: paper.Path | null = null
   // Anchor sub-selection built by direct-select marquee / shift-click.
   private selectedSegments: { path: paper.Path; index: number }[] = []
+  // Curve (segment) sub-selection: clicking a path stroke in direct-select
+  // selects the whole curve plus its two end anchors (AI behavior). Dragging
+  // moves the end anchors rigidly so adjacent curves reshape with it.
+  private selectedCurves: { path: paper.Path; curve: number }[] = []
+  // Curve index grabbed for a segment drag (kept apart from
+  // grabSegmentIndex so the anchor delete-key quirk never fires for curves).
+  private grabCurveIndex = -1
   // Whether the active marquee selects anchors (direct-select) or objects.
   private anchorMarquee = false
   // Whether the active marquee is additive (shift held on mouse-down).
@@ -389,6 +396,7 @@ export class SelectController {
     this.dragStartPoint = null
     this.anchorMarquee = false
     this.clearAnchorSelection()
+    this.clearCurveSelection()
     this.guides.clearSelection()
     this.chrome.clear()
     this.setupTool()
@@ -401,6 +409,7 @@ export class SelectController {
   private clearAnchorState() {
     this.grab = 'none'
     this.grabSegmentIndex = -1
+    this.grabCurveIndex = -1
     this.grabIsIn = false
     this.lastSegmentCount = -1
     this.grabPath = null
@@ -479,11 +488,38 @@ export class SelectController {
         return
       }
 
+      // Direct-select curve (segment) grab: clicking a path stroke selects
+      // the whole curve plus its two end anchors; dragging moves them.
+      // Priority sits below anchors/handles, above guides and objects.
+      if (this.mode === 'direct-select') {
+        const curveHit = this.curveHitAt(event.point, 5 / scope.view.zoom)
+        if (curveHit) {
+          this.guides.clearSelection()
+          this.ensureEditedPath(curveHit.path)
+          if (event.modifiers.shift) {
+            this.toggleCurveSelection(curveHit.path, curveHit.curve)
+          } else if (!this.isCurveSelected(curveHit.path, curveHit.curve)) {
+            this.clearCurveSelection()
+            this.clearAnchorSelection()
+            this.addCurveToSelection(curveHit.path, curveHit.curve)
+          }
+          this.grab = 'segment'
+          this.grabPath = curveHit.path
+          this.grabCurveIndex = curveHit.curve
+          this.dragStartPoint = { x: event.point.x, y: event.point.y }
+          engine.store.setDragging(true)
+          engine.canvas.style.cursor = 'move'
+          this.refreshChrome()
+          return
+        }
+      }
+
       // ---- Guide interaction (skipped while guides are locked) ----
       if (engine.store.view.showGuides && !engine.store.view.guidesLocked) {
         const guideHit = this.guides.hitTest(event.point)
         if (guideHit) {
           this.clearAnchorSelection()
+          this.clearCurveSelection()
           engine.store.setDragging(true)
           const wasSelected = this.guides.getSelectedGuides().includes(guideHit)
 
@@ -544,6 +580,7 @@ export class SelectController {
       if (hitResult) {
         const item = hitResult.item
         this.clearAnchorSelection()
+        this.clearCurveSelection()
         engine.store.setDragging(true)
 
         if (!item.selected && !event.modifiers.shift) {
@@ -589,6 +626,7 @@ export class SelectController {
         if (event.modifiers.shift) return
         engine.clearSelection()
         this.clearAnchorSelection()
+        this.clearCurveSelection()
         this.refreshChrome()
         this.isMarquee = true
         // Direct-select marquee sub-selects anchors; the select tool marquee
@@ -611,6 +649,8 @@ export class SelectController {
         this.dragAnchor(event.point)
       } else if (this.mode === 'direct-select' && this.grab === 'handle') {
         this.dragHandle(event.point)
+      } else if (this.mode === 'direct-select' && this.grab === 'segment') {
+        this.dragSegment(event.point)
       } else if (this.isMarquee) {
         this.updateMarquee(event.point.x, event.point.y)
       } else if (this.isDragging && this.dragItems.length > 0) {
@@ -643,13 +683,14 @@ export class SelectController {
         this.isDragging = false
         engine.pushHistory('Move')
         engine.stampSelectionFrame()
-      } else if (this.grab === 'anchor' || this.grab === 'anchor-group' || this.grab === 'handle') {
+      } else if (this.grab === 'anchor' || this.grab === 'anchor-group' || this.grab === 'handle' || this.grab === 'segment') {
         engine.pushHistory('Edit Path')
       }
       this.grab = 'none'
       this.isDragging = false
       this.grabGuide = null
       this.grabPath = null
+      this.grabCurveIndex = -1
       this.dragStartPoint = null
       engine.store.setDragging(false)
       // Back to the AI-aligned tool default (arrow / white arrow).
@@ -712,6 +753,7 @@ export class SelectController {
           }
           this.guides.clearSelection()
           this.clearAnchorSelection()
+          this.clearCurveSelection()
           engine.clearSelection()
           this.refreshChrome()
           break
@@ -949,6 +991,153 @@ export class SelectController {
   }
 
   // ------------------------------------------------------------------
+  // Curve (segment) sub-selection (direct-select)
+  // ------------------------------------------------------------------
+
+  /**
+   * Nearest curve (segment between two anchors) within tolerance. Only
+   * plain editable paths qualify: compound children would break their
+   * compound, pattern tiles and text modes are never direct-edited.
+   * Later (top-most) hits win ties, matching paint order.
+   */
+  private curveHitAt(point: paper.Point, tol: number): { path: paper.Path; curve: number } | null {
+    const engine = this.engine
+    if (!engine) return null
+    const scope = engine.scope
+    // Holder object (not a bare `let`): assignments inside the `walk`
+    // closure below are invisible to control-flow narrowing at the return.
+    const found: { hit: { path: paper.Path; curve: number; dist: number } | null } = { hit: null }
+    const walk = (item: paper.Item) => {
+      if ((item as any).locked) return
+      const data = (item.data as any) ?? {}
+      if (data.isChrome || data.isPreview || data.isGuide || data.isArtboard || data.annotation) return
+      if (data.isPatternTile || data.isPatternFill || data.textMode) return
+      // Clipping masks reshape their whole group; never direct-edit one.
+      if ((item as any).clipMask) return
+      if (item instanceof scope.Path && !(item instanceof scope.CompoundPath)) {
+        const path = item as paper.Path
+        if (!path.parent || path.segments.length < 2) return
+        if (path.parent instanceof scope.CompoundPath) return
+        if (path.parent instanceof scope.Layer && !(path.parent.data as any)?.isUserLayer) return
+        const bounds = path.bounds
+        if (!bounds || !bounds.expand(tol).contains(point)) return
+        let loc: any = null
+        try {
+          loc = path.getNearestLocation(point)
+        } catch {
+          return
+        }
+        if (!loc || !loc.curve || !loc.point) return
+        const d = (loc.point as paper.Point).getDistance(point)
+        if (d > tol) return
+        const index = (loc.curve as paper.Curve).index
+        if (index < 0 || index >= path.curves.length) return
+        if (!found.hit || d <= found.hit.dist) found.hit = { path, curve: index, dist: d }
+        return
+      }
+      const children = (item as any).children as paper.Item[] | undefined
+      if (children) {
+        for (const child of children) walk(child as paper.Item)
+      }
+    }
+    for (const layer of engine.project.layers) {
+      if (!(layer.data as any)?.isUserLayer || !layer.visible || layer.locked) continue
+      for (const child of layer.children) walk(child as paper.Item)
+    }
+    return found.hit ? { path: found.hit.path, curve: found.hit.curve } : null
+  }
+
+  /** End anchor indices of a curve (curve i spans segments[i] → next). */
+  private curveEndAnchors(path: paper.Path, curve: number): [number, number] | null {
+    const n = path.segments.length
+    if (n < 2 || curve < 0 || curve >= path.curves.length) return null
+    return [curve, (curve + 1) % n]
+  }
+
+  private isCurveSelected(path: paper.Path, curve: number): boolean {
+    return this.selectedCurves.some((s) => s.path === path && s.curve === curve)
+  }
+
+  /** Select a curve plus its two end anchors (AI shows both ends solid). */
+  private addCurveToSelection(path: paper.Path, curve: number) {
+    if (!this.isCurveSelected(path, curve)) {
+      this.selectedCurves.push({ path, curve })
+    }
+    const ends = this.curveEndAnchors(path, curve)
+    if (ends) {
+      this.addAnchorToSelection(path, ends[0])
+      this.addAnchorToSelection(path, ends[1])
+    }
+  }
+
+  /** Drop a curve; end anchors shared with other curves stay selected. */
+  private removeCurveFromSelection(path: paper.Path, curve: number) {
+    const at = this.selectedCurves.findIndex((s) => s.path === path && s.curve === curve)
+    if (at < 0) return
+    this.selectedCurves.splice(at, 1)
+    const ends = this.curveEndAnchors(path, curve)
+    if (!ends) return
+    for (const anchor of ends) {
+      const shared = this.selectedCurves.some((s) => {
+        const other = this.curveEndAnchors(s.path, s.curve)
+        return !!other && s.path === path && (other[0] === anchor || other[1] === anchor)
+      })
+      if (!shared) {
+        const si = this.selectedSegments.findIndex((s) => s.path === path && s.index === anchor)
+        if (si >= 0) this.selectedSegments.splice(si, 1)
+      }
+    }
+  }
+
+  private toggleCurveSelection(path: paper.Path, curve: number) {
+    if (this.isCurveSelected(path, curve)) this.removeCurveFromSelection(path, curve)
+    else this.addCurveToSelection(path, curve)
+  }
+
+  private clearCurveSelection() {
+    this.selectedCurves = []
+  }
+
+  private hasCurveSelection(): boolean {
+    return this.selectedCurves.length > 0
+  }
+
+  /** Drop curve entries whose path or curve no longer exists. */
+  private pruneCurveSelection() {
+    this.selectedCurves = this.selectedCurves.filter(
+      (s) => s.path.parent && s.curve >= 0 && s.curve < s.path.curves.length
+    )
+  }
+
+  /**
+   * Drag the selected curves by translating every distinct end anchor
+   * rigidly. Handles are anchor-relative in Paper.js, so they travel along
+   * and adjacent curves reshape — the AI segment-move feel.
+   */
+  private dragSegment(point: paper.Point) {
+    const engine = this.engine
+    if (!engine || !this.dragStartPoint) return
+    const dx = point.x - this.dragStartPoint.x
+    const dy = point.y - this.dragStartPoint.y
+    if (Math.abs(dx) < 1e-9 && Math.abs(dy) < 1e-9) return
+    this.pruneCurveSelection()
+    const seen = new Set<paper.Segment>()
+    for (const entry of this.selectedCurves) {
+      const ends = this.curveEndAnchors(entry.path, entry.curve)
+      if (!ends) continue
+      for (const index of ends) {
+        const seg = entry.path.segments[index]
+        if (!seg || seen.has(seg)) continue
+        seen.add(seg)
+        seg.point = seg.point.add(new engine.scope.Point(dx, dy))
+      }
+      engine.refreshItemGradient(entry.path)
+    }
+    this.dragStartPoint = { x: point.x, y: point.y }
+    engine.scope.view.update()
+  }
+
+  // ------------------------------------------------------------------
   // Anchor sub-selection (direct-select)
   // ------------------------------------------------------------------
 
@@ -1010,6 +1199,7 @@ export class SelectController {
 
     const additive = this.marqueeShift
     if (!additive) this.selectedSegments = []
+    if (!additive) this.clearCurveSelection()
 
     const touchedPaths: paper.Path[] = []
     for (const layer of engine.project.layers) {
@@ -1081,6 +1271,7 @@ export class SelectController {
       path.remove()
     }
     this.clearAnchorSelection()
+    this.clearCurveSelection()
     this.clearAnchorState()
     engine.pushHistory('Delete Anchors')
     scope.view.update()
@@ -1099,9 +1290,14 @@ export class SelectController {
       return
     }
     this.pruneAnchorSelection()
+    this.pruneCurveSelection()
     // When anchors are sub-selected, draw chrome for every involved path so
-    // multi-path anchor selections stay visible.
+    // multi-path anchor selections stay visible. Curve selections always
+    // bring their own paths along.
     const paths = this.hasAnchorSelection() ? this.anchorSelectionPaths() : []
+    for (const s of this.selectedCurves) {
+      if (s.path.parent && !paths.includes(s.path)) paths.push(s.path)
+    }
     if (paths.length === 0) {
       const path = this.getEditPath()
       if (path) paths.push(path)
@@ -1147,6 +1343,20 @@ export class SelectController {
             (this.grab === 'anchor' || this.grab === 'handle'))
         // AI: unselected = hollow white, selected = solid layer color.
         this.chrome.drawAnchor(seg.point, isSelectedAnchor, color)
+      }
+      // AI segment selection: the curve paints in the layer color (thicker
+      // than the path outline) and both end anchors read solid. Curves
+      // enclosed by a marquee (both ends selected) highlight the same way.
+      const curves = path.curves
+      for (let ci = 0; ci < curves.length; ci++) {
+        const ends = this.curveEndAnchors(path, ci)
+        if (!ends) continue
+        if (
+          this.isCurveSelected(path, ci) ||
+          (this.isAnchorSelected(path, ends[0]) && this.isAnchorSelected(path, ends[1]))
+        ) {
+          this.chrome.drawCurveHighlight(path, ci, color)
+        }
       }
     }
     scope.view.update()
@@ -1510,9 +1720,9 @@ export class SelectController {
   }
 
   /**
-   * Hover cursor for direct-select anchor / handle targets. Returns
-   * `pointer` when the white arrow sits on a draggable anchor or handle so
-   * the hit target reads as clickable, otherwise null (keep white arrow).
+   * Hover cursor for direct-select anchor / handle / curve targets. Returns
+   * `pointer` on a draggable anchor or handle, `move` on a draggable curve
+   * segment, otherwise null (keep white arrow).
    */
   private directHoverCursor(point: paper.Point): string | null {
     const engine = this.engine
@@ -1535,7 +1745,11 @@ export class SelectController {
         if (ho && anchor.add(ho).getDistance(point) <= tol) return 'pointer'
       }
     }
-    return this.anchorHitAt(point, tol) ? 'pointer' : null
+    if (this.anchorHitAt(point, tol)) return 'pointer'
+    // A hovered curve reads draggable (AI shows the segment highlight on
+    // selection; the move cue previews the drag here).
+    if (this.curveHitAt(point, tol)) return 'move'
+    return null
   }
 
   /** Draw the AI-style selection: outlines + oriented frame + 8 handles. */

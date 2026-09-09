@@ -292,8 +292,9 @@ export class AnchorChrome {
    *
    * @param path  The path whose curve segment should be highlighted
    * @param curveIndex  The index of the curve within the path to highlight
+   * @param color  Layer color so the highlight matches the selection (AI)
    */
-  drawCurveHighlight(path: paper.Path, curveIndex: number): paper.Path | null {
+  drawCurveHighlight(path: paper.Path, curveIndex: number, color = '#4a90d9'): paper.Path | null {
     const engine = this.engine
     const layer = this.ensureLayer()
     if (!engine || !layer) return null
@@ -318,7 +319,7 @@ export class AnchorChrome {
       const y = mt * mt * mt * p1.y + 3 * mt * mt * t * p2.y + 3 * mt * t * t * p3.y + t * t * t * p4.y
       hl.add(new scope.Segment(new scope.Point(x, y)))
     }
-    hl.strokeColor = new scope.Color('#4a90d9')
+    hl.strokeColor = new scope.Color(color)
     hl.strokeWidth = 2.5 / scope.view.zoom
     hl.strokeCap = 'round' as any
     hl.data.isChrome = true
