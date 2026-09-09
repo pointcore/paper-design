@@ -485,8 +485,9 @@ export class TextController {
     content: string,
     point: paper.Point,
     data: { textMode: TextKind; raw: string; frame?: TextFrame },
-    historyLabel: string
-  ) {
+    historyLabel: string,
+    push = true
+  ): paper.PointText {
     const engine = this.engine!
     const scope = engine.scope
     const charStyle = engine.store.charStyle
@@ -512,8 +513,11 @@ export class TextController {
     if (data.frame) text.data.frame = { ...data.frame }
     engine.getActiveLayer().addChild(text)
 
-    engine.selectItem(text)
-    engine.pushHistory(historyLabel)
+    if (push) {
+      engine.selectItem(text)
+      engine.pushHistory(historyLabel)
+    }
+    return text
   }
 
   /** Create the group that owns one path-text run. */
@@ -768,17 +772,16 @@ export class TextController {
       height: info.frame.height,
     }
     const overflowContent = this.wrapText(overflowRaw, nextFrame.width).join('\n')
-    this.createTextItem(overflowContent, this.frameAnchor(nextFrame), {
+    // Links must land before the history snapshot, or undo loses them.
+    const created = this.createTextItem(overflowContent, this.frameAnchor(nextFrame), {
       textMode: 'area',
       raw: overflowRaw,
       frame: { ...nextFrame },
-    }, 'Thread Text')
-    const created = engine.getSelection()[0] as any
-    if (created) {
-      ;(created.data as any).threadPrev = (item.data as any)?.id ?? ''
-      ;(item.data as any).threadNext = (created.data as any)?.id ?? ''
-    }
+    }, 'Thread Text', false)
+    ;(created.data as any).threadPrev = (item.data as any)?.id ?? ''
+    ;(item.data as any).threadNext = (created.data as any)?.id ?? ''
     engine.selectItem(item)
+    engine.pushHistory('Thread Text')
     return true
   }
 
