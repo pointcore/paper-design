@@ -445,20 +445,12 @@ function ctxDelete() {
 }
 
 function ctxBringToFront() {
-  if (engine) {
-    engine.getSelection().forEach((i) => i.bringToFront())
-    engine.scope.view.update()
-    engine.pushHistory('Bring to Front')
-  }
+  engine?.bringSelectionToFront()
   hideMenu()
 }
 
 function ctxSendToBack() {
-  if (engine) {
-    engine.getSelection().forEach((i) => i.sendToBack())
-    engine.scope.view.update()
-    engine.pushHistory('Send to Back')
-  }
+  engine?.sendSelectionToBack()
   hideMenu()
 }
 

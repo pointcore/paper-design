@@ -3052,7 +3052,7 @@ export class EditorEngine {
    * Returns false (no history) when nothing is selected.
    */
   bringSelectionToFront(): boolean {
-    const items = this.getSelection()
+    const items = this.getSelection().filter((i) => !i.locked)
     if (items.length === 0) return false
     items.forEach((i) => i.bringToFront())
     this.scope.view.update()
@@ -3064,7 +3064,7 @@ export class EditorEngine {
    * Send the selection to the very back. Returns false when empty.
    */
   sendSelectionToBack(): boolean {
-    const items = this.getSelection()
+    const items = this.getSelection().filter((i) => !i.locked)
     if (items.length === 0) return false
     items.forEach((i) => i.sendToBack())
     this.scope.view.update()
