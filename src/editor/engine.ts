@@ -1383,6 +1383,18 @@ export class EditorEngine {
     this.clearIsolationState()
     this.project.clear()
     this.project.importJSON(snapshot)
+    // Paste offsets step from the source: restart the stepping after any
+    // restore so undo/redo cannot walk pastes out of the viewport.
+    this.pasteCount = 0
+    // Isolation hides ride in snapshots as plain visible=false: lift the
+    // flagged ones so undo during isolation cannot hide artwork forever
+    // (the mode itself is already dropped above).
+    for (const item of this.walkUserItems()) {
+      if ((item.data as any)?.isolationHidden) {
+        item.visible = true
+        delete (item.data as any).isolationHidden
+      }
+    }
     this.geometryVersion++
     this.syncLayersToStore()
     this.syncSelectionToStore()
@@ -3303,30 +3315,34 @@ export class EditorEngine {
     return null
   }
 
-  /** Every style-carrying leaf of user artwork (groups descended into). */
+  /** Every selectable style-carrying leaf (locked / hidden art excluded). */
   private appearanceLeaves(): paper.Item[] {
     const scope = this.scope
     const out: paper.Item[] = []
-    const walk = (item: paper.Item) => {
+    const walk = (item: paper.Item, hidden: boolean, locked: boolean) => {
       const data = (item.data as any) ?? {}
       if (data.isChrome || data.isPreview || data.isGuide || data.annotation) return
+      hidden = hidden || (item as any).visible === false
+      locked = locked || !!(item as any).locked
       if (data.isPatternTile) return
       if (
         item instanceof scope.Path ||
         item instanceof scope.CompoundPath ||
         item instanceof scope.PointText
       ) {
-        out.push(item)
+        if (!hidden && !locked) out.push(item)
         return
       }
       const children = (item as any).children as paper.Item[] | undefined
       if (children) {
-        for (const child of children) walk(child)
+        for (const child of children) walk(child, hidden, locked)
       }
     }
     for (const layer of this.project.layers) {
       if (!(layer.data as any)?.isUserLayer) continue
-      for (const child of layer.children) walk(child as paper.Item)
+      const layerHidden = (layer as any).visible === false
+      const layerLocked = !!(layer as any).locked
+      for (const child of layer.children) walk(child as paper.Item, layerHidden, layerLocked)
     }
     return out
   }
@@ -3969,6 +3985,9 @@ export class EditorEngine {
     for (const item of this.walkUserItems()) {
       if (inside.has(item)) continue
       this.isolationBackup.set(item, item.visible)
+      // Flag isolation-driven hides so snapshot restores can tell them
+      // apart from user hides (data survives project JSON).
+      if (item.visible) (item.data as any).isolationHidden = true
       item.visible = false
     }
     this.isolationRoot = root
@@ -3981,6 +4000,7 @@ export class EditorEngine {
   exitIsolation(): void {
     for (const [item, wasVisible] of this.isolationBackup) {
       if (item.parent) item.visible = wasVisible
+      if ((item.data as any)) delete (item.data as any).isolationHidden
     }
     this.clearIsolationState()
     this.scope.view.update()
