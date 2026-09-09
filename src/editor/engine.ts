@@ -1368,10 +1368,37 @@ export class EditorEngine {
     const grid =
       this.gridLayer && this.gridLayer.parent ? this.gridLayer : null
     const stashed = grid ? grid.removeChildren() : null
+    // Same for editing chrome and drag previews (selection outlines,
+    // anchors, handles, rubber bands): flagged isChrome / isPreview, kept
+    // out of snapshots and re-attached afterwards in index order.
+    const stashedChrome: Array<{ item: paper.Item; parent: paper.Item; index: number }> = []
+    const collect = (item: paper.Item): void => {
+      const children = ((item as any).children as paper.Item[] | undefined) ?? []
+      for (const child of children.slice()) collect(child as paper.Item)
+      const data = (item as any).data ?? {}
+      if (!(data.isChrome || data.isPreview)) return
+      const parent = item.parent as paper.Item | null
+      if (!parent) return
+      stashedChrome.push({ item, parent, index: parent.children.indexOf(item) })
+      item.remove()
+    }
+    for (const layer of this.project.layers.slice()) collect(layer as paper.Item)
     try {
       return this.project.exportJSON({ asString: true })
     } finally {
       if (grid && stashed) grid.addChildren(stashed)
+      const byParent = new Map<paper.Item, Array<{ item: paper.Item; index: number }>>()
+      for (const entry of stashedChrome) {
+        const list = byParent.get(entry.parent) ?? []
+        list.push({ item: entry.item, index: entry.index })
+        byParent.set(entry.parent, list)
+      }
+      for (const [parent, list] of byParent) {
+        list.sort((a, b) => a.index - b.index)
+        for (const { item, index } of list) {
+          parent.insertChild(Math.min(index, parent.children.length), item)
+        }
+      }
     }
   }
 
