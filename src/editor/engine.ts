@@ -1512,6 +1512,9 @@ export class EditorEngine {
     this.historySnapshots = []
     this.historyIndex = -1
     this.store.setHistory([], -1)
+    this.clearSelection()
+    this.clearIsolationState()
+    this.thumbCache?.clear?.()
   }
 
   // ===== Document (Save/Open/New) =====
@@ -1610,15 +1613,17 @@ export class EditorEngine {
 
   /** Reset the document to an empty state with the given page size. */
   newDocument(width: number, height: number): void {
+    const w = Number.isFinite(width) ? Math.min(16384, Math.max(1, Math.round(width))) : 1920
+    const h = Number.isFinite(height) ? Math.min(16384, Math.max(1, Math.round(height))) : 1080
     this.clearIsolationState()
     this.project.clear()
     this.setupProject()
     this.initLayers()
     this.pointActiveLayerAtRestoredStack()
-    this.store.setPageSize(width, height)
+    this.store.setPageSize(w, h)
     const boardId = this.genId()
     this.store.setArtboards([
-      { id: boardId, name: 'Artboard 1', x: 0, y: 0, width, height },
+      { id: boardId, name: 'Artboard 1', x: 0, y: 0, width: w, height: h },
     ])
     this.store.setActiveArtboard(boardId)
     this.clearSelection()
