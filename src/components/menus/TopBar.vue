@@ -238,6 +238,14 @@
               <el-input-number v-model="settings.pageHeight" :min="1" :max="16384" size="small" @change="onPageSizeChange" />
             </div>
           </div>
+
+          <div class="setting-row">
+            <div class="setting-label">
+              <span class="setting-name">Bleed</span>
+              <span class="setting-desc">Vector PDF page grows by this; crop marks print when above 0</span>
+            </div>
+            <el-input-number v-model="settings.bleed" :min="0" :max="100" size="small" @change="onBleedChange" />
+          </div>
         </div>
 
         <div class="setting-section">
@@ -372,6 +380,7 @@ const settings = reactive({
     store.activeArtboard?.width ?? store.pageSize.width,
     store.activeArtboard?.height ?? store.pageSize.height
   ),
+  bleed: store.bleed,
   nudgeStep: store.nudgeStep,
 })
 
@@ -641,7 +650,8 @@ async function onExportBoardsPdf() {
 /**
  * Export the active artboard as a vector PDF (paths/text stay selectable;
  * fonts are referenced, not embedded — stick to standard families for
- * fidelity). Falls back to the raster PDF when vector rendering fails.
+ * fidelity). The page grows by the document bleed with crop marks at the
+ * trim corners. Falls back to the raster PDF when vector rendering fails.
  */
 async function onExportVectorPdf() {
   const e = engineRef?.value
@@ -652,30 +662,34 @@ async function onExportVectorPdf() {
     return
   }
   try {
-    const svg = e.exportBoardVectorSVG(board)
+    const bleed = Number(store.bleed) || 0
+    const svg = e.exportBoardVectorSVG(board, { bleed, marks: true })
     if (!svg) {
       store.setStatusMessage('PDF export failed')
       return
     }
+    const pageWidth = board.width + bleed * 2
+    const pageHeight = board.height + bleed * 2
     const { jsPDF } = await import('jspdf')
     const { svg2pdf } = await import('svg2pdf.js')
     const doc = new jsPDF({
-      orientation: board.width >= board.height ? 'landscape' : 'portrait',
+      orientation: pageWidth >= pageHeight ? 'landscape' : 'portrait',
       unit: 'pt',
-      format: [board.width, board.height],
+      format: [pageWidth, pageHeight],
       compress: true,
     })
-    await svg2pdf(svg, doc, { x: 0, y: 0, width: board.width, height: board.height })
+    await svg2pdf(svg, doc, { x: 0, y: 0, width: pageWidth, height: pageHeight })
     doc.save('export-vector.pdf')
-    store.setStatusMessage('Vector PDF exported')
+    store.setStatusMessage(bleed > 0 ? `Vector PDF exported (bleed ${bleed})` : 'Vector PDF exported')
   } catch (err) {
     store.setStatusMessage('Vector PDF failed, use PDF (Raster)')
   }
 }
 
 /**
- * Export every artboard as one vector PDF page each. Boards keep their own
- * page sizes; fonts are referenced, not embedded.
+ * Export every artboard as one vector PDF page each (one-up imposition:
+ * every board is its own page). Boards keep their own page sizes plus the
+ * shared bleed; fonts are referenced, not embedded.
  */
 async function onExportBoardsVectorPdf() {
   const e = engineRef?.value
@@ -686,20 +700,23 @@ async function onExportBoardsVectorPdf() {
     return
   }
   try {
+    const bleed = Number(store.bleed) || 0
     const { jsPDF } = await import('jspdf')
     const { svg2pdf } = await import('svg2pdf.js')
     let doc = null as InstanceType<typeof jsPDF> | null
     let painted = 0
     for (const board of boards) {
-      const svg = e.exportBoardVectorSVG(board)
+      const svg = e.exportBoardVectorSVG(board, { bleed, marks: true })
       if (!svg) continue
-      const orientation = board.width >= board.height ? 'landscape' : 'portrait'
+      const pageWidth = board.width + bleed * 2
+      const pageHeight = board.height + bleed * 2
+      const orientation = pageWidth >= pageHeight ? 'landscape' : 'portrait'
       if (!doc) {
-        doc = new jsPDF({ orientation, unit: 'pt', format: [board.width, board.height], compress: true })
+        doc = new jsPDF({ orientation, unit: 'pt', format: [pageWidth, pageHeight], compress: true })
       } else {
-        doc.addPage([board.width, board.height], orientation)
+        doc.addPage([pageWidth, pageHeight], orientation)
       }
-      await svg2pdf(svg, doc, { x: 0, y: 0, width: board.width, height: board.height })
+      await svg2pdf(svg, doc, { x: 0, y: 0, width: pageWidth, height: pageHeight })
       painted++
     }
     if (!doc || painted === 0) {
@@ -1021,6 +1038,7 @@ function syncSettingsFromStore() {
   settings.snapPoint = store.snap.point
   settings.smartGuides = store.snap.smartGuides
   settings.nudgeStep = store.nudgeStep
+  settings.bleed = store.bleed
   syncPageSettings()
 }
 
@@ -1104,6 +1122,17 @@ function onPageOrientationSwap() {
   if (!board) return
   resizeActiveBoard(board.height, board.width)
   syncPageSettings()
+}
+
+/** Bleed change: persist, redraw the dashed bleed guides, confirm. */
+function onBleedChange(val: number | undefined) {
+  if (val === undefined || !Number.isFinite(val)) {
+    settings.bleed = store.bleed
+    return
+  }
+  store.setBleed(val)
+  settings.bleed = store.bleed
+  engineRef?.value?.refreshArtboards()
 }
 
 function onUnitChange(val: string) {

@@ -159,6 +159,18 @@ export class EditorEngine {
       rect.strokeWidth = (active ? 1.5 : 1) / zoom
       rect.data.isArtboard = true
       layer.addChild(rect)
+      const bleed = Number(this.store.bleed) || 0
+      if (bleed > 0) {
+        const bleedRect = new scope.Path.Rectangle(
+          new scope.Rectangle(board.x - bleed, board.y - bleed, board.width + bleed * 2, board.height + bleed * 2)
+        ) as paper.Path
+        bleedRect.fillColor = null
+        bleedRect.strokeColor = new scope.Color('#e5484d')
+        bleedRect.strokeWidth = 1 / zoom
+        bleedRect.dashArray = [4 / zoom, 3 / zoom]
+        bleedRect.data.isArtboard = true
+        layer.addChild(bleedRect)
+      }
       const label = new scope.PointText({
         point: new scope.Point(board.x, board.y - 6 / zoom),
         content: board.name,
@@ -1402,6 +1414,7 @@ export class EditorEngine {
       app: PROJECT_FILE_APP,
       version: PROJECT_FILE_VERSION,
       pageSize: { ...this.store.pageSize },
+      bleed: Number(this.store.bleed) || 0,
       snapshot: this.snapshotProject(),
       artboards: this.store.artboards.map((board) => ({ ...board })),
       activeArtboardId: this.store.activeArtboardId,
@@ -1452,6 +1465,9 @@ export class EditorEngine {
       pageSize.height > 0
     ) {
       this.store.setPageSize(pageSize.width, pageSize.height)
+    }
+    if (Number.isFinite(parsed.bleed)) {
+      this.store.setBleed(Number(parsed.bleed))
     }
     this.restoreArtboards(parsed.artboards, parsed.activeArtboardId, pageSize)
     this.pointActiveLayerAtRestoredStack()
@@ -2816,14 +2832,26 @@ export class EditorEngine {
 
   /**
    * Export one artboard's artwork as a vector SVG element clipped to the
-   * board rect (editor chrome layers hidden like raster export). The root
-   * carries width/height/viewBox of the board plus a white page rect, so
+   * board (editor chrome layers hidden like raster export). The root
+   * carries width/height/viewBox of the page plus a white page rect, so
    * vector-PDF renderers (svg2pdf) paint exactly one full-bleed page.
-   * Returns null when the board is invalid or exports nothing.
+   * With `bleed > 0` the page grows by the bleed on every side and
+   * `marks` draws hairline crop marks at the trim corners. Returns null
+   * when the board is invalid or exports nothing.
    */
-  exportBoardVectorSVG(board: { x: number; y: number; width: number; height: number }): SVGSVGElement | null {
+  exportBoardVectorSVG(
+    board: { x: number; y: number; width: number; height: number },
+    opts?: { bleed?: number; marks?: boolean }
+  ): SVGSVGElement | null {
     if (!board || !(board.width > 0) || !(board.height > 0)) return null
     if (!Number.isFinite(board.x) || !Number.isFinite(board.y)) return null
+    const bleed = Math.min(100, Math.max(0, Number(opts?.bleed) || 0))
+    const page = {
+      x: board.x - bleed,
+      y: board.y - bleed,
+      width: board.width + bleed * 2,
+      height: board.height + bleed * 2,
+    }
     const hiddenLayers: paper.Layer[] = []
     for (const layer of this.project.layers) {
       const data = (layer.data as any) ?? {}
@@ -2838,18 +2866,22 @@ export class EditorEngine {
       const root = exported as SVGSVGElement | null
       if (!root || typeof (root as any).setAttribute !== 'function') return null
       const fmt = (n: number): string => String(Math.round(n * 100) / 100)
-      root.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
-      root.setAttribute('width', fmt(board.width))
-      root.setAttribute('height', fmt(board.height))
-      root.setAttribute('viewBox', `${fmt(board.x)} ${fmt(board.y)} ${fmt(board.width)} ${fmt(board.height)}`)
+      const ns = 'http://www.w3.org/2000/svg'
+      root.setAttribute('xmlns', ns)
+      root.setAttribute('width', fmt(page.width))
+      root.setAttribute('height', fmt(page.height))
+      root.setAttribute('viewBox', `${fmt(page.x)} ${fmt(page.y)} ${fmt(page.width)} ${fmt(page.height)}`)
       // White page sheet behind the artwork (raster PDF shows the sheet too).
-      const page = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
-      page.setAttribute('x', fmt(board.x))
-      page.setAttribute('y', fmt(board.y))
-      page.setAttribute('width', fmt(board.width))
-      page.setAttribute('height', fmt(board.height))
-      page.setAttribute('fill', '#ffffff')
-      root.insertBefore(page, root.firstChild)
+      const sheet = document.createElementNS(ns, 'rect')
+      sheet.setAttribute('x', fmt(page.x))
+      sheet.setAttribute('y', fmt(page.y))
+      sheet.setAttribute('width', fmt(page.width))
+      sheet.setAttribute('height', fmt(page.height))
+      sheet.setAttribute('fill', '#ffffff')
+      root.insertBefore(sheet, root.firstChild)
+      if (opts?.marks && bleed > 0) {
+        this.appendCropMarks(root, ns, board, bleed)
+      }
       return root
     } catch {
       return null
@@ -2859,6 +2891,52 @@ export class EditorEngine {
       })
       this.scope.view.update()
     }
+  }
+
+  /**
+   * Hairline crop marks at the trim corners (drawn inside the bleed box,
+   * flush to the page edges). Imposition stays one-up: every board is its
+   * own PDF page.
+   */
+  private appendCropMarks(
+    root: SVGSVGElement,
+    ns: string,
+    trim: { x: number; y: number; width: number; height: number },
+    bleed: number
+  ): void {
+    const fmt = (n: number): string => String(Math.round(n * 100) / 100)
+    const len = Math.min(12, Math.max(3, bleed * 0.8))
+    const x0 = trim.x
+    const x1 = trim.x + trim.width
+    const y0 = trim.y
+    const y1 = trim.y + trim.height
+    const segs: Array<[number, number, number, number]> = [
+      // Top-left corner.
+      [x0 - bleed, y0, x0 - bleed + len, y0],
+      [x0, y0 - bleed, x0, y0 - bleed + len],
+      // Top-right corner.
+      [x1 + bleed - len, y0, x1 + bleed, y0],
+      [x1, y0 - bleed, x1, y0 - bleed + len],
+      // Bottom-left corner.
+      [x0 - bleed, y1, x0 - bleed + len, y1],
+      [x0, y1 + bleed - len, x0, y1 + bleed],
+      // Bottom-right corner.
+      [x1 + bleed - len, y1, x1 + bleed, y1],
+      [x1, y1 + bleed - len, x1, y1 + bleed],
+    ]
+    const group = document.createElementNS(ns, 'g')
+    group.setAttribute('fill', 'none')
+    group.setAttribute('stroke', '#000000')
+    group.setAttribute('stroke-width', '0.5')
+    for (const [ax, ay, bx, by] of segs) {
+      const line = document.createElementNS(ns, 'line')
+      line.setAttribute('x1', fmt(ax))
+      line.setAttribute('y1', fmt(ay))
+      line.setAttribute('x2', fmt(bx))
+      line.setAttribute('y2', fmt(by))
+      group.appendChild(line)
+    }
+    root.appendChild(group)
   }
 
   // ===== Object order / visibility / select-same =====

@@ -162,6 +162,8 @@ export const useEditorStore = defineStore('editor', {
     statusMessage: '',
     /** Page settings (default size for new documents and artboards) */
     pageSize: { width: 1920, height: 1080 },
+    /** Print bleed in document units (vector PDF page grows by this; 0 = trim only) */
+    bleed: 0,
     /** Artboard list */
     artboards: [] as ArtboardMeta[],
     /** Currently active artboard id */
@@ -377,6 +379,12 @@ export const useEditorStore = defineStore('editor', {
     /** Set page size */
     setPageSize(width: number, height: number) {
       this.pageSize = { width, height }
+    },
+
+    /** Set print bleed (clamped to 0–100 document units) */
+    setBleed(bleed: number) {
+      if (!Number.isFinite(bleed)) return
+      this.bleed = Math.min(100, Math.max(0, bleed))
     },
 
     /** Replace the artboard list (active id falls back to the first board) */

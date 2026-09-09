@@ -352,6 +352,8 @@ export interface ProjectFileData {
   app: string
   version: number
   pageSize: { width: number; height: number }
+  /** Print bleed in document units (absent/legacy means 0). */
+  bleed?: number
   /** Paper.js project JSON string captured via project.exportJSON(). */
   snapshot: string
   /** Artboards (absent in files predating multi-artboard support). */
