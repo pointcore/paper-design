@@ -4329,6 +4329,9 @@ export class EditorEngine {
     return navigator.clipboard ?? null
   }
 
+  /** Payload of our last OS clipboard write (external-copy detection). */
+  private lastSystemWrite = ''
+
   /**
    * Best-effort copy of the current selection to the OS clipboard as SVG so
    * artwork can move to other applications. Falls back from the SVG MIME
@@ -4338,6 +4341,9 @@ export class EditorEngine {
   async copyToSystemClipboard(): Promise<boolean> {
     const svg = this.exportSelectionSVG()
     if (!svg) return false
+    // Remember our own payload so pastes can tell external SVG copies
+    // apart from the echo of our last in-app copy.
+    this.lastSystemWrite = svg
     const clipboard = this.systemClipboard()
     if (!clipboard) return false
     try {
@@ -4378,17 +4384,39 @@ export class EditorEngine {
   }
 
   /**
-   * Paste entry point: OS clipboard SVG first, internal clipboard fallback.
-   * Denied or unavailable OS access silently falls back so in-app
-   * copy/paste keeps working everywhere.
+   * Paste entry point: the lossless internal clipboard first (OS
+   * round-tripping through SVG drops Paper-only state like pattern fills
+   * and thread links), OS clipboard SVG for cross-app pastes, nothing when
+   * both are empty. An OS SVG payload we never wrote shadows stale
+   * internal content (copied in-app, then copied elsewhere). Denied OS
+   * access silently falls through.
    */
   async pasteWithSystemFallback(): Promise<void> {
+    if (this.clipboardItems.length > 0) {
+      try {
+        const clipboard = this.systemClipboard()
+        if (clipboard?.readText) {
+          const text = await clipboard.readText()
+          if (
+            text &&
+            /<svg[\s>]/i.test(text.trim().slice(0, 4096)) &&
+            text !== this.lastSystemWrite &&
+            (await this.pasteFromSystemClipboard())
+          ) {
+            return
+          }
+        }
+      } catch {
+        // Denied or unavailable OS access -> internal paste below.
+      }
+      this.pasteClipboard()
+      return
+    }
     try {
       if (await this.pasteFromSystemClipboard()) return
     } catch {
-      // Denied or unavailable OS access -> internal fallback below.
+      // Denied or unavailable OS access -> nothing to paste below.
     }
-    this.pasteClipboard()
   }
 
   deleteSelected() {
