@@ -478,11 +478,7 @@ function onFileCmd(cmd: string) {
           const svgStr = typeof result === 'string' ? result : String(result)
           const blob = new Blob([svgStr], { type: 'image/svg+xml' })
           const url = URL.createObjectURL(blob)
-          const a = document.createElement('a')
-          a.href = url
-          a.download = 'export.svg'
-          a.click()
-          URL.revokeObjectURL(url)
+          downloadHref(url, 'export.svg')
           store.setStatusMessage('SVG exported')
         } finally {
           // Restore layer visibility
@@ -539,8 +535,24 @@ function onFileCmd(cmd: string) {
   }
 }
 
-/** Read a file as a data URL (embeddable, unlike object URLs). */
-function readFileAsDataURL(file: File): Promise<string> {
+/**
+ * Trigger a download that also works in Firefox (the anchor must be in the
+ * DOM when clicked) and keeps the object URL alive until the download
+ * starts instead of revoking it synchronously.
+ */
+function downloadHref(href: string, filename: string) {
+  const a = document.createElement('a')
+  a.href = href
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  if (href.startsWith('blob:')) {
+    setTimeout(() => URL.revokeObjectURL(href), 4000)
+  }
+}
+
+/** Read a file as a data URL (embeddable, unlike object URLs). */function readFileAsDataURL(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => resolve(reader.result as string)
@@ -569,10 +581,7 @@ function onExportRasterConfirm() {
       store.setStatusMessage('Raster export failed')
       return
     }
-    const a = document.createElement('a')
-    a.href = dataUrl
-    a.download = `export.${exportForm.format}`
-    a.click()
+    downloadHref(dataUrl, `export.${exportForm.format}`)
     exportVisible.value = false
     store.setStatusMessage(`Raster exported (${exportForm.format.toUpperCase()} ${exportForm.scale}x)`)
   } catch (err) {

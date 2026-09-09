@@ -1514,8 +1514,12 @@ export class EditorEngine {
     const a = document.createElement('a')
     a.href = url
     a.download = 'project.vec.json'
+    // Firefox ignores clicks on detached anchors; the delayed revoke keeps
+    // large files alive until the download starts.
+    document.body.appendChild(a)
     a.click()
-    URL.revokeObjectURL(url)
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 4000)
     this.showStatus('Project saved')
   }
 
