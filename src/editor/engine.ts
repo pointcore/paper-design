@@ -621,30 +621,40 @@ export class EditorEngine {
   private lastGridKey = ''
 
   /**
-   * Show / hide the grid and (re)draw the grid lines if needed.
-   * The grid is drawn on a dedicated layer at the bottom of the stack
-   * so it sits behind all user artwork.
+   * Grid layer, adopted or created on demand. Never leaves a duplicate
+   * behind (old snapshots may restore one) and never steals the active
+   * layer — `new Layer()` activates itself, which used to divert later
+   * artwork into the grid layer after undo / new-document flows.
    */
-  setGridVisible(visible: boolean, gridSize: number = 10) {
-    if (!this.gridLayer || !this.gridLayer.parent) {
-      this.gridLayer = new this.scope.Layer()
-      this.gridLayer.name = 'grid'
-      this.gridLayer.locked = true
-      this.gridLayer.data.isUserLayer = false
-      this.gridLayer.data.isGridLayer = true
-      // Ensure the grid layer sits at the very bottom of the stack
-      this.gridLayer.sendToBack()
+  private ensureGridLayer(): paper.Layer {
+    const flagged = this.project.layers.filter((l) => (l.data as any)?.isGridLayer)
+    let layer =
+      this.gridLayer && this.gridLayer.parent
+        ? this.gridLayer
+        : (flagged[0] as paper.Layer | undefined) ?? null
+    for (const dup of flagged) {
+      if (dup !== layer) dup.remove()
     }
-
-    this.gridLayer.visible = visible
-    if (visible) {
-      this.lastGridKey = ''
-      this.drawGrid(gridSize)
-    } else {
-      this.gridLayer.removeChildren()
-      this.lastGridKey = ''
+    if (!layer || !layer.parent) {
+      const prevActive = this.project.activeLayer
+      layer = new this.scope.Layer()
+      layer.name = 'grid'
+      layer.locked = true
+      layer.data.isUserLayer = false
+      layer.data.isGridLayer = true
+      if (prevActive && prevActive.parent) prevActive.activate()
+      else {
+        const fallback = this.getActiveLayer()
+        if (fallback && fallback.parent) fallback.activate()
+      }
     }
-    this.scope.view.update()
+    layer.name = 'grid'
+    layer.locked = true
+    layer.data.isUserLayer = false
+    layer.data.isGridLayer = true
+    layer.sendToBack()
+    this.gridLayer = layer
+    return layer
   }
 
   /**
@@ -679,11 +689,19 @@ export class EditorEngine {
 
     this.gridLayer.removeChildren()
 
-    const gridColor = new this.scope.Color('#555555')
-    gridColor.alpha = 0.25
-    const style = {
-      strokeColor: gridColor,
-      strokeWidth: 1 / (v.zoom || 1),
+    const minorColor = new this.scope.Color('#555555')
+    minorColor.alpha = 0.18
+    const majorColor = new this.scope.Color('#555555')
+    majorColor.alpha = 0.4
+    const lineWidth = 1 / (v.zoom || 1)
+    const minorStyle = {
+      strokeColor: minorColor,
+      strokeWidth: lineWidth,
+      strokeCap: 'round' as 'round' | 'square' | 'butt',
+    }
+    const majorStyle = {
+      strokeColor: majorColor,
+      strokeWidth: lineWidth,
       strokeCap: 'round' as 'round' | 'square' | 'butt',
     }
 
@@ -691,6 +709,8 @@ export class EditorEngine {
     const right = b.x + b.width
     const top = Math.floor(b.y / step) * step
     const bottom = b.y + b.height
+    /** AI-style major line every 5 steps (display only; snap stays on base). */
+    const isMajor = (coord: number): boolean => Math.round(coord / step) % 5 === 0
 
     // Draw vertical grid lines
     for (let x = left; x <= right; x += step) {
@@ -698,7 +718,7 @@ export class EditorEngine {
         new this.scope.Point(x, top),
         new this.scope.Point(x, bottom)
       )
-      line.set(style)
+      line.set(isMajor(x) ? majorStyle : minorStyle)
       line.data.isGridItem = true
       this.gridLayer.addChild(line)
     }
@@ -709,7 +729,7 @@ export class EditorEngine {
         new this.scope.Point(left, y),
         new this.scope.Point(right, y)
       )
-      line.set(style)
+      line.set(isMajor(y) ? majorStyle : minorStyle)
       line.data.isGridItem = true
       this.gridLayer.addChild(line)
     }
@@ -741,15 +761,8 @@ export class EditorEngine {
     this.gridRaf = requestAnimationFrame(() => {
       this.gridRaf = 0
       if (!this.store.view.showGrid) return
-      if (!this.gridLayer || !this.gridLayer.parent) {
-        this.gridLayer = new this.scope.Layer()
-        this.gridLayer.name = 'grid'
-        this.gridLayer.locked = true
-        this.gridLayer.data.isUserLayer = false
-        this.gridLayer.data.isGridLayer = true
-        this.gridLayer.sendToBack()
-      }
-      this.gridLayer.visible = true
+      const layer = this.ensureGridLayer()
+      layer.visible = true
       this.drawGrid(this.store.snap.gridSize || 10)
       this.scope.view.update()
     })
@@ -1299,7 +1312,17 @@ export class EditorEngine {
   // ===== History =====
 
   snapshotProject(): string {
-    return this.project.exportJSON({ asString: true })
+    // Grid lines are regenerable view cache: keep them out of history and
+    // project files (they used to bloat snapshots and resurrect as stale
+    // duplicates after undo). Children are stashed and restored in order.
+    const grid =
+      this.gridLayer && this.gridLayer.parent ? this.gridLayer : null
+    const stashed = grid ? grid.removeChildren() : null
+    try {
+      return this.project.exportJSON({ asString: true })
+    } finally {
+      if (grid && stashed) grid.addChildren(stashed)
+    }
   }
 
   restoreSnapshot(snapshot: string) {

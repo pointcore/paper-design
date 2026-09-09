@@ -272,9 +272,13 @@ function onResize() {
   // Update canvas position and size
   canvasRef.value.style.left = rulerOffset + 'px'
   canvasRef.value.style.top = rulerOffset + 'px'
-  canvasRef.value.width = Math.max(1, rect.width - rulerOffset)
-  canvasRef.value.height = Math.max(1, rect.height - rulerOffset)
+  const width = Math.max(1, rect.width - rulerOffset)
+  const height = Math.max(1, rect.height - rulerOffset)
 
+  // Go through Paper's viewSize setter: assigning canvas.width directly
+  // leaves Paper's internal _viewSize (and view.bounds) stale, so the grid
+  // painted for the old viewport and zoom-to-cursor anchored off-screen.
+  engine.scope.view.viewSize = new engine.scope.Size(width, height)
   engine.scope.view.update()
   // Canvas backing-store size changed -> Paper's bounds changed with it.
   // Re-mirror the transform so the next pan starts from the live view.
