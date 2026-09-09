@@ -1222,22 +1222,31 @@ function onTransformChange() {
   if (!Number.isFinite(posW.value) || !Number.isFinite(posH.value)) return
   if (posW.value <= 0 || posH.value <= 0) return
   // X/Y address the reference point; W/H scale about it so it stays fixed.
+  // Multi-selections act on their united bounds (AI): every member keeps
+  // its relative layout instead of being stretched to the same size.
   const ref = store.referencePoint
-  const items = e.getSelection()
-  items.forEach((item: any) => {
-    if (item.locked) return
+  const items = (e.getSelection() as any[]).filter((item) => {
+    if (!item || item.locked) return false
     const b = item.bounds
-    if (!b || b.width <= 0 || b.height <= 0) return
-    const anchor = e.referencePointForRect(b, ref)
-    const dx = posX.value - anchor.x
-    const dy = posY.value - anchor.y
+    return !!b && b.width > 0 && b.height > 0
+  })
+  if (items.length === 0) return
+  let united = items[0].bounds.clone()
+  for (let i = 1; i < items.length; i++) {
+    united = united.unite(items[i].bounds)
+  }
+  if (!united || united.width <= 0 || united.height <= 0) return
+  const anchor = e.referencePointForRect(united, ref)
+  const dx = posX.value - anchor.x
+  const dy = posY.value - anchor.y
+  const scaleX = posW.value / united.width
+  const scaleY = posH.value / united.height
+  const pivot = new e.scope.Point(posX.value, posY.value)
+  items.forEach((item: any) => {
     if (dx !== 0 || dy !== 0) {
       item.position = item.position.add(new e!.scope.Point(dx, dy))
     }
-    const current = item.bounds
-    const scaleX = current.width !== 0 ? posW.value / current.width : 1
-    const scaleY = current.height !== 0 ? posH.value / current.height : 1
-    item.scale(scaleX, scaleY, new e!.scope.Point(posX.value, posY.value))
+    item.scale(scaleX, scaleY, pivot)
     e.refreshItemGradient(item)
   })
   e.scope.view.update()
@@ -1344,14 +1353,13 @@ function onBoolean(op: BooleanOperation) {
   }
 }
 
-/** Read the first selected item bounds into the transform fields. */
+/** Read the selection bounds (united for multi-selections) into the fields. */
 function syncTransformFromSelection() {
   const e = getEngine()
   if (!e || !store.hasSelection) return
   const items = e.getSelection()
   if (items.length === 0) return
-  const item = items[0] as any
-  const b = item.bounds
+  const b = (items.length > 1 ? e.getSelectionBounds() : null) ?? (items[0] as any).bounds
   if (!b) return
   const anchor = e.referencePointForRect(b, store.referencePoint)
   posX.value = Math.round(anchor.x * 10) / 10
