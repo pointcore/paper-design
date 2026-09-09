@@ -12,8 +12,10 @@
               <el-dropdown-item command="save">Save</el-dropdown-item>
               <el-dropdown-item command="export" divided>Export SVG</el-dropdown-item>
               <el-dropdown-item command="exportRaster">Export Raster...</el-dropdown-item>
-              <el-dropdown-item command="exportPdf">Export PDF</el-dropdown-item>
-              <el-dropdown-item command="exportBoardsPdf">Export All Boards PDF</el-dropdown-item>
+              <el-dropdown-item command="exportPdf">Export PDF (Raster)</el-dropdown-item>
+              <el-dropdown-item command="exportBoardsPdf">Export All Boards PDF (Raster)</el-dropdown-item>
+              <el-dropdown-item command="exportVectorPdf">Export PDF (Vector)</el-dropdown-item>
+              <el-dropdown-item command="exportBoardsVectorPdf">Export All Boards PDF (Vector)</el-dropdown-item>
               <el-dropdown-item command="import">Import SVG...</el-dropdown-item>
               <el-dropdown-item command="place">Place Image...</el-dropdown-item>
             </el-dropdown-menu>
@@ -425,6 +427,12 @@ function onFileCmd(cmd: string) {
     case 'exportBoardsPdf':
       void onExportBoardsPdf()
       break
+    case 'exportVectorPdf':
+      void onExportVectorPdf()
+      break
+    case 'exportBoardsVectorPdf':
+      void onExportBoardsVectorPdf()
+      break
     case 'export':
       if (e) {
         // Temporarily hide non-user layers (grid / overlay / annotation / guides)
@@ -620,6 +628,81 @@ async function onExportBoardsPdf() {
   } finally {
     store.setActiveArtboard(previousActive)
     e.refreshArtboards()
+  }
+}
+
+/**
+ * Export the active artboard as a vector PDF (paths/text stay selectable;
+ * fonts are referenced, not embedded — stick to standard families for
+ * fidelity). Falls back to the raster PDF when vector rendering fails.
+ */
+async function onExportVectorPdf() {
+  const e = engineRef?.value
+  if (!e) return
+  const board = store.activeArtboard ?? store.artboards[0]
+  if (!board || board.width < 1 || board.height < 1) {
+    store.setStatusMessage('Nothing to export')
+    return
+  }
+  try {
+    const svg = e.exportBoardVectorSVG(board)
+    if (!svg) {
+      store.setStatusMessage('PDF export failed')
+      return
+    }
+    const { jsPDF } = await import('jspdf')
+    const { svg2pdf } = await import('svg2pdf.js')
+    const doc = new jsPDF({
+      orientation: board.width >= board.height ? 'landscape' : 'portrait',
+      unit: 'pt',
+      format: [board.width, board.height],
+      compress: true,
+    })
+    await svg2pdf(svg, doc, { x: 0, y: 0, width: board.width, height: board.height })
+    doc.save('export-vector.pdf')
+    store.setStatusMessage('Vector PDF exported')
+  } catch (err) {
+    store.setStatusMessage('Vector PDF failed, use PDF (Raster)')
+  }
+}
+
+/**
+ * Export every artboard as one vector PDF page each. Boards keep their own
+ * page sizes; fonts are referenced, not embedded.
+ */
+async function onExportBoardsVectorPdf() {
+  const e = engineRef?.value
+  if (!e) return
+  const boards = store.artboards.filter((b) => b.width > 0 && b.height > 0)
+  if (boards.length === 0) {
+    store.setStatusMessage('Nothing to export')
+    return
+  }
+  try {
+    const { jsPDF } = await import('jspdf')
+    const { svg2pdf } = await import('svg2pdf.js')
+    let doc = null as InstanceType<typeof jsPDF> | null
+    let painted = 0
+    for (const board of boards) {
+      const svg = e.exportBoardVectorSVG(board)
+      if (!svg) continue
+      const orientation = board.width >= board.height ? 'landscape' : 'portrait'
+      if (!doc) {
+        doc = new jsPDF({ orientation, unit: 'pt', format: [board.width, board.height], compress: true })
+      } else {
+        doc.addPage([board.width, board.height], orientation)
+      }
+      await svg2pdf(svg, doc, { x: 0, y: 0, width: board.width, height: board.height })
+      painted++
+    }
+    if (!doc || painted === 0) {
+      store.setStatusMessage('PDF export failed')
+      return
+    }
+    doc.save('export-boards-vector.pdf')
+    store.setStatusMessage(`Vector PDF exported (${painted} of ${boards.length} boards)`)
+  } catch (err) {
+    store.setStatusMessage('Vector PDF failed, use PDF (Raster)')
   }
 }
 

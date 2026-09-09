@@ -17,6 +17,7 @@
     "paper": "^0.12.17",
     "paperjs-offset": "^2.2.1",
     "pinia": "^2.1.7",
+    "svg2pdf.js": "^2.8.1",
     "vue": "^3.4.21"
   },
   "devDependencies": {

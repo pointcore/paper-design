@@ -2781,6 +2781,53 @@ export class EditorEngine {
     }
   }
 
+  /**
+   * Export one artboard's artwork as a vector SVG element clipped to the
+   * board rect (editor chrome layers hidden like raster export). The root
+   * carries width/height/viewBox of the board plus a white page rect, so
+   * vector-PDF renderers (svg2pdf) paint exactly one full-bleed page.
+   * Returns null when the board is invalid or exports nothing.
+   */
+  exportBoardVectorSVG(board: { x: number; y: number; width: number; height: number }): SVGSVGElement | null {
+    if (!board || !(board.width > 0) || !(board.height > 0)) return null
+    if (!Number.isFinite(board.x) || !Number.isFinite(board.y)) return null
+    const hiddenLayers: paper.Layer[] = []
+    for (const layer of this.project.layers) {
+      const data = (layer.data as any) ?? {}
+      if (!data.isUserLayer && layer.visible) {
+        layer.visible = false
+        hiddenLayers.push(layer)
+      }
+    }
+    try {
+      this.scope.view.update()
+      const exported = (this.project as any).exportSVG({ asString: false }) as unknown
+      const root = exported as SVGSVGElement | null
+      if (!root || typeof (root as any).setAttribute !== 'function') return null
+      const fmt = (n: number): string => String(Math.round(n * 100) / 100)
+      root.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+      root.setAttribute('width', fmt(board.width))
+      root.setAttribute('height', fmt(board.height))
+      root.setAttribute('viewBox', `${fmt(board.x)} ${fmt(board.y)} ${fmt(board.width)} ${fmt(board.height)}`)
+      // White page sheet behind the artwork (raster PDF shows the sheet too).
+      const page = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
+      page.setAttribute('x', fmt(board.x))
+      page.setAttribute('y', fmt(board.y))
+      page.setAttribute('width', fmt(board.width))
+      page.setAttribute('height', fmt(board.height))
+      page.setAttribute('fill', '#ffffff')
+      root.insertBefore(page, root.firstChild)
+      return root
+    } catch {
+      return null
+    } finally {
+      hiddenLayers.forEach((layer) => {
+        layer.visible = true
+      })
+      this.scope.view.update()
+    }
+  }
+
   // ===== Object order / visibility / select-same =====
 
   /**
