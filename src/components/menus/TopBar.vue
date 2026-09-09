@@ -406,14 +406,20 @@ function onFileCmd(cmd: string) {
   blurMenuFocus()
   const e = engineRef?.value
   switch (cmd) {
-    case 'new':
+    case 'new': {
+      // New documents inherit the active artboard size (what Canvas
+      // Settings shows), not the stale pageSize default from an old file.
+      const board = store.activeArtboard
+      const width = board?.width ?? store.pageSize.width
+      const height = board?.height ?? store.pageSize.height
       if (e) {
-        e.newDocument(store.pageSize.width, store.pageSize.height)
+        e.newDocument(width, height)
         store.setStatusMessage('New document')
       } else {
-        store.setPageSize(1920, 1080)
+        store.setPageSize(width, height)
       }
       break
+    }
     case 'save': {
       if (!e) break
       try {
