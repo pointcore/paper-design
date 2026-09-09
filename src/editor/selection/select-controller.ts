@@ -1044,6 +1044,7 @@ export class SelectController {
       const parent = path.parent
       const at = parent.children.indexOf(path)
       const clone = path.clone({ insert: false }) as paper.Path
+      engine.restampCloneTree(clone)
       const data = (clone.data as any) ?? {}
       data.id = engine.genId()
       data.isUserItem = true

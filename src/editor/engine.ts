@@ -406,14 +406,7 @@ export class EditorEngine {
     const clone = source.clone({ insert: false }) as paper.Layer
     clone.data.layerId = this.genId()
     clone.name = `${source.name || 'Layer'} copy`
-    const restamp = (item: paper.Item): void => {
-      if ((item.data as any)?.id) (item.data as any).id = this.genId()
-      const children = (item as any).children as paper.Item[] | undefined
-      if (children) {
-        for (const child of children) restamp(child)
-      }
-    }
-    restamp(clone)
+    this.restampCloneTree(clone)
     clone.insertAbove(source)
     clone.activate()
     this.syncLayersToStore()
@@ -3944,15 +3937,36 @@ export class EditorEngine {
     const items = this.getSelection()
     const clones: paper.Item[] = []
     const activeLayer = this.getActiveLayer()
+    if (!activeLayer) return clones
     for (const item of items) {
       const clone = item.clone()
       activeLayer.addChild(clone)
+      this.restampCloneTree(clone)
       clone.data.id = this.genId()
       clone.data.isUserItem = true
       clone.selected = true
       clones.push(clone)
     }
     return clones
+  }
+
+  /**
+   * Assign fresh document ids across a cloned tree. Paper clones deep-copy
+   * `data`, so without this the clone's descendants collide with the
+   * original's ids (layer tree, thumbnails and id lookups hit the wrong
+   * item). Only items that already carry a string id are restamped —
+   * id-less tiles/chrome must stay id-less.
+   */
+  restampCloneTree(root: paper.Item): void {
+    const walk = (item: paper.Item): void => {
+      const data = (item as any).data
+      if (data && typeof data.id === 'string') data.id = this.genId()
+      const children = (item as any).children as paper.Item[] | undefined
+      if (children) {
+        for (const child of children) walk(child)
+      }
+    }
+    walk(root)
   }
 
   // ===== Clipboard =====
@@ -3992,6 +4006,7 @@ export class EditorEngine {
     for (const source of this.clipboardItems) {
       const clone = source.clone({ insert: false })
       layer.addChild(clone)
+      this.restampCloneTree(clone)
       clone.data.id = this.genId()
       clone.data.isUserItem = true
       if (where === 'front') clone.bringToFront()
@@ -4021,6 +4036,7 @@ export class EditorEngine {
     for (const source of this.clipboardItems) {
       const clone = source.clone({ insert: false })
       layer.addChild(clone)
+      this.restampCloneTree(clone)
       clone.data.id = this.genId()
       clone.data.isUserItem = true
       clone.position = (clone.position as paper.Point).add(offset)
@@ -4063,8 +4079,10 @@ export class EditorEngine {
     ) as paper.Item[]
     if (items.length === 0) return false
     for (const item of items) {
-      item.data.id = this.genId()
-      item.data.isUserItem = true
+      this.restampCloneTree(item)
+      if (!(item as any).data) (item as any).data = {}
+      ;((item as any).data as any).id = this.genId()
+      ;((item as any).data as any).isUserItem = true
       layer.addChild(item)
     }
     this.syncLayersToStore()
