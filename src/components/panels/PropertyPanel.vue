@@ -541,6 +541,24 @@ const gradientType = ref<'linear' | 'radial'>('linear')
 // Editable gradient stops (offsets in percent for the inputs).
 const gradientStops = ref<Array<{ offset: number; color: string }>>([])
 
+/** Mirror the first selected item's solid paints into the Appearance controls. */
+function syncStyleFromSelection() {
+  const e = getEngine()
+  if (!e || !store.hasSelection) return
+  const items = e.getSelection()
+  if (items.length === 0) return
+  const style = e.getStyleFromItem(items[0])
+  fillColorValue.value = style.fillColor ?? ''
+  strokeColorValue.value = style.strokeColor ?? ''
+  strokeWidth.value = style.strokeWidth
+  lineCap.value = style.lineCap
+  lineJoin.value = style.lineJoin
+  miterLimit.value = style.miterLimit
+  dashPattern.value = (style.dashArray ?? []).join(' ')
+  blendMode.value = style.blendMode
+  opacityValue.value = Math.round((style.opacity ?? 1) * 100)
+}
+
 /** Mirror the store gradient into the editable stop list. */
 function syncGradientFromStore() {
   const gradient = store.style.gradient
@@ -1346,6 +1364,7 @@ function syncTransformFromSelection() {
 watch(() => store.selectedItemIds, () => {
   syncTransformFromSelection()
   syncGradientFromStore()
+  syncStyleFromSelection()
   syncTextFromSelection()
   syncPatternFromSelection()
   syncSpotFromSelection()

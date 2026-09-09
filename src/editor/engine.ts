@@ -1015,6 +1015,9 @@ export class EditorEngine {
     style.strokeWidth = s.strokeWidth ?? style.strokeWidth
     style.lineCap = (s.strokeCap as any) ?? style.lineCap
     style.lineJoin = (s.strokeJoin as any) ?? style.lineJoin
+    style.miterLimit = s.miterLimit ?? style.miterLimit
+    style.dashArray = Array.isArray(s.dashArray) ? [...s.dashArray] : style.dashArray
+    style.blendMode = (s.blendMode as any) ?? style.blendMode
     style.opacity = s.opacity ?? style.opacity
     return style
   }
