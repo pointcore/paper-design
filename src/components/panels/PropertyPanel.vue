@@ -311,7 +311,30 @@
               <el-radio-button value="left">Left</el-radio-button>
               <el-radio-button value="center">Center</el-radio-button>
               <el-radio-button value="right">Right</el-radio-button>
+              <el-radio-button value="justify">Justify</el-radio-button>
             </el-radio-group>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label-sm">Leading</span>
+            <el-input-number v-model="leadingValue" :min="1" :max="1000" size="small" controls-position="right" :disabled="leadingAuto" @change="onLeadingChange" />
+            <el-button size="small" class="fmt-btn" :type="leadingAuto ? 'primary' : ''" title="Auto leading (1.2x)" @click="toggleLeadingAuto">A</el-button>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label-sm">Tracking</span>
+            <el-input-number v-model="trackingValue" :min="-200" :max="1000" size="small" controls-position="right" @change="onTrackingChange" />
+            <span class="unit">/1000em</span>
+          </div>
+          <div v-if="isAreaSelected">
+            <div class="prop-row">
+              <span class="prop-label-sm">Frame</span>
+              <el-input-number v-model="frameW" :min="5" :max="5000" :precision="1" size="small" controls-position="right" @change="onFrameSizeChange" />
+              <el-input-number v-model="frameH" :min="5" :max="5000" :precision="1" size="small" controls-position="right" @change="onFrameSizeChange" />
+            </div>
+            <div v-if="overflowHint" class="ai-desc">{{ overflowHint }}</div>
+            <div v-if="hasOverflow" class="prop-row">
+              <el-button size="small" plain class="wide-btn" @click="onFlowOverflow">Flow Overflow to New Frame</el-button>
+            </div>
+            <div v-if="threadHint" class="ai-desc">{{ threadHint }}</div>
           </div>
         </div>
       </div>
@@ -668,6 +691,34 @@ const fontSize = ref(12)
 const isBold = ref(false)
 const isItalic = ref(false)
 const textAlign = ref<TextAlign>('left')
+const leadingAuto = ref(true)
+const leadingValue = ref(14)
+const trackingValue = ref(0)
+// Area-frame editing (single area-text selection only).
+const isAreaSelected = ref(false)
+const frameW = ref(0)
+const frameH = ref(0)
+const hasOverflow = ref(false)
+const overflowHint = ref('')
+const threadHint = ref('')
+
+/** Text controller behind the type tools (area rewrap + threading). */
+function textController() {
+  const e = getEngine()
+  if (!e) return null
+  try {
+    return e.getController('type') as {
+      selectedAreaItem: () => any
+      areaInfo: (item: any) => { frame: { x: number; y: number; width: number; height: number }; raw: string } | null
+      areaOverflow: (item: any) => { lines: number; fits: number; overflowChars: number }
+      resizeAreaItem: (item: any, w: number, h: number) => boolean
+      flowOverflowToNewFrame: (item: any) => boolean
+      effectiveLeading: () => number
+    } | null
+  } catch {
+    return null
+  }
+}
 
 /** Object-type label shown under the tab, like AI ("Path", "Text", ...). */
 const selectionLabel = computed(() => {
@@ -703,13 +754,53 @@ function getSelectedText(): paper.PointText | null {
 function syncTextFromSelection() {
   const item = getSelectedText()
   isTextSelected.value = !!item
+  isAreaSelected.value = false
+  hasOverflow.value = false
+  overflowHint.value = ''
+  threadHint.value = ''
   if (!item) return
   fontFamily.value = (item.fontFamily as string) || 'Arial'
   fontSize.value = Number(item.fontSize) || 12
   isBold.value = String(item.fontWeight) === 'bold' || Number(item.fontWeight) >= 600
   isItalic.value = ((item as any).fontStyle as string) === 'italic'
   const j = (item as any).justification as string
-  textAlign.value = j === 'center' || j === 'right' ? j : 'left'
+  const storedAlign = store.paragraphStyle.align
+  textAlign.value = j === 'center' || j === 'right' ? j : (storedAlign === 'justify' ? 'justify' : 'left')
+  const leading = Number((item as any).leading) || 0
+  if (leading > 0) {
+    leadingValue.value = Math.round(leading * 10) / 10
+    leadingAuto.value = Math.abs(leading - fontSize.value * 1.2) < 0.05 && store.charStyle.autoLeading
+  } else {
+    leadingValue.value = Math.round(fontSize.value * 1.2 * 10) / 10
+    leadingAuto.value = true
+  }
+  trackingValue.value = Number(store.charStyle.tracking) || 0
+  syncAreaFromSelection()
+}
+
+/** Read area-frame size + overflow state for a single area-text selection. */
+function syncAreaFromSelection() {
+  const tc = textController()
+  const e = getEngine()
+  if (!tc || !e) return
+  const items = e.getSelection()
+  const single = items.length === 1 ? items[0] as any : null
+  const isArea = !!single && single instanceof e.scope.PointText && (single.data as any)?.textMode === 'area'
+  isAreaSelected.value = isArea
+  if (!isArea) return
+  const info = tc.areaInfo(single)
+  if (!info) return
+  frameW.value = Math.round(info.frame.width * 10) / 10
+  frameH.value = Math.round(info.frame.height * 10) / 10
+  const over = tc.areaOverflow(single)
+  hasOverflow.value = over.overflowChars > 0
+  overflowHint.value = hasOverflow.value
+    ? `${over.lines - over.fits} line(s) overflow (${over.overflowChars} chars)`
+    : `${over.lines} line(s) fit`
+  const data = (single.data as any) ?? {}
+  if (data.threadNext || data.threadPrev) {
+    threadHint.value = 'Threaded frame (one-way v1: edits do not auto-reflow downstream)'
+  }
 }
 
 /** Apply a style change to every selected point text and record history. */
@@ -733,11 +824,21 @@ function onFontFamilyChange(val: string) {
 
 function onFontSizeChange(val: number | undefined) {
   if (!val) return
-  store.updateCharStyle({ fontSize: val, leading: val * 1.2 })
-  applyTextStyle((item) => {
-    item.fontSize = val
-    item.leading = val * 1.2
-  }, 'Change Font Size')
+  if (leadingAuto.value) {
+    const leading = val * 1.2
+    leadingValue.value = Math.round(leading * 10) / 10
+    store.updateCharStyle({ fontSize: val, leading, autoLeading: true })
+    applyTextStyle((item) => {
+      item.fontSize = val
+      item.leading = leading
+    }, 'Change Font Size')
+  } else {
+    store.updateCharStyle({ fontSize: val })
+    applyTextStyle((item) => {
+      item.fontSize = val
+    }, 'Change Font Size')
+  }
+  syncAreaFromSelection()
 }
 
 function toggleBold() {
@@ -755,9 +856,104 @@ function toggleItalic() {
 }
 
 function onAlignChange(val: TextAlign) {
+  // Paper.js justification has no justify: it renders as left (stored on
+  // the paragraph style so SVG/export can honour it later).
   const justification = val === 'center' ? 'center' : val === 'right' ? 'right' : 'left'
   store.updateParagraphStyle({ align: val })
   applyTextStyle((item) => { (item as any).justification = justification }, 'Change Text Alignment')
+}
+
+function onLeadingChange(val: number | undefined) {
+  if (!val || val <= 0) {
+    leadingValue.value = Number(store.charStyle.leading) || 14
+    return
+  }
+  leadingAuto.value = false
+  leadingValue.value = val
+  store.updateCharStyle({ leading: val, autoLeading: false })
+  applyTextStyle((item) => { (item as any).leading = val }, 'Change Leading')
+  syncAreaFromSelection()
+}
+
+function toggleLeadingAuto() {
+  leadingAuto.value = !leadingAuto.value
+  const e = getEngine()
+  if (leadingAuto.value) {
+    const leading = fontSize.value * 1.2
+    leadingValue.value = Math.round(leading * 10) / 10
+    store.updateCharStyle({ leading, autoLeading: true })
+    applyTextStyle((item) => { (item as any).leading = leading }, 'Change Leading')
+  } else {
+    store.updateCharStyle({ autoLeading: false, leading: leadingValue.value })
+  }
+  if (e) e.scope.view.update()
+  syncAreaFromSelection()
+}
+
+function onTrackingChange(val: number | undefined) {
+  if (val === undefined || !Number.isFinite(val)) {
+    trackingValue.value = Number(store.charStyle.tracking) || 0
+    return
+  }
+  trackingValue.value = val
+  store.updateCharStyle({ tracking: val })
+  // Tracking has no Paper.js PointText primitive: area frames re-wrap
+  // (visible) and path runs pick it up on next layout; point text stores
+  // it for export.
+  const tc = textController()
+  const e = getEngine()
+  if (tc && e) {
+    const items = e.getSelection()
+    let rewrapped = false
+    for (const item of items) {
+      const anyItem = item as any
+      if (item instanceof e.scope.PointText && anyItem?.data?.textMode === 'area') {
+        const info = tc.areaInfo(item as paper.PointText)
+        if (info && tc.resizeAreaItem(item as paper.PointText, info.frame.width, info.frame.height)) {
+          rewrapped = true
+        }
+      }
+    }
+    e.scope.view.update()
+    // Point text has no tracking primitive (stored for export/next layout),
+    // so only area re-wraps record history; defaults already updated above.
+    if (rewrapped) e.pushHistory('Change Tracking')
+  }
+  syncAreaFromSelection()
+}
+
+function onFrameSizeChange() {
+  const tc = textController()
+  const e = getEngine()
+  if (!tc || !e) return
+  const item = tc.selectedAreaItem() as paper.PointText | null
+  if (!item) return
+  if (!Number.isFinite(frameW.value) || !Number.isFinite(frameH.value)) {
+    syncAreaFromSelection()
+    return
+  }
+  if (tc.resizeAreaItem(item, frameW.value, frameH.value)) {
+    e.clearSelection()
+    item.selected = true
+    e.syncSelectionToStore()
+    e.pushHistory('Resize Text Frame')
+    e.scope.view.update()
+  }
+  syncAreaFromSelection()
+}
+
+function onFlowOverflow() {
+  const tc = textController()
+  const e = getEngine()
+  if (!tc || !e) return
+  const item = tc.selectedAreaItem() as paper.PointText | null
+  if (!item) return
+  if (!tc.flowOverflowToNewFrame(item)) {
+    store.setStatusMessage('No overflow to flow')
+    return
+  }
+  store.setStatusMessage('Overflow flowed to a new linked frame')
+  syncAreaFromSelection()
 }
 
 function onFillChange(val: string) {

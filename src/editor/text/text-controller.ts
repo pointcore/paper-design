@@ -500,7 +500,7 @@ export class TextController {
       fontWeight: charStyle.fontWeight,
       fontStyle: charStyle.fontStyle,
       fontSize: charStyle.fontSize,
-      leading: charStyle.fontSize * 1.2,
+      leading: this.effectiveLeading(),
       justification,
       fillColor,
     }) as paper.PointText
@@ -541,11 +541,13 @@ export class TextController {
     const scope = engine.scope
     const charStyle = engine.store.charStyle
     const fillColor = engine.store.style.fillColor || '#000000'
+    const leading = this.effectiveLeading()
+    const tracking = (Number(charStyle.tracking) || 0) / 1000 * (Number(charStyle.fontSize) || 12)
     const total = path.length
     let cursor = Math.max(0, startOffset)
 
     for (const ch of raw) {
-      const advance = this.measureLineWidth(ch === '\t' ? ' ' : ch)
+      const advance = this.measureLineWidth(ch === '\t' ? ' ' : ch) + tracking * 0
       const mid = cursor + advance / 2
       if (mid > total) break
       if (advance > 0) {
@@ -560,13 +562,13 @@ export class TextController {
           fontWeight: charStyle.fontWeight,
           fontStyle: charStyle.fontStyle,
           fontSize: charStyle.fontSize,
-          leading: charStyle.fontSize * 1.2,
+          leading,
           fillColor,
         }) as paper.PointText
         glyph.rotate(angle, pt)
         group.addChild(glyph)
       }
-      cursor += advance
+      cursor += advance + tracking
     }
   }
 
@@ -680,6 +682,106 @@ export class TextController {
     }
   }
 
+  // ------------------------------------------------------------------
+  // Area rewrap + threading v1 (public: panels and menus call these)
+  // ------------------------------------------------------------------
+
+  /** Area-text root under the selection, if exactly one is selected. */
+  selectedAreaItem(): paper.PointText | null {
+    const engine = this.engine
+    if (!engine) return null
+    const items = engine.getSelection()
+    if (items.length !== 1) return null
+    const item = items[0]
+    if (item instanceof engine.scope.PointText && (item.data as any)?.textMode === 'area') {
+      return item as paper.PointText
+    }
+    return null
+  }
+
+  /** Stored frame + raw content for an area item (bounds fallback). */
+  areaInfo(item: paper.PointText): { frame: TextFrame; raw: string } | null {
+    const data = (item.data as any) ?? {}
+    const frame = data.frame ? { ...(data.frame as TextFrame) } : this.frameFromBounds(item)
+    if (!frame) return null
+    const raw = typeof data.raw === 'string' ? data.raw : item.content
+    return { frame, raw }
+  }
+
+  /** How many wrapped lines fit vs exist (overflow = threaded candidate). */
+  areaOverflow(item: paper.PointText): { lines: number; fits: number; overflowChars: number } {
+    const info = this.areaInfo(item)
+    if (!info) return { lines: 0, fits: 0, overflowChars: 0 }
+    const lines = this.wrapText(info.raw, Math.max(info.frame.width, MIN_FRAME_SPAN))
+    const leading = this.effectiveLeading()
+    const fits = Math.max(1, Math.floor(info.frame.height / (leading || 1)))
+    if (lines.length <= fits) return { lines: lines.length, fits, overflowChars: 0 }
+    const overflowChars = lines.slice(fits).join('\n').length
+    return { lines: lines.length, fits, overflowChars }
+  }
+
+  /**
+   * Resize an area frame and re-wrap its raw content in place.
+   * Returns false when the item is gone or the size is invalid.
+   */
+  resizeAreaItem(item: paper.PointText, width: number, height: number): boolean {
+    const engine = this.engine
+    if (!engine || !item.parent) return false
+    if (!Number.isFinite(width) || !Number.isFinite(height)) return false
+    if (width < MIN_FRAME_SPAN || height < MIN_FRAME_SPAN) return false
+    const info = this.areaInfo(item)
+    if (!info) return false
+    const frame: TextFrame = { ...info.frame, width, height }
+    item.content = this.wrapText(info.raw, width).join('\n')
+    item.point = this.frameAnchor(frame)
+    ;(item.data as any).frame = { ...frame }
+    engine.scope.view.update()
+    return true
+  }
+
+  /**
+   * Flow an area item's overflow into a new linked frame placed to its
+   * right (one-way v1: `threadNext`/`threadPrev` ids persist in Save/Open;
+   * live reflow across frames is out of scope). Returns false with nothing
+   * to flow.
+   */
+  flowOverflowToNewFrame(item: paper.PointText): boolean {
+    const engine = this.engine
+    if (!engine || !item.parent) return false
+    const info = this.areaInfo(item)
+    if (!info) return false
+    const lines = this.wrapText(info.raw, Math.max(info.frame.width, MIN_FRAME_SPAN))
+    const leading = this.effectiveLeading()
+    const fits = Math.max(1, Math.floor(info.frame.height / (leading || 1)))
+    if (lines.length <= fits) return false
+    const kept = lines.slice(0, fits).join('\n')
+    const overflowRaw = lines.slice(fits).join('\n')
+    // Wrapped lines already fit the frame width, so re-wrapping them is
+    // stable: keep the visible prefix as the new raw (explicit breaks kept).
+    item.content = kept
+    ;(item.data as any).raw = kept
+    const gap = 16
+    const nextFrame: TextFrame = {
+      x: info.frame.x + info.frame.width + gap,
+      y: info.frame.y,
+      width: info.frame.width,
+      height: info.frame.height,
+    }
+    const overflowContent = this.wrapText(overflowRaw, nextFrame.width).join('\n')
+    this.createTextItem(overflowContent, this.frameAnchor(nextFrame), {
+      textMode: 'area',
+      raw: overflowRaw,
+      frame: { ...nextFrame },
+    }, 'Thread Text')
+    const created = engine.getSelection()[0] as any
+    if (created) {
+      ;(created.data as any).threadPrev = (item.data as any)?.id ?? ''
+      ;(item.data as any).threadNext = (created.data as any)?.id ?? ''
+    }
+    engine.selectItem(item)
+    return true
+  }
+
   /** Wrap raw text (explicit newlines kept) into frame-width lines. */
   private wrapText(raw: string, maxWidth: number): string[] {
     const out: string[] = []
@@ -722,15 +824,26 @@ export class TextController {
     return `${charStyle.fontStyle} ${charStyle.fontWeight} ${charStyle.fontSize}px ${charStyle.fontFamily}`
   }
 
-  /** Width of one line in document units under the current style. */
+  /** Width of one line in document units under the current style (tracking-aware). */
   private measureLineWidth(line: string): number {
     if (!this.measureCtx) {
       const canvas = document.createElement('canvas')
       this.measureCtx = canvas.getContext('2d')
     }
-    if (!this.measureCtx) return line.length * 6
+    const charStyle = this.engine!.store.charStyle
+    const tracking = (Number(charStyle.tracking) || 0) / 1000 * (Number(charStyle.fontSize) || 12)
+    if (!this.measureCtx) return line.length * (6 + tracking)
     this.measureCtx.font = this.textMeasureFont()
-    return this.measureCtx.measureText(line).width
+    const base = this.measureCtx.measureText(line).width
+    // Tracking adds per-character advance (no trailing space after last glyph).
+    return base + Math.max(0, line.length - 1) * tracking
+  }
+
+  /** Effective leading for new/updated text (auto = 1.2x). */
+  effectiveLeading(): number {
+    const charStyle = this.engine!.store.charStyle
+    if (charStyle.autoLeading) return (Number(charStyle.fontSize) || 12) * 1.2
+    return Number(charStyle.leading) || (Number(charStyle.fontSize) || 12) * 1.2
   }
 
   // ------------------------------------------------------------------

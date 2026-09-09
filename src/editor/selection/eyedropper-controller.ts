@@ -100,11 +100,15 @@ export class EyedropperController {
     engine.store.updateStyle({ ...style })
 
     if (leaf instanceof engine.scope.PointText && !(leaf.data as any)?.annotation) {
+      const size = Number(leaf.fontSize) || 12
+      const leading = Number((leaf as any).leading) || size * 1.2
       engine.store.updateCharStyle({
         fontFamily: (leaf.fontFamily as string) || 'Arial',
-        fontSize: Number(leaf.fontSize) || 12,
+        fontSize: size,
         fontWeight: leaf.fontWeight as string,
         fontStyle: ((leaf as any).fontStyle as 'normal' | 'italic' | 'oblique') ?? 'normal',
+        leading,
+        autoLeading: Math.abs(leading - size * 1.2) < 0.05,
       })
       const justification = ((leaf as any).justification as string) ?? 'left'
       engine.store.updateParagraphStyle({

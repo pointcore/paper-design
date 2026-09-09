@@ -66,6 +66,7 @@
               <el-dropdown-item command="releaseMask" :disabled="!store.hasSelection">Release Clipping Mask</el-dropdown-item>
               <el-dropdown-item command="applyPattern" divided :disabled="!store.hasSelection">Apply Pattern Fill</el-dropdown-item>
               <el-dropdown-item command="removePattern" :disabled="!store.hasSelection">Remove Pattern Fill</el-dropdown-item>
+              <el-dropdown-item command="flowText" divided :disabled="!store.hasSelection">Flow Text Overflow</el-dropdown-item>
               <el-dropdown-item command="lock" divided :disabled="!store.hasSelection">Lock</el-dropdown-item>
               <el-dropdown-item command="unlockAll">Unlock All</el-dropdown-item>
               <el-dropdown-item command="hide" divided :disabled="!store.hasSelection">Hide</el-dropdown-item>
@@ -817,6 +818,17 @@ function onObjectCmd(cmd: string) {
         store.setStatusMessage('Select a pattern to remove')
       }
       break
+    case 'flowText': {
+      const tc = e.getController('type') as {
+        selectedAreaItem?: () => any
+        flowOverflowToNewFrame?: (item: any) => boolean
+      } | null
+      const area = tc?.selectedAreaItem?.() ?? null
+      if (!area || !tc?.flowOverflowToNewFrame?.(area)) {
+        store.setStatusMessage('Select an overflowing area text')
+      }
+      break
+    }
   }
 }
 
