@@ -62,7 +62,7 @@ export const TOOL_SHORTCUTS: Record<ToolName, ShortcutDef | null> = {
   zoom:            { label: 'Z',    match: (e) => key(e) === 'z' },
   measure:         null,
   callout:         null,
-  'shape-builder': null,
+  'shape-builder': { label: 'Shift+M', match: (e) => e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey && key(e) === 'm' },
   eyedropper:      { label: 'I',    match: (e) => key(e) === 'i' },
 }
 
@@ -75,6 +75,7 @@ export const TOOL_SHORTCUTS: Record<ToolName, ShortcutDef | null> = {
 const SHORTCUT_ORDER: ToolName[] = [
   'curvature',
   'convert-anchor',
+  'shape-builder',
   'add-anchor',
   'delete-anchor',
   'line',

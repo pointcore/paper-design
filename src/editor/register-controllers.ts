@@ -9,6 +9,7 @@ import { EraserController } from './path-drawing/eraser-controller'
 import { BlobBrushController } from './path-drawing/blob-brush-controller'
 import { BrushController } from './path-drawing/brush-controller'
 import { ScissorsController } from './path-drawing/scissors-controller'
+import { ShapeBuilderController } from './path-drawing/shape-builder-controller'
 import { EyedropperController } from './selection/eyedropper-controller'
 import { CurvatureController } from './path-drawing/curvature-controller'
 import { AnchorController } from './path-drawing/anchor-controller'
@@ -41,6 +42,9 @@ export function registerAllControllers(engine: EditorEngine) {
 
   // Scissors tool (cut path at click)
   engine.registerController('scissors', new ScissorsController())
+
+  // Shape builder (drag-across unite, Alt-drag subtract)
+  engine.registerController('shape-builder', new ShapeBuilderController())
 
   // Eyedropper tool (appearance pickup)
   engine.registerController('eyedropper', new EyedropperController())
