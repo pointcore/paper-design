@@ -1656,7 +1656,19 @@ export class SelectController {
       // AI order: path outline beneath, then handle lines/dots, anchors on top.
       this.chrome.drawItemOutline(path, color)
       const segs = path.segments
+      // AI shows handles only for selected anchors (plus the anchor under
+      // an active anchor/handle grab); unselected anchors stay hollow with
+      // no handle chrome even when they carry handles.
+      const editPath = this.grabPath ?? this.getEditPath()
+      const selFlags = segs.map(
+        (_, i) =>
+          this.isAnchorSelected(path, i) ||
+          (this.grabSegmentIndex === i &&
+            path === editPath &&
+            (this.grab === 'anchor' || this.grab === 'handle'))
+      )
       for (let i = 0; i < segs.length; i++) {
+        if (!selFlags[i]) continue
         const seg = segs[i]
         const hi = seg.handleIn as paper.Point | null
         const ho = seg.handleOut as paper.Point | null
@@ -1669,11 +1681,8 @@ export class SelectController {
       }
       for (let i = 0; i < segs.length; i++) {
         const seg = segs[i]
-        const isSelectedAnchor = this.isAnchorSelected(path, i) ||
-          (this.grabSegmentIndex === i && path === (this.grabPath ?? this.getEditPath()) &&
-            (this.grab === 'anchor' || this.grab === 'handle'))
         // AI: unselected = hollow white, selected = solid layer color.
-        this.chrome.drawAnchor(seg.point, isSelectedAnchor, color)
+        this.chrome.drawAnchor(seg.point, selFlags[i], color)
       }
       // AI segment selection: the curve paints in the layer color (thicker
       // than the path outline) and both end anchors read solid. Curves
