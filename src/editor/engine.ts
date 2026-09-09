@@ -3527,6 +3527,24 @@ export class EditorEngine {
       }
     }
     const style = this.getStyleFromItem(first)
+    return this.mergePathsEndToEnd(first, second, best[2], best[3], style)
+  }
+
+  /**
+   * Merge two open paths end to end with explicit orientations: each path
+   * walks so the joined ends meet (useFirst reverses the walk). Shared by
+   * auto nearest-pair join and sub-selection endpoint join.
+   */
+  mergePathsEndToEnd(
+    first: paper.Path,
+    second: paper.Path,
+    firstUsesFirst: boolean,
+    secondUsesFirst: boolean,
+    style?: StyleState
+  ): boolean {
+    const scope = this.scope
+    if (!first.parent || !second.parent) return false
+    const paint = style ?? this.getStyleFromItem(first)
     const parent = first.parent ?? this.getActiveLayer()
     const rawAt = parent.children.indexOf(first)
     const at = rawAt < 0 ? parent.children.length : rawAt
@@ -3539,15 +3557,15 @@ export class EditorEngine {
         for (let i = segs.length - 1; i >= 0; i--) merged.add(this.reversedSegment(segs[i]))
       }
     }
-    pushOriented(first, best[2])
-    pushOriented(second, best[3])
+    pushOriented(first, firstUsesFirst)
+    pushOriented(second, secondUsesFirst)
     merged.closed = false
     first.remove()
     second.remove()
     parent.insertChild(Math.min(at, parent.children.length), merged)
     merged.data.id = this.genId()
     merged.data.isUserItem = true
-    this.applyStyleToItem(merged, style)
+    this.applyStyleToItem(merged, paint)
     this.clearSelection()
     merged.selected = true
     this.syncSelectionToStore()

@@ -900,11 +900,23 @@ function onObjectCmd(cmd: string) {
         store.setStatusMessage('Select a compound path to release')
       }
       break
-    case 'joinPaths':
+    case 'joinPaths': {
+      // Direct-select endpoint join first (two sub-selected endpoints);
+      // falls through to object join when there is no sub-selection.
+      const sc = e.getController('direct-select') as {
+        joinEndpointsFromSubselection?: () => boolean | null
+      } | null
+      const sub = sc?.joinEndpointsFromSubselection?.() ?? null
+      if (sub === true) break
+      if (sub === false) {
+        store.setStatusMessage('Join needs two selected open endpoints')
+        break
+      }
       if (!e.joinPaths()) {
         store.setStatusMessage('Join needs exactly two unlocked open paths')
       }
       break
+    }
     case 'outlineStroke':
       if (!e.outlineStroke()) {
         store.setStatusMessage('Outline needs a path with a stroke')

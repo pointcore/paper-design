@@ -131,7 +131,7 @@ export function resolveToolShortcut(e: KeyboardEvent): ToolName | null {
  * - Clipboard, history, fit, select, arrange, group, lock, hide, save,
  *   grid toggle and invert shortcuts (Ctrl+C / X / V / F / B / A / G /
  *   Shift+G / Shift+I / S / 2 / Alt+2 / 3 / Alt+3 / Z / Shift+Z / Y / 0 /
- *   brackets / Quote). Copy also mirrors the selection to the OS clipboard
+ *   brackets / Quote / J). Copy also mirrors the selection to the OS clipboard
  *   as SVG (best effort); paste prefers OS clipboard SVG and falls back to
  *   the internal clipboard. They work in every tool context, matching
  *   Illustrator; the text edit overlay is exempt via the editable-target
@@ -232,6 +232,19 @@ export function handleGlobalKeydown(
       }
     } else if (key === '3' && e.altKey) {
       engine?.showAll()
+      e.preventDefault()
+    } else if (key === 'j') {
+      // AI Ctrl+J: sub-selected endpoints first, then object join.
+      // Always consumed so the browser downloads tab never opens.
+      const sc = engine?.getController('direct-select') as {
+        joinEndpointsFromSubselection?: () => boolean | null
+      } | null
+      const sub = sc?.joinEndpointsFromSubselection?.() ?? null
+      if (sub === false) {
+        store.setStatusMessage('Join needs two selected open endpoints')
+      } else if (sub !== true && engine && !engine.joinPaths()) {
+        store.setStatusMessage('Join needs exactly two unlocked open paths')
+      }
       e.preventDefault()
     } else if (e.code === 'BracketRight' && !e.altKey && store.hasSelection) {
       // Physical key positions (layout-independent): ] forward, Shift+] front.

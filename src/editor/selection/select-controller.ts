@@ -1247,6 +1247,78 @@ export class SelectController {
     engine.scope.view.update()
   }
 
+  /**
+   * Join from the anchor sub-selection (AI Ctrl+J): exactly two selected
+   * endpoints. Same path + both ends closes it; two paths merge end to
+   * end with the chosen ends meeting. Returns null when there is no
+   * sub-selection (caller falls through to object join), false when the
+   * selection cannot join.
+   */
+  joinEndpointsFromSubselection(): boolean | null {
+    const engine = this.engine
+    if (!engine || this.mode !== 'direct-select') return null
+    this.pruneAnchorSelection()
+    this.pruneCurveSelection()
+    if (this.selectedSegments.length === 0 && this.selectedCurves.length === 0) return null
+    // Curves resolve to their end anchors, like everywhere else.
+    const ends: Array<{ path: paper.Path; index: number }> = []
+    const seen = new Set<string>()
+    const take = (path: paper.Path, index: number) => {
+      const key = `${(path.data as any)?.id ?? ''}:${index}`
+      if (seen.has(key)) return
+      seen.add(key)
+      ends.push({ path, index })
+    }
+    for (const s of this.selectedSegments) take(s.path, s.index)
+    for (const c of this.selectedCurves) {
+      const pair = this.curveEndAnchors(c.path, c.curve)
+      if (pair) {
+        take(c.path, pair[0])
+        take(c.path, pair[1])
+      }
+    }
+    if (ends.length !== 2) return false
+    const scope = engine.scope
+    const valid = (entry: { path: paper.Path; index: number }): boolean => {
+      const { path, index } = entry
+      if (!path.parent || (path as any).locked) return false
+      if (!(path instanceof scope.Path) || path instanceof scope.CompoundPath) return false
+      if (path.closed || path.segments.length === 0) return false
+      const last = path.segments.length - 1
+      return index === 0 || index === last
+    }
+    if (!valid(ends[0]) || !valid(ends[1])) return false
+    const [a, b] = ends
+    if (a.path === b.path) {
+      if (a.index === b.index) return false
+      a.path.closed = true
+      engine.refreshItemGradient(a.path)
+      this.clearCurveSelection()
+      this.clearAnchorSelection()
+      this.clearAnchorState()
+      engine.pushHistory('Join Paths')
+      engine.scope.view.update()
+      this.refreshChrome()
+      return true
+    }
+    // Orient each walk so the chosen ends meet: the first path ends with
+    // its anchor, the second starts with its anchor.
+    const ordered = [a.path, b.path]
+      .slice()
+      .sort((p, q) => (p.isBelow(q) ? -1 : p.isAbove(q) ? 1 : 0))
+    const first = ordered[0]
+    const second = ordered[1]
+    const firstIdx = first === a.path ? a.index : b.index
+    const secondIdx = second === a.path ? a.index : b.index
+    const ok = engine.mergePathsEndToEnd(first, second, firstIdx === 0, secondIdx !== 0)
+    if (!ok) return false
+    this.clearCurveSelection()
+    this.clearAnchorSelection()
+    this.clearAnchorState()
+    this.refreshChrome()
+    return true
+  }
+
   // ------------------------------------------------------------------
   // Anchor sub-selection (direct-select)
   // ------------------------------------------------------------------
