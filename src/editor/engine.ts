@@ -4175,13 +4175,29 @@ export class EditorEngine {
 
   duplicateSelected() {
     const items = this.getSelection()
-    const clones = this.copySelected()
+    if (items.length === 0) return
+    const activeLayer = this.getActiveLayer()
+    if (!activeLayer) return
+    // Clone from a snapshot and reselect only the clones: reselecting the
+    // sources too used to double the selection on every repeat (1→2→4→8).
+    const clones: paper.Item[] = []
+    for (const item of items) {
+      const clone = item.clone()
+      activeLayer.addChild(clone)
+      this.restampCloneTree(clone)
+      clone.data.id = this.genId()
+      clone.data.isUserItem = true
+      clones.push(clone)
+    }
+    this.clearSelection()
     if (clones.length > 0) {
       const dx = 10
       const dy = 10
       clones.forEach((c) => {
         c.position = c.position.add(new this.scope.Point(dx, dy))
+        c.selected = true
       })
+      this.syncSelectionToStore()
       this.pushHistory('Duplicate')
       this.scope.view.update()
     }
