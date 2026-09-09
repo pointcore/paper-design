@@ -311,26 +311,11 @@ function selectLayer(id: string) {
 }
 
 function toggleVisibility(layer: any) {
-  const e = getEngine()
-  if (!e) return
-  layer.visible = !layer.visible
-  store.updateLayer(layer.id, { visible: layer.visible })
-  const pLayer = e.project.layers.find((l) => (l.data as any)?.layerId === layer.id)
-  if (pLayer) {
-    pLayer.visible = layer.visible
-    e.scope.view.update()
-  }
+  getEngine()?.setUserLayerVisible(layer.id, !layer.visible)
 }
 
 function toggleLock(layer: any) {
-  const e = getEngine()
-  if (!e) return
-  layer.locked = !layer.locked
-  store.updateLayer(layer.id, { locked: layer.locked })
-  const pLayer = e.project.layers.find((l) => (l.data as any)?.layerId === layer.id)
-  if (pLayer) {
-    pLayer.locked = layer.locked
-  }
+  getEngine()?.setUserLayerLocked(layer.id, !layer.locked)
 }
 
 function toggleExpand(layer: any) {
@@ -437,14 +422,7 @@ function cancelRename() {
 
 function finishRename() {
   if (renamingId.value) {
-    const id = renamingId.value
-    const newName = renameValue.value.trim() || 'Layer'
-    store.updateLayer(id, { name: newName })
-    const e = getEngine()
-    if (e) {
-      const pLayer = e.project.layers.find((l) => (l.data as any)?.layerId === id)
-      if (pLayer) pLayer.name = newName
-    }
+    getEngine()?.renameUserLayer(renamingId.value, renameValue.value)
   }
   renamingId.value = ''
 }

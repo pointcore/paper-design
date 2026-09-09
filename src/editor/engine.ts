@@ -379,6 +379,8 @@ export class EditorEngine {
     this.parkUserLayer(layer)
     layer.activate()
     this.syncLayersToStore()
+    this.pushHistory('New Layer')
+    this.scope.view.update()
     return layer
   }
 
@@ -427,13 +429,53 @@ export class EditorEngine {
     this.scope.view.update()
   }
 
-  deleteLayer(layerId: string) {
+  deleteLayer(layerId: string): boolean {
     const layer = this.project.layers.find((l) => (l.data as any)?.layerId === layerId)
-    if (layer) {
-      layer.remove()
-      this.syncLayersToStore()
-      this.pointActiveLayerAtRestoredStack()
-    }
+    if (!layer) return false
+    layer.remove()
+    this.clearSelection()
+    this.syncLayersToStore()
+    this.pointActiveLayerAtRestoredStack()
+    this.pushHistory('Delete Layer')
+    this.scope.view.update()
+    return true
+  }
+
+  /**
+   * Layer visibility / lock / rename with store sync and history (the panel
+   * used to write these straight through, leaving them un-undoable and
+   * overwritable by the next undo). Labels reuse the object-op names so the
+   * entries stay frame-safe. Each returns false when nothing changed.
+   */
+  setUserLayerVisible(layerId: string, visible: boolean): boolean {
+    const layer = this.project.layers.find((l) => (l.data as any)?.layerId === layerId)
+    if (!layer || layer.visible === visible) return false
+    layer.visible = visible
+    this.store.updateLayer(layerId, { visible })
+    this.pushHistory(visible ? 'Show' : 'Hide')
+    this.scope.view.update()
+    return true
+  }
+
+  setUserLayerLocked(layerId: string, locked: boolean): boolean {
+    const layer = this.project.layers.find((l) => (l.data as any)?.layerId === layerId)
+    if (!layer || layer.locked === locked) return false
+    layer.locked = locked
+    this.store.updateLayer(layerId, { locked })
+    this.pushHistory(locked ? 'Lock' : 'Unlock')
+    this.scope.view.update()
+    return true
+  }
+
+  renameUserLayer(layerId: string, name: string): boolean {
+    const next = (name ?? '').trim() || 'Layer'
+    const layer = this.project.layers.find((l) => (l.data as any)?.layerId === layerId)
+    if (!layer || layer.name === next) return false
+    layer.name = next
+    this.store.updateLayer(layerId, { name: next })
+    this.pushHistory('Rename')
+    this.scope.view.update()
+    return true
   }
 
   getOverlayLayer(): paper.Layer {
@@ -1631,17 +1673,20 @@ export class EditorEngine {
    * Only permutes user layers via pairwise stacking, so the grid, guide
    * and overlay layers keep their slots. Callers mirror the store order.
    */
-  moveUserLayer(layerId: string, toUserIndex: number): void {
+  moveUserLayer(layerId: string, toUserIndex: number): boolean {
     const users = this.project.layers.filter((l) => (l.data as any)?.isUserLayer)
     const from = users.findIndex((l) => (l.data as any)?.layerId === layerId)
-    if (from < 0) return
+    if (from < 0) return false
     const clamped = Math.min(users.length - 1, Math.max(0, toUserIndex))
+    if (clamped === from) return false
     const [moved] = users.splice(from, 1)
     users.splice(clamped, 0, moved)
     for (let i = 1; i < users.length; i++) {
       users[i].insertAbove(users[i - 1])
     }
+    this.pushHistory('Rearrange')
     this.scope.view.update()
+    return true
   }
 
   /** Set the active user layer opacity (store stays in sync, no history). */
