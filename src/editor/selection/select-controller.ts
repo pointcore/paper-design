@@ -133,6 +133,9 @@ export class SelectController {
   private marqueeShift = false
   // Reference point for group anchor translation.
   private dragStartPoint: { x: number; y: number } | null = null
+  // Grab-time pointer for Shift axis-locking (never updated mid-drag,
+  // unlike dragStartPoint which advances with the pointer).
+  private dragConstrainOrigin: { x: number; y: number } | null = null
 
   // Bounding-box transform drag state (select mode). Scaling is AI-aligned
   // absolute: totals are always measured from the grab-time snapshot
@@ -414,6 +417,7 @@ export class SelectController {
     this.lastSegmentCount = -1
     this.grabPath = null
     this.dragStartPoint = null
+    this.dragConstrainOrigin = null
   }
 
   /** Drop any in-progress bounding-box transform drag state. */
@@ -496,17 +500,22 @@ export class SelectController {
         if (curveHit) {
           this.guides.clearSelection()
           this.ensureEditedPath(curveHit.path)
+          let targetPath = curveHit.path
+          if (event.modifiers.alt) {
+            targetPath = this.altDuplicatePaths([curveHit.path]).get(curveHit.path) ?? curveHit.path
+          }
           if (event.modifiers.shift) {
-            this.toggleCurveSelection(curveHit.path, curveHit.curve)
-          } else if (!this.isCurveSelected(curveHit.path, curveHit.curve)) {
+            this.toggleCurveSelection(targetPath, curveHit.curve)
+          } else if (!this.isCurveSelected(targetPath, curveHit.curve)) {
             this.clearCurveSelection()
             this.clearAnchorSelection()
-            this.addCurveToSelection(curveHit.path, curveHit.curve)
+            this.addCurveToSelection(targetPath, curveHit.curve)
           }
           this.grab = 'segment'
-          this.grabPath = curveHit.path
+          this.grabPath = targetPath
           this.grabCurveIndex = curveHit.curve
           this.dragStartPoint = { x: event.point.x, y: event.point.y }
+          this.dragConstrainOrigin = { x: event.point.x, y: event.point.y }
           engine.store.setDragging(true)
           engine.canvas.style.cursor = 'move'
           this.refreshChrome()
@@ -646,11 +655,11 @@ export class SelectController {
       } else if (this.grab === 'guide' && this.grabGuide) {
         this.dragGuide(event.point)
       } else if (this.mode === 'direct-select' && (this.grab === 'anchor' || this.grab === 'anchor-group')) {
-        this.dragAnchor(event.point)
+        this.dragAnchor(event.point, event.modifiers)
       } else if (this.mode === 'direct-select' && this.grab === 'handle') {
         this.dragHandle(event.point)
       } else if (this.mode === 'direct-select' && this.grab === 'segment') {
-        this.dragSegment(event.point)
+        this.dragSegment(event.point, event.modifiers)
       } else if (this.isMarquee) {
         this.updateMarquee(event.point.x, event.point.y)
       } else if (this.isDragging && this.dragItems.length > 0) {
@@ -692,6 +701,7 @@ export class SelectController {
       this.grabPath = null
       this.grabCurveIndex = -1
       this.dragStartPoint = null
+      this.dragConstrainOrigin = null
       engine.store.setDragging(false)
       // Back to the AI-aligned tool default (arrow / white arrow).
       engine.canvas.style.cursor = cursorForTool(this.mode)
@@ -738,6 +748,10 @@ export class SelectController {
         case 'backspace':
           if (!engine.store.view.guidesLocked && this.guides.hasSelection()) {
             this.guides.deleteSelectedGuides()
+          } else if (this.mode === 'direct-select' && this.hasCurveSelection()) {
+            // AI deletes the curve itself (path splits open); the anchor
+            // branch below would remove both end anchors instead.
+            this.deleteSelectedCurves()
           } else if (this.mode === 'direct-select' && this.hasAnchorSelection()) {
             this.deleteSelectedAnchors()
           } else if (this.mode === 'direct-select' && this.grabSegmentIndex >= 0) {
@@ -800,11 +814,18 @@ export class SelectController {
         (s) => s.path === hit.path && s.index === hit.index
       )
       if (member) {
+        // Alt-drag duplicates the involved paths first (AI); indices carry
+        // over to the clones untouched.
+        let targetPath = hit.path
+        if (modifiers.alt) {
+          targetPath = this.altDuplicatePaths(this.anchorSelectionPaths()).get(hit.path) ?? hit.path
+        }
         this.grab = 'anchor-group'
-        this.grabPath = hit.path
+        this.grabPath = targetPath
         this.grabSegmentIndex = hit.index
         this.grabIsIn = false
         this.dragStartPoint = { x: event.point.x, y: event.point.y }
+        this.dragConstrainOrigin = { x: event.point.x, y: event.point.y }
         return true
       }
     }
@@ -855,17 +876,23 @@ export class SelectController {
     //    the sub-selection; a plain click replaces it with just this anchor.
     if (hit) {
       this.ensureEditedPath(hit.path)
+      let targetPath = hit.path
+      if (modifiers.alt) {
+        targetPath = this.altDuplicatePaths([hit.path]).get(hit.path) ?? hit.path
+      }
       if (modifiers.shift) {
-        this.toggleAnchorSelection(hit.path, hit.index)
-      } else if (!this.isAnchorSelected(hit.path, hit.index)) {
+        this.toggleAnchorSelection(targetPath, hit.index)
+      } else if (!this.isAnchorSelected(targetPath, hit.index)) {
         this.clearAnchorSelection()
-        this.addAnchorToSelection(hit.path, hit.index)
+        this.clearCurveSelection()
+        this.addAnchorToSelection(targetPath, hit.index)
       }
       this.grab = this.hasAnchorSelection() ? 'anchor-group' : 'anchor'
-      this.grabPath = hit.path
+      this.grabPath = targetPath
       this.grabSegmentIndex = hit.index
       this.grabIsIn = false
       this.dragStartPoint = { x: event.point.x, y: event.point.y }
+      this.dragConstrainOrigin = { x: event.point.x, y: event.point.y }
       return true
     }
     return false
@@ -930,21 +957,41 @@ export class SelectController {
     return out
   }
 
-  private dragAnchor(point: paper.Point) {
+  /**
+   * Shift axis-lock for sub-object drags (AI): the free axis stays pinned
+   * to the grab-time pointer, measured as totals from the grab origin.
+   */
+  private constrainPoint(raw: paper.Point, modifiers?: any): paper.Point {
+    const engine = this.engine
+    if (!engine || !modifiers?.shift || !this.dragConstrainOrigin) return raw
+    const ox = this.dragConstrainOrigin.x
+    const oy = this.dragConstrainOrigin.y
+    const tx = raw.x - ox
+    const ty = raw.y - oy
+    if (Math.abs(tx) >= Math.abs(ty)) return new engine.scope.Point(raw.x, oy)
+    return new engine.scope.Point(ox, raw.y)
+  }
+
+  private dragAnchor(point: paper.Point, modifiers?: any) {
     const engine = this.engine
     if (!engine) return
     if (this.grab === 'anchor-group' && this.hasAnchorSelection()) {
       // Translate every sub-selected anchor as one rigid group.
       if (!this.dragStartPoint) return
-      const dx = point.x - this.dragStartPoint.x
-      const dy = point.y - this.dragStartPoint.y
+      // Static snap first (own paths excluded so the grab never sticks to
+      // its start), then the Shift axis lock — same order as object drags.
+      const snapped = this.snapService.snapPoint(point, this.anchorSelectionPaths())
+      const eff = this.constrainPoint(snapped, modifiers)
+      const dx = eff.x - this.dragStartPoint.x
+      const dy = eff.y - this.dragStartPoint.y
       if (Math.abs(dx) < 1e-9 && Math.abs(dy) < 1e-9) return
       for (const entry of this.selectedSegments) {
         const seg = entry.path.segments[entry.index]
         if (!seg) continue
         seg.point = seg.point.add(new engine.scope.Point(dx, dy))
       }
-      this.dragStartPoint = { x: point.x, y: point.y }
+      for (const path of this.anchorSelectionPaths()) engine.refreshItemGradient(path)
+      this.dragStartPoint = { x: eff.x, y: eff.y }
       engine.scope.view.update()
       return
     }
@@ -952,7 +999,9 @@ export class SelectController {
     if (!path) return
     const seg = path.segments[this.grabSegmentIndex]
     if (!seg) return
-    seg.point = point
+    const snapped = this.snapService.snapPoint(point, [path])
+    seg.point = this.constrainPoint(snapped, modifiers)
+    engine.refreshItemGradient(path)
     engine.scope.view.update()
   }
 
@@ -966,6 +1015,44 @@ export class SelectController {
     if (this.grabIsIn) seg.handleIn = rel
     else seg.handleOut = rel
     engine.scope.view.update()
+  }
+
+  /**
+   * Alt-drag duplicate for sub-object grabs (AI duplicates the whole
+   * path): clone every involved path in place, reselect the clones and
+   * remap anchor/curve entries (indices carry over untouched). One
+   * Duplicate entry up front mirrors the object Alt-drag flow.
+   */
+  private altDuplicatePaths(paths: paper.Path[]): Map<paper.Path, paper.Path> {
+    const engine = this.engine!
+    const remap = new Map<paper.Path, paper.Path>()
+    const seen = new Set(paths)
+    for (const path of seen) {
+      if (!path.parent) continue
+      const parent = path.parent
+      const at = parent.children.indexOf(path)
+      const clone = path.clone({ insert: false }) as paper.Path
+      const data = (clone.data as any) ?? {}
+      data.id = engine.genId()
+      data.isUserItem = true
+      parent.insertChild(at < 0 ? parent.children.length : at + 1, clone)
+      path.selected = false
+      clone.selected = true
+      remap.set(path, clone)
+    }
+    if (remap.size === 0) return remap
+    this.selectedSegments = this.selectedSegments.map((s) => {
+      const clone = remap.get(s.path)
+      return clone ? { path: clone, index: s.index } : s
+    })
+    this.selectedCurves = this.selectedCurves.map((s) => {
+      const clone = remap.get(s.path)
+      return clone ? { path: clone, curve: s.curve } : s
+    })
+    engine.syncSelectionToStore()
+    engine.pushHistory('Duplicate')
+    engine.scope.view.update()
+    return remap
   }
 
   private deleteGrabbedAnchor() {
@@ -1114,11 +1201,17 @@ export class SelectController {
    * rigidly. Handles are anchor-relative in Paper.js, so they travel along
    * and adjacent curves reshape — the AI segment-move feel.
    */
-  private dragSegment(point: paper.Point) {
+  private dragSegment(point: paper.Point, modifiers?: any) {
     const engine = this.engine
     if (!engine || !this.dragStartPoint) return
-    const dx = point.x - this.dragStartPoint.x
-    const dy = point.y - this.dragStartPoint.y
+    const curvePaths: paper.Path[] = []
+    for (const entry of this.selectedCurves) {
+      if (!curvePaths.includes(entry.path)) curvePaths.push(entry.path)
+    }
+    const snapped = this.snapService.snapPoint(point, curvePaths)
+    const eff = this.constrainPoint(snapped, modifiers)
+    const dx = eff.x - this.dragStartPoint.x
+    const dy = eff.y - this.dragStartPoint.y
     if (Math.abs(dx) < 1e-9 && Math.abs(dy) < 1e-9) return
     this.pruneCurveSelection()
     const seen = new Set<paper.Segment>()
@@ -1133,7 +1226,7 @@ export class SelectController {
       }
       engine.refreshItemGradient(entry.path)
     }
-    this.dragStartPoint = { x: point.x, y: point.y }
+    this.dragStartPoint = { x: eff.x, y: eff.y }
     engine.scope.view.update()
   }
 
@@ -1182,6 +1275,86 @@ export class SelectController {
       if (!out.includes(s.path)) out.push(s.path)
     }
     return out
+  }
+
+  /**
+   * Direct-select Ctrl+A (AI): select every anchor of the selected paths.
+   * Returns false when there is nothing to sub-select so the caller falls
+   * back to whole-object selection. Curves highlight themselves through
+   * their (now fully selected) end anchors.
+   */
+  selectAllSubselection(): boolean {
+    const engine = this.engine
+    if (!engine || this.mode !== 'direct-select') return false
+    const scope = engine.scope
+    const paths: paper.Path[] = []
+    const walk = (item: paper.Item) => {
+      if ((item as any).locked) return
+      if (item instanceof scope.Path && !(item instanceof scope.CompoundPath)) {
+        if (item.parent && (item as paper.Path).segments.length > 0 && !paths.includes(item as paper.Path)) {
+          paths.push(item as paper.Path)
+        }
+        return
+      }
+      const children = (item as any).children as paper.Item[] | undefined
+      if (children) {
+        for (const child of children) walk(child as paper.Item)
+      }
+    }
+    for (const item of engine.getSelection()) walk(item)
+    if (paths.length === 0) return false
+    this.clearCurveSelection()
+    this.selectedSegments = []
+    for (const path of paths) {
+      for (let i = 0; i < path.segments.length; i++) {
+        this.addAnchorToSelection(path, i)
+      }
+    }
+    engine.scope.view.update()
+    this.refreshChrome()
+    return true
+  }
+
+  /**
+   * Arrow-key nudge for the sub-selection (AI moves selected anchors, not
+   * whole objects). Shares the engine's coalesced Nudge history so holding
+   * a key still records one undo step.
+   */
+  nudgeSubselection(dx: number, dy: number): boolean {
+    const engine = this.engine
+    if (!engine || this.mode !== 'direct-select') return false
+    if (!Number.isFinite(dx) || !Number.isFinite(dy) || (dx === 0 && dy === 0)) return false
+    this.pruneAnchorSelection()
+    this.pruneCurveSelection()
+    const owned: Array<{ seg: paper.Segment; path: paper.Path }> = []
+    const seen = new Set<paper.Segment>()
+    const take = (path: paper.Path, index: number) => {
+      if ((path as any).locked) return
+      const seg = path.segments[index]
+      if (!seg || seen.has(seg)) return
+      seen.add(seg)
+      owned.push({ seg, path })
+    }
+    for (const s of this.selectedSegments) take(s.path, s.index)
+    for (const c of this.selectedCurves) {
+      const ends = this.curveEndAnchors(c.path, c.curve)
+      if (ends) {
+        take(c.path, ends[0])
+        take(c.path, ends[1])
+      }
+    }
+    if (owned.length === 0) return false
+    const delta = new engine.scope.Point(dx, dy)
+    const paths = new Set<paper.Path>()
+    for (const { seg, path } of owned) {
+      seg.point = seg.point.add(delta)
+      paths.add(path)
+    }
+    paths.forEach((path) => engine.refreshItemGradient(path))
+    engine.scope.view.update()
+    engine.pushCoalescedHistory('Nudge')
+    this.refreshChrome()
+    return true
   }
 
   /**
@@ -1275,6 +1448,124 @@ export class SelectController {
     this.clearAnchorState()
     engine.pushHistory('Delete Anchors')
     scope.view.update()
+  }
+
+  /**
+   * AI segment delete: remove the selected curves and split the path open
+   * (middle curves split one path into runs; a fully consumed path is
+   * removed). End anchors survive — only the curve between them goes.
+   */
+  private deleteSelectedCurves() {
+    const engine = this.engine
+    if (!engine) return
+    const scope = engine.scope
+    this.pruneAnchorSelection()
+    this.pruneCurveSelection()
+    if (this.selectedCurves.length === 0) return
+    const byPath = new Map<paper.Path, number[]>()
+    for (const s of this.selectedCurves) {
+      if (!s.path.parent) continue
+      const list = byPath.get(s.path) ?? []
+      list.push(s.curve)
+      byPath.set(s.path, list)
+    }
+    const selectAfter: paper.Item[] = []
+    for (const [path, curves] of byPath) {
+      const removed = new Set(curves)
+      const n = path.segments.length
+      if (path.curves.length <= removed.size) {
+        if (path.selected) path.selected = false
+        path.remove()
+        continue
+      }
+      const runs = this.remainingRuns(path.closed, n, removed)
+      const style = engine.getStyleFromItem(path)
+      const name = (path as any).name as string | undefined
+      const parent = path.parent ?? engine.getActiveLayer()
+      let at = parent.children.indexOf(path)
+      if (at < 0) at = parent.children.length
+      for (const run of runs) {
+        if (run.length === 0) continue
+        const np = new scope.Path({ insert: false }) as paper.Path
+        for (const i of run) {
+          const seg = path.segments[i]
+          np.add(new scope.Segment(
+            seg.point.clone(),
+            (seg.handleIn as paper.Point | null)?.clone() as any,
+            (seg.handleOut as paper.Point | null)?.clone() as any
+          ))
+        }
+        np.closed = false
+        parent.insertChild(Math.min(at++, parent.children.length), np)
+        np.data.id = engine.genId()
+        np.data.isUserItem = true
+        if (name) (np as any).name = name
+        engine.applyStyleToItem(np, style)
+        selectAfter.push(np)
+      }
+      path.remove()
+    }
+    this.clearCurveSelection()
+    this.clearAnchorSelection()
+    this.clearAnchorState()
+    engine.clearSelection()
+    selectAfter.forEach((item) => { item.selected = true })
+    engine.syncSelectionToStore()
+    engine.pushHistory('Delete Segment')
+    engine.scope.view.update()
+    this.refreshChrome()
+  }
+
+  /**
+   * Anchor runs surviving a curve deletion. Open paths split at removed
+   * curves; closed paths rotate to start after a removed curve so the
+   * linearization stays contiguous, then split at each removed curve.
+   * Single-anchor runs survive (AI keeps lone anchors for later joins).
+   */
+  private remainingRuns(closed: boolean, n: number, removed: Set<number>): number[][] {
+    const runs: number[][] = []
+    if (!closed) {
+      let run: number[] = []
+      for (let i = 0; i < n; i++) {
+        run.push(i)
+        if (i < n - 1 && removed.has(i)) {
+          runs.push(run)
+          run = []
+        }
+      }
+      if (run.length > 0) runs.push(run)
+      return runs
+    }
+    let gap = -1
+    for (let c = 0; c < n; c++) {
+      if (removed.has(c)) {
+        gap = c
+        break
+      }
+    }
+    if (gap < 0) return [Array.from({ length: n }, (_, i) => i)]
+    let run: number[] = []
+    let prevEnd: number | null = null
+    for (let j = 0; j < n; j++) {
+      const c = (gap + 1 + j) % n
+      if (removed.has(c)) {
+        if (run.length > 0) {
+          runs.push(run)
+          run = []
+        }
+        prevEnd = null
+        continue
+      }
+      if (run.length === 0) run.push(c)
+      else if (prevEnd !== c) {
+        runs.push(run)
+        run = [c]
+      }
+      run.push((c + 1) % n)
+      prevEnd = (c + 1) % n
+    }
+    if (run.length > 0) runs.push(run)
+    return runs
   }
 
   /** Redraw editing chrome: bbox handles in select mode, anchors in direct-select. */

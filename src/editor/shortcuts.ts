@@ -13,6 +13,7 @@
 import type { ToolName } from './types'
 import type { EditorEngine } from './engine'
 import type { EditorStore } from './store-types'
+import type { SelectController } from './selection/select-controller'
 
 /** A single shortcut binding. */
 export interface ShortcutDef {
@@ -192,7 +193,12 @@ export function handleGlobalKeydown(
       engine?.invertSelection()
       e.preventDefault()
     } else if (key === 'a') {
-      engine?.selectAllArtwork()
+      // Direct-select with a path selection takes every anchor (AI Ctrl+A);
+      // otherwise the whole artwork is selected.
+      const direct = engine?.getController('direct-select') as SelectController | null
+      if (!(direct && direct.selectAllSubselection())) {
+        engine?.selectAllArtwork()
+      }
       e.preventDefault()
     } else if (key === 'g' && !e.shiftKey && !e.altKey) {
       // Group claims the key whenever anything is selected (failing still
@@ -247,11 +253,17 @@ export function handleGlobalKeydown(
   if (e.altKey) return
   if (e.key.startsWith('Arrow')) {
     // Arrow-key nudge: move the unlocked selection by the keyboard
-    // increment (Shift = x10). Repeats are allowed so holding the key
-    // keeps nudging; rapid nudges share one history entry.
+    // increment (Shift = x10). In direct-select with a sub-selection the
+    // anchors move instead of whole objects (AI). Repeats are allowed so
+    // holding the key keeps nudging; rapid nudges share one history entry.
     const step = (store.nudgeStep > 0 ? store.nudgeStep : 1) * (e.shiftKey ? 10 : 1)
     const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0
     const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0
+    const direct = engine?.getController('direct-select') as SelectController | null
+    if (direct && direct.nudgeSubselection(dx, dy)) {
+      e.preventDefault()
+      return
+    }
     if (engine?.nudgeSelection(dx, dy)) e.preventDefault()
     return
   }

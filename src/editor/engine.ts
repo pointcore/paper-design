@@ -2485,21 +2485,30 @@ export class EditorEngine {
       // Frame bookkeeping must never break document ops.
     }
     this.scope.view.update()
-    const now = Date.now()
-    const last = this.history[this.historyIndex]
-    if (last && last.name === 'Nudge' && now - last.timestamp < 1200) {
-      this.historySnapshots[this.historyIndex] = this.snapshotProject()
-      last.timestamp = now
-      this.store.setHistory(this.history, this.historyIndex)
-    } else {
-      this.pushHistory('Nudge')
-    }
+    this.pushCoalescedHistory('Nudge')
     try {
       selectCtrl?.frameStamped?.()
     } catch {
       // Frame bookkeeping must never break document ops.
     }
     return true
+  }
+
+  /**
+   * Record a history entry, coalescing with the previous one when it shares
+   * the name and landed inside `windowMs`. Lets held-down keys (nudge)
+   * share one undo step instead of flooding the history panel.
+   */
+  pushCoalescedHistory(name: string, windowMs = 1200) {
+    const now = Date.now()
+    const last = this.history[this.historyIndex]
+    if (last && last.name === name && now - last.timestamp < windowMs) {
+      this.historySnapshots[this.historyIndex] = this.snapshotProject()
+      last.timestamp = now
+      this.store.setHistory(this.history, this.historyIndex)
+    } else {
+      this.pushHistory(name)
+    }
   }
 
   /**
