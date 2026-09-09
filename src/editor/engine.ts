@@ -1362,6 +1362,7 @@ export class EditorEngine {
     'Add Guide', 'Move Guide', 'Delete Guide',
     'Change Fill', 'Clear Fill', 'Change Stroke', 'Clear Stroke',
     'Change Stroke Style', 'Change Dash Pattern', 'Change Blend Mode',
+    'Change Opacity', 'Spot Color',
     'Eyedropper',
     'Bring to Front', 'Bring Forward', 'Send Backward', 'Send to Back',
     'Rearrange',
@@ -2586,9 +2587,9 @@ export class EditorEngine {
    * neighbors (first and last stay put; even overlap when cramped).
    * Needs at least three unlocked items. Callers record history.
    */
-  distributeSpacing(axis: DistributeAxis): void {
+  distributeSpacing(axis: DistributeAxis): boolean {
     const items = this.getSelection().filter((item) => !item.locked && item.bounds)
-    if (items.length < 3) return
+    if (items.length < 3) return false
     const horizontal = axis === 'horizontal'
     const leading = (b: paper.Rectangle) => (horizontal ? b.x : b.y)
     const sizeOf = (b: paper.Rectangle) => (horizontal ? b.width : b.height)
@@ -2597,8 +2598,9 @@ export class EditorEngine {
     const last = leading(sorted[sorted.length - 1].bounds) + sizeOf(sorted[sorted.length - 1].bounds)
     const totalSize = sorted.reduce((sum, item) => sum + sizeOf(item.bounds), 0)
     const gap = (last - first - totalSize) / (items.length - 1)
-    if (!Number.isFinite(gap)) return
+    if (!Number.isFinite(gap)) return false
     let cursor = first
+    let moved = false
     for (const item of sorted) {
       const b = item.bounds
       const delta = cursor - leading(b)
@@ -2608,21 +2610,23 @@ export class EditorEngine {
           : new this.scope.Point(0, delta)
         item.position = item.position.add(shift)
         this.refreshItemGradient(item)
+        moved = true
       }
       cursor += sizeOf(item.bounds) + gap
     }
     this.scope.view.update()
+    return moved
   }
 
   /**
    * Spread unlocked selected items evenly along an axis by distributing
    * their centers between the extreme centers. The extreme items stay in
    * place. Needs at least three unlocked items with distinct extremes.
-   * Callers record history.
+   * Returns whether anything moved; callers record history only then.
    */
-  distributeSelection(axis: DistributeAxis): void {
+  distributeSelection(axis: DistributeAxis): boolean {
     const items = this.getSelection().filter((item) => !item.locked && item.bounds)
-    if (items.length < 3) return
+    if (items.length < 3) return false
     const horizontal = axis === 'horizontal'
     const centers = items.map((item) => {
       const b = item.bounds
@@ -2631,9 +2635,10 @@ export class EditorEngine {
     const order = items.map((_, index) => index).sort((a, b) => centers[a] - centers[b])
     const first = centers[order[0]]
     const last = centers[order[order.length - 1]]
-    if (!Number.isFinite(first) || !Number.isFinite(last)) return
-    if (Math.abs(last - first) < 1e-9) return
+    if (!Number.isFinite(first) || !Number.isFinite(last)) return false
+    if (Math.abs(last - first) < 1e-9) return false
     const step = (last - first) / (items.length - 1)
+    let moved = false
     order.forEach((itemIndex, rank) => {
       const delta = first + step * rank - centers[itemIndex]
       if (Math.abs(delta) < 1e-9) return
@@ -2643,8 +2648,10 @@ export class EditorEngine {
         : new this.scope.Point(0, delta)
       item.position = item.position.add(shift)
       this.refreshItemGradient(item)
+      moved = true
     })
     this.scope.view.update()
+    return moved
   }
 
   /**

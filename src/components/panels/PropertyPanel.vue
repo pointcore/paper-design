@@ -1213,6 +1213,7 @@ function onOpacityChange(val: number) {
     item.opacity = opacity
   })
   e.scope.view.update()
+  e.pushHistory('Change Opacity')
 }
 
 function onTransformChange() {
@@ -1311,15 +1312,17 @@ function onAlign(mode: AlignMode, label: string) {
 function onDistribute(axis: DistributeAxis) {
   const e = getEngine()
   if (!e) return
-  e.distributeSelection(axis)
-  e.pushHistory(axis === 'horizontal' ? 'Distribute Horizontally' : 'Distribute Vertically')
+  if (e.distributeSelection(axis)) {
+    e.pushHistory(axis === 'horizontal' ? 'Distribute Horizontally' : 'Distribute Vertically')
+  }
 }
 
 function onDistributeGap(axis: DistributeAxis) {
   const e = getEngine()
   if (!e) return
-  e.distributeSpacing(axis)
-  e.pushHistory('Distribute Gaps')
+  if (e.distributeSpacing(axis)) {
+    e.pushHistory('Distribute Gaps')
+  }
 }
 
 /** Number of selected unlocked paths usable as boolean operands. */
