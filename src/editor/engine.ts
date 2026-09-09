@@ -1707,34 +1707,44 @@ export class EditorEngine {
 
   /**
    * Load artboards from a project file (pre-artboard files fall back to a
-   * single board from the page size). Invalid entries are dropped; an
-   * empty result keeps the current boards.
+   * single board from the page size). Parsing is tolerant: numeric strings
+   * coerce, duplicate ids are suffixed, and only entries without any usable
+   * geometry are dropped; an empty result keeps the current boards.
    */
   private restoreArtboards(
     raw: ArtboardMeta[] | undefined,
     activeId: string | undefined,
     pageSize: { width: number; height: number } | undefined
   ): void {
+    const seenIds = new Set<string>()
     const clean = (Array.isArray(raw) ? raw : [])
-      .filter(
-        (board) =>
-          board &&
-          typeof board.id === 'string' &&
-          Number.isFinite(board.x) &&
-          Number.isFinite(board.y) &&
-          Number.isFinite(board.width) &&
-          Number.isFinite(board.height) &&
-          board.width > 0 &&
-          board.height > 0
-      )
-      .map((board, index) => ({
-        id: board.id,
-        name: board.name || `Artboard ${index + 1}`,
-        x: board.x,
-        y: board.y,
-        width: board.width,
-        height: board.height,
-      }))
+      .map((board: any, index: number) => {
+        if (!board || typeof board !== 'object') return null
+        const x = Number(board.x)
+        const y = Number(board.y)
+        const width = Number(board.width)
+        const height = Number(board.height)
+        if (
+          ![x, y, width, height].every((n) => Number.isFinite(n)) ||
+          width <= 0 ||
+          height <= 0
+        ) {
+          return null
+        }
+        let id = typeof board.id === 'string' && board.id ? board.id : this.genId()
+        let dup = 1
+        while (seenIds.has(id)) id = `${board.id}#${dup++}`
+        seenIds.add(id)
+        return {
+          id,
+          name: typeof board.name === 'string' && board.name.trim() ? board.name : `Artboard ${index + 1}`,
+          x,
+          y,
+          width,
+          height,
+        }
+      })
+      .filter((board): board is ArtboardMeta => board !== null)
     if (clean.length === 0) {
       const page = pageSize ?? this.store.pageSize
       if (Number.isFinite(page.width) && Number.isFinite(page.height) && page.width > 0 && page.height > 0) {
