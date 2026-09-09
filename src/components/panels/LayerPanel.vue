@@ -513,10 +513,24 @@ function onTreeDrop(ev: DragEvent, entry: LayerItemNode) {
     const moved = e.moveTreeItem(id, entry.id, entry.layerId)
     if (!moved) {
       store.setStatusMessage('Cannot move there')
-    } else if (entry.collapsed) {
-      // Reveal the drop so the moved item does not vanish into a fold.
-      e.setTreeCollapsed(entry.id, false)
+    } else {
+      // Reveal the drop along the whole ancestor chain so the moved item
+      // never vanishes into a folded parent above the direct target.
       treeTick.value++
+      let pid: string | null = entry.id
+      let revealed = false
+      const seen = new Set<string>()
+      while (pid && !seen.has(pid)) {
+        seen.add(pid)
+        const node = findEntry(entry.layerId, pid)
+        if (!node) break
+        if (node.collapsed) {
+          e.setTreeCollapsed(node.id, false)
+          revealed = true
+        }
+        pid = node.parentId || null
+      }
+      if (revealed) treeTick.value++
     }
     return
   }

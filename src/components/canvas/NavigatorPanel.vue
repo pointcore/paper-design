@@ -106,14 +106,21 @@ function updateViewport() {
  * Frame loop syncing the viewport rectangle. A loop (instead of chaining
  * engine.onViewChange) avoids clobbering CanvasHost's own view handler,
  * which is assigned after children mount; rounding keeps idle frames
- * free of reactive churn.
+ * free of reactive churn. Paused while collapsed (nothing to paint).
  */
 function startViewportLoop() {
   const tick = () => {
-    updateViewport()
+    if (!collapsed.value) updateViewport()
     rafId = requestAnimationFrame(tick)
   }
   rafId = requestAnimationFrame(tick)
+}
+
+function stopViewportLoop() {
+  if (rafId) {
+    cancelAnimationFrame(rafId)
+    rafId = 0
+  }
 }
 
 function docPointAt(e: PointerEvent): paper.Point | null {
@@ -169,16 +176,27 @@ watch(
     store.historyIndex,
     store.activeArtboardId,
     store.artboards.map((b) => `${b.id}:${b.x},${b.y},${b.width},${b.height},${b.name}`).join(';'),
+    // Layer visibility/lock/opacity/name bypass history (no snapshot), so
+    // watch their signature too or thumbnails go stale on toggles.
+    store.layers.map((l) => `${l.id}:${l.visible ? 1 : 0}:${l.locked ? 1 : 0}:${l.opacity}:${l.name}`).join(';'),
   ],
   () => rebuild()
 )
+
+watch(collapsed, (isCollapsed) => {
+  if (isCollapsed) stopViewportLoop()
+  else {
+    updateViewport()
+    startViewportLoop()
+  }
+})
 
 onMounted(() => {
   startViewportLoop()
 })
 
 onBeforeUnmount(() => {
-  if (rafId) cancelAnimationFrame(rafId)
+  stopViewportLoop()
   attachedEngine = null
 })
 </script>
