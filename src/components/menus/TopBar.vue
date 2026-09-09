@@ -392,7 +392,18 @@ const units = [
   { value: 'in', label: 'in' },
 ]
 
+/**
+ * Return keyboard focus to the document after a menu command. Element Plus
+ * leaves focus on the dropdown trigger, and a later Space would re-open
+ * the menu instead of parking the hand tool for canvas drag.
+ */
+function blurMenuFocus() {
+  const ae = document.activeElement as HTMLElement | null
+  if (ae && ae !== document.body && typeof ae.blur === 'function') ae.blur()
+}
+
 function onFileCmd(cmd: string) {
+  blurMenuFocus()
   const e = engineRef?.value
   switch (cmd) {
     case 'new':
@@ -731,6 +742,7 @@ async function onExportBoardsVectorPdf() {
 }
 
 function onEditCmd(cmd: string) {
+  blurMenuFocus()
   const e = engineRef?.value
   if (!e) return
   switch (cmd) {
@@ -795,6 +807,7 @@ async function onCopySVG() {
 }
 
 function onObjectCmd(cmd: string) {
+  blurMenuFocus()
   const e = engineRef?.value
   if (!e) return
   switch (cmd) {
@@ -954,6 +967,7 @@ function onObjectCmd(cmd: string) {
 }
 
 function onViewCmd(cmd: string) {
+  blurMenuFocus()
   const e = engineRef?.value
   if (!e) return
   switch (cmd) {

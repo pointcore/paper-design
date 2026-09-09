@@ -217,6 +217,11 @@ function onGlobalKeydown(e: KeyboardEvent) {
 
 /** Middle-button drag pans in every tool (paper tools ignore button 1). */
 function onCanvasMouseDown(e: MouseEvent) {
+  // Any press on the canvas returns keyboard focus to the document: menu
+  // triggers keep focus after a command, and a later Space would re-open
+  // the menu instead of parking the hand tool.
+  const ae = document.activeElement as HTMLElement | null
+  if (ae && ae !== document.body && typeof ae.blur === 'function') ae.blur()
   if (!engine || e.button !== 1 || middlePanActive) return
   middlePanActive = true
   // Screen-space anchor: doc-space diffs would feed the just-moved view back
