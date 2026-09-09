@@ -2267,7 +2267,7 @@ export class EditorEngine {
     if (!clean) return false
     // Labels render as `name (Kind)`; strip a pasted kind suffix so the
     // kind never doubles up after repeated renames.
-    const bare = clean.replace(/\s*\((Sublayer|Group|Clipping Mask|Compound Path|Closed Path|Path|Path Text|Area Text|Vertical Text|Text|Image|Symbol|Object)\)\s*$/i, '').trim()
+    const bare = clean.replace(/\s*\((Sublayer|Group|Clipping Mask|Compound Path|Closed Path|Path|Path Text|Area Text|Vertical Text|Text|Image|Symbol|Pattern \w+|Object)\)\s*$/i, '').trim()
     if (!bare) return false
     ;(item as any).name = bare
     this.pushHistory('Rename')
