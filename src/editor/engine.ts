@@ -1478,7 +1478,21 @@ export class EditorEngine {
     if (typeof parsed.version === 'number' && parsed.version > PROJECT_FILE_VERSION) {
       throw new Error('Unsupported project file version')
     }
-    this.restoreSnapshot(parsed.snapshot)
+    // Trial-restore first: importJSON throws on malformed snapshots AFTER
+    // project.clear(), which used to wipe the open document with no way
+    // back. Roll back to a backup snapshot when the file is unreadable.
+    const backup = this.snapshotProject()
+    try {
+      this.restoreSnapshot(parsed.snapshot)
+    } catch {
+      try {
+        this.restoreSnapshot(backup)
+      } catch {
+        // The backup came from our own exporter; a second failure means
+        // the project itself is unusable, so surface the file error.
+      }
+      throw new Error('Invalid project file: snapshot unreadable')
+    }
     const pageSize = parsed.pageSize
     if (
       pageSize &&
