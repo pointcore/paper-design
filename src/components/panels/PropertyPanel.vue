@@ -1313,6 +1313,16 @@ function onAlign(mode: AlignMode, label: string) {
   const e = getEngine()
   if (!e) return
   const target = alignTarget.value === 'board' ? e.getActiveArtboardRect() ?? undefined : undefined
+  // Direct-select sub-selection first (anchors); falls through to objects.
+  const sc = e.getController('direct-select') as {
+    alignSubselection?: (m: AlignMode, t?: paper.Rectangle | null) => boolean | null
+  } | null
+  const sub = sc?.alignSubselection?.(mode, target ?? null) ?? null
+  if (sub === true) return
+  if (sub === false) {
+    store.setStatusMessage('Nothing to align in the sub-selection')
+    return
+  }
   if (e.alignSelection(mode, target)) {
     e.pushHistory(label)
   } else {
@@ -1323,6 +1333,15 @@ function onAlign(mode: AlignMode, label: string) {
 function onDistribute(axis: DistributeAxis) {
   const e = getEngine()
   if (!e) return
+  const sc = e.getController('direct-select') as {
+    distributeSubselection?: (a: DistributeAxis) => boolean | null
+  } | null
+  const sub = sc?.distributeSubselection?.(axis) ?? null
+  if (sub === true) return
+  if (sub === false) {
+    store.setStatusMessage('Distribute needs 3+ sub-selected anchors')
+    return
+  }
   if (e.distributeSelection(axis)) {
     e.pushHistory(axis === 'horizontal' ? 'Distribute Horizontally' : 'Distribute Vertically')
   }
@@ -1331,6 +1350,15 @@ function onDistribute(axis: DistributeAxis) {
 function onDistributeGap(axis: DistributeAxis) {
   const e = getEngine()
   if (!e) return
+  const sc = e.getController('direct-select') as {
+    distributeSubselection?: (a: DistributeAxis) => boolean | null
+  } | null
+  const sub = sc?.distributeSubselection?.(axis) ?? null
+  if (sub === true) return
+  if (sub === false) {
+    store.setStatusMessage('Distribute needs 3+ sub-selected anchors')
+    return
+  }
   if (e.distributeSpacing(axis)) {
     e.pushHistory('Distribute Gaps')
   }

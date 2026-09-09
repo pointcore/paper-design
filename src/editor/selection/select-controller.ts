@@ -10,6 +10,7 @@
 import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
 import { AnchorChrome } from '../path-drawing/anchor-chrome'
+import type { AlignMode, DistributeAxis } from '../types'
 import { selectionColorForItem, selectionColorForItems } from './selection-style'
 import { GuideController } from '../guides/guide-controller'
 import { SnapService } from '../snap/snap-service'
@@ -1442,6 +1443,128 @@ export class SelectController {
     paths.forEach((path) => engine.refreshItemGradient(path))
     engine.scope.view.update()
     engine.pushCoalescedHistory('Nudge')
+    this.refreshChrome()
+    return true
+  }
+
+  /** Distinct sub-selected anchors (curves resolve to their end anchors). */
+  private subselectionAnchors(): Array<{ seg: paper.Segment; path: paper.Path }> {
+    const engine = this.engine
+    if (!engine) return []
+    this.pruneAnchorSelection()
+    this.pruneCurveSelection()
+    const out: Array<{ seg: paper.Segment; path: paper.Path }> = []
+    const seen = new Set<paper.Segment>()
+    const take = (path: paper.Path, index: number) => {
+      if ((path as any).locked) return
+      const seg = path.segments[index]
+      if (!seg || seen.has(seg)) return
+      seen.add(seg)
+      out.push({ seg, path })
+    }
+    for (const s of this.selectedSegments) take(s.path, s.index)
+    for (const c of this.selectedCurves) {
+      const ends = this.curveEndAnchors(c.path, c.curve)
+      if (ends) {
+        take(c.path, ends[0])
+        take(c.path, ends[1])
+      }
+    }
+    return out
+  }
+
+  /**
+   * Align sub-selected anchors (AI): to an explicit target rect (artboard)
+   * or within their own united bounds (needs 2+ anchors then). Returns
+   * null with no sub-selection (caller falls through to object align).
+   */
+  alignSubselection(mode: AlignMode, target?: paper.Rectangle | null): boolean | null {
+    const engine = this.engine
+    if (!engine || this.mode !== 'direct-select') return null
+    const anchors = this.subselectionAnchors()
+    if (anchors.length === 0) return null
+    const scope = engine.scope
+    let bounds = target ?? null
+    if (!bounds) {
+      if (anchors.length < 2) return false
+      let minX = Infinity
+      let minY = Infinity
+      let maxX = -Infinity
+      let maxY = -Infinity
+      for (const { seg } of anchors) {
+        minX = Math.min(minX, seg.point.x)
+        minY = Math.min(minY, seg.point.y)
+        maxX = Math.max(maxX, seg.point.x)
+        maxY = Math.max(maxY, seg.point.y)
+      }
+      bounds = new scope.Rectangle(minX, minY, Math.max(0, maxX - minX), Math.max(0, maxY - minY))
+    }
+    const left = bounds.x
+    const centerX = bounds.x + bounds.width / 2
+    const right = bounds.x + bounds.width
+    const top = bounds.y
+    const centerY = bounds.y + bounds.height / 2
+    const bottom = bounds.y + bounds.height
+    let moved = false
+    const paths = new Set<paper.Path>()
+    for (const { seg, path } of anchors) {
+      let x = seg.point.x
+      let y = seg.point.y
+      if (mode === 'left') x = left
+      else if (mode === 'centerX') x = centerX
+      else if (mode === 'right') x = right
+      else if (mode === 'top') y = top
+      else if (mode === 'centerY') y = centerY
+      else y = bottom
+      if (Math.abs(x - seg.point.x) < 1e-9 && Math.abs(y - seg.point.y) < 1e-9) continue
+      seg.point = new scope.Point(x, y)
+      paths.add(path)
+      moved = true
+    }
+    if (!moved) return false
+    paths.forEach((path) => engine.refreshItemGradient(path))
+    engine.scope.view.update()
+    engine.pushHistory('Align Anchors')
+    this.refreshChrome()
+    return true
+  }
+
+  /**
+   * Distribute sub-selected anchors evenly along an axis (AI). Point
+   * spacing and center spacing coincide for anchors, so one routine
+   * serves both panel buttons. Needs 3+ anchors with distinct extremes.
+   */
+  distributeSubselection(axis: DistributeAxis): boolean | null {
+    const engine = this.engine
+    if (!engine || this.mode !== 'direct-select') return null
+    const anchors = this.subselectionAnchors()
+    if (anchors.length === 0) return null
+    if (anchors.length < 3) return false
+    const horizontal = axis === 'horizontal'
+    const at = anchors.map((a) => (horizontal ? a.seg.point.x : a.seg.point.y))
+    const order = anchors.map((_, i) => i).sort((a, b) => at[a] - at[b])
+    const first = at[order[0]]
+    const last = at[order[order.length - 1]]
+    if (!Number.isFinite(first) || !Number.isFinite(last)) return false
+    if (Math.abs(last - first) < 1e-9) return false
+    const step = (last - first) / (anchors.length - 1)
+    let moved = false
+    const paths = new Set<paper.Path>()
+    order.forEach((anchorIndex, rank) => {
+      const { seg, path } = anchors[anchorIndex]
+      const goal = first + step * rank
+      const current = horizontal ? seg.point.x : seg.point.y
+      if (Math.abs(goal - current) < 1e-9) return
+      seg.point = horizontal
+        ? new engine.scope.Point(goal, seg.point.y)
+        : new engine.scope.Point(seg.point.x, goal)
+      paths.add(path)
+      moved = true
+    })
+    if (!moved) return false
+    paths.forEach((path) => engine.refreshItemGradient(path))
+    engine.scope.view.update()
+    engine.pushHistory('Distribute Anchors')
     this.refreshChrome()
     return true
   }
