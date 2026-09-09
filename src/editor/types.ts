@@ -72,6 +72,21 @@ export interface GradientStopState {
   color: string
 }
 
+/** Procedural pattern fill (AI-style swatch, Paper.js has no native type).
+ * Rendered as a clipped tile group so it survives JSON snapshots and SVG
+ * export; `data.pattern` on the group is the source of truth. */
+export interface PatternFillState {
+  kind: 'dots' | 'stripes' | 'grid' | 'crosshatch'
+  /** Motif paint (CSS color, alpha allowed). */
+  color: string
+  /** Shape background behind the motifs, or null for transparent. */
+  background: string | null
+  /** Tile density multiplier (0.25-4, 1 = 12px step). */
+  scale: number
+  /** Motif rotation in degrees. */
+  angle: number
+}
+
 /** Gradient fill parameters (geometry derives from item bounds). */
 export interface GradientState {
   type: 'linear' | 'radial'
@@ -112,6 +127,7 @@ export type TextType = 'point' | 'area' | 'path' | 'vertical'
 export interface StyleState {
   fillColor: string | null
   gradient: GradientState | null
+  pattern: PatternFillState | null
   fillRule: FillRule
   strokeColor: string | null
   strokeWidth: number

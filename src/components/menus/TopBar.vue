@@ -64,6 +64,8 @@
               <el-dropdown-item command="openPath" :disabled="!store.hasSelection">Open Path</el-dropdown-item>
               <el-dropdown-item command="makeMask" divided :disabled="!store.hasSelection">Make Clipping Mask</el-dropdown-item>
               <el-dropdown-item command="releaseMask" :disabled="!store.hasSelection">Release Clipping Mask</el-dropdown-item>
+              <el-dropdown-item command="applyPattern" divided :disabled="!store.hasSelection">Apply Pattern Fill</el-dropdown-item>
+              <el-dropdown-item command="removePattern" :disabled="!store.hasSelection">Remove Pattern Fill</el-dropdown-item>
               <el-dropdown-item command="lock" divided :disabled="!store.hasSelection">Lock</el-dropdown-item>
               <el-dropdown-item command="unlockAll">Unlock All</el-dropdown-item>
               <el-dropdown-item command="hide" divided :disabled="!store.hasSelection">Hide</el-dropdown-item>
@@ -801,6 +803,18 @@ function onObjectCmd(cmd: string) {
     case 'releaseMask':
       if (!e.releaseClippingMask()) {
         store.setStatusMessage('Select a clipping mask to release')
+      }
+      break
+    case 'applyPattern': {
+      const fallback = store.style.pattern ?? { kind: 'dots' as const, color: '#000000', background: '#ffffff', scale: 1, angle: 45 }
+      if (e.applyPatternFill({ ...fallback }) === 0) {
+        store.setStatusMessage('Pattern needs a path selection')
+      }
+      break
+    }
+    case 'removePattern':
+      if (e.removePatternFill() === 0) {
+        store.setStatusMessage('Select a pattern to remove')
       }
       break
   }

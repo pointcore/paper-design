@@ -29,6 +29,7 @@ A vector graphics editor built with **Vue 3 + TypeScript + Paper.js**, offering 
 - **Artboards**: Multiple named page sheets with white-sheet visuals and labels, add (offset beside active) / delete / rename, click-to-activate with pan, per-board position and size; Save/Open round-trips the set, raster page export targets the active board.
 - **Object ops**: Bring to front/back plus stepwise forward/backward, group/ungroup, isolate groups (double-click, banner + Esc to exit), lock/unlock-all, hide/show-all, select same fill/stroke. Locked items are skipped by selection and tools; hidden items never hit-test.
 - **Appearance**: Single fill + stroke with caps, joins, miter limit, dash patterns and all 16 canvas blend modes, plus opacity and linear/radial gradient fills with a stops editor. Fill, stroke and stop pickers support alpha; applied live from the properties panel to the selection and to subsequently drawn shapes.
+- **Pattern fills**: Procedural dots/stripes/grid/crosshatch swatches (motif color + background + scale + angle) rendered as clipped tile groups, so they survive history, Save/Open and SVG export. Apply/retile/remove from the Properties panel or Object menu; eyedropper picks patterns; remove before boolean ops.
 - **Page setup**: Canvas Settings page size (presets, custom W/H, orientation swap) driving New Document, Save/Open persistence and page-area raster export.
 - **Guides & grid**: Ruler drag-out guides with move/delete (drag back to a ruler), line grid with size control, transparent checkerboard background.
 - **Navigator**: Floating whole-scene minimap (artwork plus artboard sheets) with a live viewport rectangle; click or drag to pan, collapsible, toggleable from the View menu.
@@ -36,7 +37,7 @@ A vector graphics editor built with **Vue 3 + TypeScript + Paper.js**, offering 
 - **Annotation tools**: Callout annotations with persisted content/style models.
 - **Measure tool**: Drag for a dashed preview with length (ruler units) and angle in the status bar; transient, nothing is committed.
 
-Not yet implemented: pattern fills, mesh gradients, opacity masks, and multi-fill/stroke appearance stacks.
+Not yet implemented: mesh gradients, opacity masks, and multi-fill/stroke appearance stacks.
 
 ---
 

@@ -82,6 +82,18 @@ export class EyedropperController {
   private applyEyedropper(picked: paper.Item) {
     const engine = this.engine
     if (!engine) return
+    // Pattern fills copy as patterns (not as the tile motif color).
+    const pickedPattern = engine.getPatternFromItem(picked)
+    if (pickedPattern) {
+      engine.store.updateStyle({ pattern: { ...pickedPattern }, fillColor: null, gradient: null })
+      const targets = engine.getSelection().filter((i) => !i.locked && i.parent)
+      if (targets.length > 0) {
+        engine.applyPatternFill({ ...pickedPattern })
+      } else {
+        engine.showStatus('Pattern picked')
+      }
+      return
+    }
     const leaf = this.resolveLeaf(picked)
     if (!leaf) return
     const style = engine.getStyleFromItem(leaf)

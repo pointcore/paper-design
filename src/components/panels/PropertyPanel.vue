@@ -257,6 +257,37 @@
         </div>
       </div>
 
+      <div class="prop-section">
+        <div class="prop-head" @click="toggle('pattern')">
+          <span class="prop-chevron" :class="{ closed: !open.pattern }">›</span>
+          <span class="prop-label">Pattern</span>
+        </div>
+        <div v-show="open.pattern" class="prop-body">
+          <div class="prop-row">
+            <el-select v-model="patternKind" size="small" class="flex-ctl" title="Pattern preset">
+              <el-option v-for="p in patternPresets" :key="p.value" :label="p.label" :value="p.value" />
+            </el-select>
+            <el-color-picker v-model="patternColor" size="small" show-alpha title="Motif color" />
+          </div>
+          <div class="prop-row">
+            <span class="prop-label-sm">Back</span>
+            <el-color-picker v-model="patternBackground" size="small" show-alpha title="Background" :disabled="patternTransparent" />
+            <el-button size="small" class="grid-btn" :type="patternTransparent ? 'primary' : ''" title="Transparent background" @click="patternTransparent = !patternTransparent">None</el-button>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label-sm">Scale</span>
+            <el-input-number v-model="patternScale" :min="0.25" :max="4" :step="0.25" :precision="2" size="small" controls-position="right" />
+            <span class="prop-label-sm">Angle</span>
+            <el-input-number v-model="patternAngle" :min="0" :max="180" :step="15" size="small" controls-position="right" />
+          </div>
+          <div class="btn-grid-2">
+            <el-button size="small" class="grid-btn" :disabled="!canApplyPattern" @click="onApplyPattern">Apply</el-button>
+            <el-button size="small" class="grid-btn" :disabled="!isPatternSelected" @click="onRemovePattern">Remove</el-button>
+          </div>
+          <div v-if="patternHint" class="ai-desc">{{ patternHint }}</div>
+        </div>
+      </div>
+
       <div v-if="isTextSelected" class="prop-section">
         <div class="prop-head" @click="toggle('text')">
           <span class="prop-chevron" :class="{ closed: !open.text }">›</span>
@@ -341,7 +372,7 @@ import {
 } from '@element-plus/icons-vue'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
-import type { AlignMode, BooleanOperation, DistributeAxis, GradientState, LineCap, LineJoin, ReferencePoint, RulerUnit, TextAlign } from '../../editor/types'
+import type { AlignMode, BooleanOperation, DistributeAxis, GradientState, LineCap, LineJoin, PatternFillState, ReferencePoint, RulerUnit, TextAlign } from '../../editor/types'
 
 const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
@@ -352,6 +383,7 @@ const open = ref({
   text: true,
   transform: true,
   fill: true,
+  pattern: true,
   align: false,
   path: false,
 })
@@ -473,6 +505,97 @@ function syncGradientFromStore() {
   gradientStops.value = gradient
     ? gradient.stops.map((stop) => ({ offset: Math.round(stop.offset * 100), color: stop.color }))
     : []
+}
+
+// ---- Pattern fill (procedural presets rendered as clipped tiles) ----
+
+const patternPresets: Array<{ value: PatternFillState['kind']; label: string }> = [
+  { value: 'dots', label: 'Dots' },
+  { value: 'stripes', label: 'Stripes' },
+  { value: 'grid', label: 'Grid' },
+  { value: 'crosshatch', label: 'Crosshatch' },
+]
+
+const patternKind = ref<PatternFillState['kind']>('dots')
+const patternColor = ref('#000000')
+const patternBackground = ref('#ffffff')
+const patternTransparent = ref(false)
+const patternScale = ref(1)
+const patternAngle = ref(45)
+const isPatternSelected = ref(false)
+const canApplyPattern = ref(false)
+const patternHint = ref('')
+
+/** Read pattern state from the current selection into the panel. */
+function syncPatternFromSelection() {
+  const e = getEngine()
+  isPatternSelected.value = false
+  canApplyPattern.value = false
+  patternHint.value = ''
+  if (!e || !store.hasSelection) return
+  const items = e.getSelection()
+  if (items.length === 0) return
+  const first = items[0] as any
+  const found = e.getPatternFromItem(first)
+  if (found) {
+    isPatternSelected.value = true
+    patternKind.value = found.kind
+    patternColor.value = found.color || '#000000'
+    patternTransparent.value = !found.background
+    patternBackground.value = found.background || '#ffffff'
+    patternScale.value = found.scale || 1
+    patternAngle.value = found.angle || 0
+  } else if (store.style.pattern) {
+    const p = store.style.pattern
+    patternKind.value = p.kind
+    patternColor.value = p.color
+    patternTransparent.value = !p.background
+    patternBackground.value = p.background || '#ffffff'
+    patternScale.value = p.scale
+    patternAngle.value = p.angle
+  }
+  canApplyPattern.value = items.some((item: any) => {
+    if (e.isPatternGroup(item)) return true
+    const name = String(item?.className ?? item?.constructor?.name ?? '')
+    return /path/i.test(name)
+  })
+  if (!canApplyPattern.value) {
+    patternHint.value = 'Select a path to apply a pattern.'
+  } else if (isPatternSelected.value) {
+    patternHint.value = 'Pattern moves/scales with its shape. Remove before boolean ops.'
+  }
+}
+
+function currentPattern(): PatternFillState {
+  return {
+    kind: patternKind.value,
+    color: patternColor.value || '#000000',
+    background: patternTransparent.value ? null : (patternBackground.value || null),
+    scale: Math.min(4, Math.max(0.25, Number(patternScale.value) || 1)),
+    angle: Number(patternAngle.value) || 0,
+  }
+}
+
+function onApplyPattern() {
+  const e = getEngine()
+  if (!e) return
+  const applied = e.applyPatternFill(currentPattern())
+  syncPatternFromSelection()
+  if (applied === 0) {
+    store.setStatusMessage('Pattern needs a path selection')
+  }
+}
+
+function onRemovePattern() {
+  const e = getEngine()
+  if (!e) return
+  if (e.removePatternFill() === 0) {
+    // Also covers Release Clipping Mask on a pattern group.
+    if (!e.releaseClippingMask()) {
+      store.setStatusMessage('Select a pattern to remove')
+    }
+  }
+  syncPatternFromSelection()
 }
 
 const lineCap = ref<LineCap>(store.style.lineCap)
@@ -978,6 +1101,7 @@ watch(() => store.selectedItemIds, () => {
   syncTransformFromSelection()
   syncGradientFromStore()
   syncTextFromSelection()
+  syncPatternFromSelection()
 }, { immediate: true })
 </script>
 
