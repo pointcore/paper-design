@@ -44,6 +44,8 @@
       <template v-if="store.tool === 'polygon'">
         <span class="cb-label">Sides</span>
         <el-input-number v-model="polygonSides" :min="3" :max="64" size="small" style="width: 84px" @change="onPolygonSides" />
+        <el-button size="small" class="cb-btn" :type="polygonStar ? 'primary' : ''" title="Star (inner radius)" @click="toggleStar">Star</el-button>
+        <el-input-number v-if="polygonStar" v-model="starRatio" :min="0.1" :max="0.9" :step="0.05" size="small" style="width: 76px" title="Inner radius ratio" @change="onStarRatio" />
       </template>
       <template v-if="store.tool === 'spiral'">
         <span class="cb-label">Turns</span>
@@ -106,7 +108,7 @@ const getEngine = () => engineRef?.value ?? null
 
 const toolLabel = computed(() => {
   const names: Record<string, string> = {
-    select: 'Select', 'direct-select': 'Direct Select', pen: 'Pen', curvature: 'Curvature',
+    select: 'Select', 'direct-select': 'Direct Select', lasso: 'Lasso', pen: 'Pen', curvature: 'Curvature',
     'add-anchor': 'Add Anchor', 'delete-anchor': 'Delete Anchor', 'convert-anchor': 'Convert Anchor',
     type: 'Point Text', 'area-type': 'Area Text', 'type-on-path': 'Type on Path', 'vertical-type': 'Vertical Text',
     rect: 'Rectangle', 'rounded-rect': 'Rounded Rect', ellipse: 'Ellipse', polygon: 'Polygon',
@@ -120,6 +122,7 @@ const toolLabel = computed(() => {
 })
 const toolHint = computed(() => {
   switch (store.tool) {
+    case 'lasso': return 'Drag a loop · Shift adds · Alt removes'
     case 'rotate': return 'Drag to rotate · Shift = 45° snap'
     case 'scale': return 'Drag to scale · Shift = 10% snap'
     case 'mirror': return 'Click = flip H · Shift-click = flip V'
@@ -130,7 +133,7 @@ const toolHint = computed(() => {
   }
 })
 
-const isSelectTool = computed(() => store.tool === 'select' || store.tool === 'direct-select' || store.tool === 'free-transform')
+const isSelectTool = computed(() => store.tool === 'select' || store.tool === 'direct-select' || store.tool === 'free-transform' || store.tool === 'lasso')
 const isTextTool = computed(() => store.tool === 'type' || store.tool === 'area-type' || store.tool === 'type-on-path' || store.tool === 'vertical-type')
 const isShapeTool = computed(() => ['rect', 'rounded-rect', 'ellipse', 'polygon', 'arc', 'spiral', 'line', 'rect-grid', 'polar-grid'].includes(store.tool))
 const isTransformTool = computed(() => store.tool === 'rotate' || store.tool === 'scale' || store.tool === 'mirror')
@@ -176,6 +179,8 @@ const isBold = ref(String(store.charStyle.fontWeight) === 'bold')
 const isItalic = ref(store.charStyle.fontStyle === 'italic')
 const pathOffset = ref((store as any).textPathOffset ?? 0)
 const polygonSides = ref((store as any).polygonSides ?? 5)
+const polygonStar = ref(!!(store as any).polygonStar)
+const starRatio = ref((store as any).starRatio ?? 0.5)
 const spiralTurns = ref((store as any).spiralTurns ?? 3)
 const roundedRadius = ref((store as any).roundedRadius ?? 12)
 const gridRows = ref((store as any).gridRows ?? 4)
@@ -257,6 +262,11 @@ function onPathOffset(v: number | undefined) {
   ;(store as any).setTextPathOffset?.(v)
 }
 function onPolygonSides(v: number | undefined) { if (v !== undefined) (store as any).setPolygonSides?.(v) }
+function toggleStar() {
+  polygonStar.value = !polygonStar.value
+  ;(store as any).setPolygonStar?.(polygonStar.value)
+}
+function onStarRatio(v: number | undefined) { if (v !== undefined) (store as any).setStarRatio?.(v) }
 function onSpiralTurns(v: number | undefined) { if (v !== undefined) (store as any).setSpiralTurns?.(v) }
 function onRoundedRadius(v: number | undefined) { if (v !== undefined) (store as any).setRoundedRadius?.(v) }
 function onGridRows(v: number | undefined) { if (v !== undefined) (store as any).setGridOptions?.(v, gridCols.value) }

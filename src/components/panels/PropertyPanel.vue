@@ -209,6 +209,11 @@
                 <el-radio-button value="radial">Radial</el-radio-button>
               </el-radio-group>
             </div>
+            <div v-if="gradientType === 'linear'" class="prop-row">
+              <span class="prop-label-sm">Angle</span>
+              <el-input-number v-model="gradientAngle" :min="0" :max="360" size="small" controls-position="right" @change="onGradientChange" />
+              <span class="unit">deg</span>
+            </div>
             <div class="prop-row" v-for="(stop, index) in gradientStops" :key="index">
               <el-color-picker v-model="stop.color" size="small" show-alpha @change="onGradientChange" />
               <el-input-number v-model="stop.offset" :min="0" :max="100" size="small" controls-position="right" @change="onGradientChange" />
@@ -552,6 +557,7 @@ const opacityValue = ref(Math.round(store.style.opacity * 100))
 // Fill kind follows the store gradient (solid when none is set).
 const fillKind = computed(() => (store.style.gradient ? 'gradient' : 'solid'))
 const gradientType = ref<'linear' | 'radial'>('linear')
+const gradientAngle = ref(0)
 // Editable gradient stops (offsets in percent for the inputs).
 const gradientStops = ref<Array<{ offset: number; color: string }>>([])
 
@@ -577,6 +583,7 @@ function syncStyleFromSelection() {
 function syncGradientFromStore() {
   const gradient = store.style.gradient
   gradientType.value = gradient?.type ?? 'linear'
+  gradientAngle.value = Math.round(gradient?.angle ?? 0)
   gradientStops.value = gradient
     ? gradient.stops.map((stop) => ({ offset: Math.round(stop.offset * 100), color: stop.color }))
     : []
@@ -1142,7 +1149,10 @@ function currentGradient(): GradientState {
       color: stop.color || '#000000',
     }))
     .sort((a, b) => a.offset - b.offset)
-  return { type: gradientType.value, stops }
+  const angle = gradientType.value === 'linear'
+    ? ((Number(gradientAngle.value) || 0) % 360 + 360) % 360
+    : undefined
+  return angle === undefined ? { type: gradientType.value, stops } : { type: gradientType.value, stops, angle }
 }
 
 /** Write the edited gradient to the store and repaint the selection. */

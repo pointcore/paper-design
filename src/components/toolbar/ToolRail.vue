@@ -92,6 +92,7 @@ const groups: ToolGroup[] = [
   { key: 'select', members: [
     { name: 'select', tip: 'Select Tool (V)', icon: Pointer },
     { name: 'direct-select', tip: 'Direct Select Tool (A)', icon: Aim },
+    { name: 'lasso', tip: 'Lasso Tool (Q, drag a loop)', glyph: '◎' },
     { name: 'free-transform', tip: 'Free Transform (Shift+F)', glyph: '⛶' },
   ] },
   { key: 'draw', members: [
@@ -111,7 +112,7 @@ const groups: ToolGroup[] = [
     { name: 'rect', tip: 'Rectangle Tool (R)', icon: MagicStick },
     { name: 'rounded-rect', tip: 'Rounded Rectangle Tool', icon: Crop },
     { name: 'ellipse', tip: 'Ellipse Tool (L)', icon: Star },
-    { name: 'polygon', tip: 'Polygon Tool', icon: Discount },
+    { name: 'polygon', tip: 'Polygon / Star Tool', icon: Discount },
     { name: 'arc', tip: 'Arc Tool', glyph: '◠' },
     { name: 'line', tip: 'Line Segment Tool (\\)', icon: Position },
     { name: 'spiral', tip: 'Spiral Tool', icon: Loading },

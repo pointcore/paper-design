@@ -49,6 +49,7 @@
       <div class="menu-item" @click="ctxLock">Lock</div>
       <div class="menu-item" @click="ctxHide">Hide</div>
       <div class="menu-item" @click="ctxSameFill">Select Same Fill</div>
+      <div class="menu-item" @click="ctxSameStroke">Select Same Stroke</div>
     </div>
   </div>
 </template>
@@ -456,7 +457,7 @@ function exitIsolation() {
 function onContextMenu(e: MouseEvent) {
   // Clamp inside the viewport so edge clicks keep every item clickable.
   const MENU_W = 200
-  const MENU_H = 460
+  const MENU_H = 490
   contextMenu.value = {
     visible: true,
     x: Math.min(e.clientX, window.innerWidth - MENU_W),
@@ -558,6 +559,14 @@ function ctxSameFill() {
   if (engine) {
     const n = engine.selectSame('fill')
     store.setStatusMessage(`Selected ${n} items with the same fill`)
+  }
+  hideMenu()
+}
+
+function ctxSameStroke() {
+  if (engine) {
+    const n = engine.selectSame('stroke')
+    store.setStatusMessage(`Selected ${n} items with the same stroke`)
   }
   hideMenu()
 }

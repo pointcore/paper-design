@@ -53,7 +53,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, inject, type Ref } from 'vue'
+import { computed, ref, watch, inject, type Ref } from 'vue'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
 import type { RasterExportArea, RasterExportFormat, WorkspacePreset } from '../../editor/types'
@@ -74,13 +74,48 @@ const workspaceHint = computed(() => {
   }
 })
 function onWorkspace(v: string) {
-  store.setWorkspace(v as WorkspacePreset)
+  const preset = v as WorkspacePreset
+  store.setWorkspace(preset)
   // Workspaces rearrange the dock instead of hiding tools.
-  if (v === 'typography') store.setRightTab('property')
-  else if (v === 'print') store.setRightTab('property')
-  else store.setRightTab('property')
-  store.setStatusMessage(`Workspace: ${v}`)
+  if (preset === 'typography') {
+    store.setShowControlBar(true)
+    store.setShowNavigator(false)
+    store.setToolRailDensity('single')
+    store.setRightTab('property')
+  } else if (preset === 'print') {
+    store.setShowControlBar(true)
+    store.setShowNavigator(true)
+    store.setToolRailDensity('single')
+    store.updateView({ proofMode: 'cmyk' })
+    store.setRightTab('property')
+  } else {
+    store.setShowControlBar(true)
+    store.setShowNavigator(true)
+    store.setToolRailDensity('single')
+    store.updateView({ proofMode: 'rgb' })
+    store.setRightTab('property')
+  }
+  persistUiPrefs()
+  store.setStatusMessage(`Workspace: ${preset}`)
 }
+
+/** Persist dock prefs across reloads (best effort). */
+function persistUiPrefs() {
+  try {
+    localStorage.setItem('vve.ui', JSON.stringify({
+      workspace: store.ui.workspace,
+      density: store.ui.toolRailDensity,
+      controlBar: store.ui.showControlBar,
+      navigator: store.ui.showNavigator,
+    }))
+  } catch { /* private mode */ }
+}
+
+// Keep stored prefs in sync when the dock buttons toggle them.
+watch(
+  () => [store.ui.toolRailDensity, store.ui.showControlBar, store.ui.showNavigator, store.ui.workspace].join('|'),
+  () => persistUiPrefs()
+)
 
 const area = ref<RasterExportArea>('artwork')
 const format = ref<RasterExportFormat>('png')

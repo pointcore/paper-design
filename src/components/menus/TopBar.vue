@@ -79,6 +79,9 @@
               <el-dropdown-item command="showAll">Show All</el-dropdown-item>
               <el-dropdown-item command="sameFill" divided :disabled="!store.hasSelection">Select Same Fill</el-dropdown-item>
               <el-dropdown-item command="sameStroke" :disabled="!store.hasSelection">Select Same Stroke</el-dropdown-item>
+              <el-dropdown-item command="sameWidth" :disabled="!store.hasSelection">Select Same Stroke Width</el-dropdown-item>
+              <el-dropdown-item command="sameOpacity" :disabled="!store.hasSelection">Select Same Opacity</el-dropdown-item>
+              <el-dropdown-item command="sameBlend" :disabled="!store.hasSelection">Select Same Blend Mode</el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
@@ -101,6 +104,7 @@
               <el-dropdown-item command="guides" :icon="store.view.showGuides ? Check : undefined">
                 Guides
               </el-dropdown-item>
+              <el-dropdown-item command="guidesDialog">Guides...</el-dropdown-item>
               <el-dropdown-item command="lockGuides" :icon="store.view.guidesLocked ? Check : undefined">
                 Lock Guides
               </el-dropdown-item>
@@ -316,6 +320,34 @@
         </div>
       </div>
     </AppDialog>
+
+    <!-- Guides Dialog (positions edit live; Clear All empties the guide layer) -->
+    <AppDialog
+      v-model="guidesVisible"
+      title="Guides"
+      :width="380"
+      :show-footer="false"
+    >
+      <template #footer>
+        <el-button size="small" @click="guidesVisible = false">Close</el-button>
+      </template>
+      <div class="settings-body app-settings">
+        <div v-if="guideRows.length === 0" class="setting-desc">No guides yet — drag one out from a ruler.</div>
+        <div v-for="g in guideRows" :key="g.id" class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">{{ g.orientation === 'vertical' ? 'Vertical X' : 'Horizontal Y' }}</span>
+          </div>
+          <el-input-number :model-value="g.position" :precision="1" size="small" style="width: 130px" @change="(v: number | undefined) => onGuidePosition(g.id, v)" />
+          <el-button size="small" title="Delete guide" @click="onGuideDelete(g.id)">×</el-button>
+        </div>
+        <div v-if="guideRows.length > 0" class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">All guides</span>
+          </div>
+          <el-button size="small" @click="onGuidesClear">Clear All</el-button>
+        </div>
+      </div>
+    </AppDialog>
   </div>
 </template>
 
@@ -335,6 +367,47 @@ const settingsVisible = computed({
   set: (v: boolean) => store.setSettingsOpen(v),
 })
 const exportVisible = ref(false)
+const guidesVisible = ref(false)
+const guidesTick = ref(0)
+/** Guide rows (rebuilt on open + every guide op + history jumps). */
+const guideRows = computed(() => {
+  void guidesTick.value
+  void store.historyIndex
+  void guidesVisible.value
+  return engineRef?.value?.listGuides() ?? []
+})
+function openGuidesDialog() {
+  guidesTick.value++
+  guidesVisible.value = true
+}
+function onGuidePosition(id: string, v: number | undefined) {
+  const e = engineRef?.value
+  if (!e || v === undefined || !Number.isFinite(v)) {
+    guidesTick.value++
+    return
+  }
+  if (e.moveGuideById(id, v)) {
+    e.pushHistory('Move Guide')
+  } else {
+    store.setStatusMessage('Guide not found')
+  }
+  guidesTick.value++
+}
+function onGuideDelete(id: string) {
+  const e = engineRef?.value
+  if (!e) return
+  if (e.deleteGuideById(id)) {
+    e.pushHistory('Delete Guide')
+  }
+  guidesTick.value++
+}
+function onGuidesClear() {
+  const e = engineRef?.value
+  if (!e) return
+  e.clearGuides()
+  e.pushHistory('Clear Guides')
+  guidesTick.value++
+}
 const exportForm = reactive({
   format: 'png' as RasterExportFormat,
   scale: 2,
@@ -937,6 +1010,21 @@ function onObjectCmd(cmd: string) {
       store.setStatusMessage(`Selected ${count} items with the same stroke`)
       break
     }
+    case 'sameWidth': {
+      const count = e.selectSame('strokeWidth')
+      store.setStatusMessage(`Selected ${count} items with the same stroke width`)
+      break
+    }
+    case 'sameOpacity': {
+      const count = e.selectSame('opacity')
+      store.setStatusMessage(`Selected ${count} items with the same opacity`)
+      break
+    }
+    case 'sameBlend': {
+      const count = e.selectSame('blendMode')
+      store.setStatusMessage(`Selected ${count} items with the same blend mode`)
+      break
+    }
     case 'makeCompound':
       if (!e.makeCompoundPath()) {
         store.setStatusMessage('Compound needs at least two unlocked paths')
@@ -1068,6 +1156,9 @@ function onViewCmd(cmd: string) {
       break
     case 'guides':
       store.updateView({ showGuides: !store.view.showGuides })
+      break
+    case 'guidesDialog':
+      openGuidesDialog()
       break
     case 'lockGuides':
       store.updateView({ guidesLocked: !store.view.guidesLocked })
@@ -1244,7 +1335,7 @@ function onNudgeStepChange(val: number | undefined) {
 }
 
 function onHelp() {
-  store.setStatusMessage('Shortcuts: V Select | A Direct Select | P Pen | N Pencil | Shift+E Eraser | Shift+B Blob | B Brush | C Scissors | Curvature | +/- & C Anchor Tools | Space Pan | Ctrl+0 Fit | Arrows Nudge | Ctrl+A Select | Ctrl+G Group | Ctrl+2 Lock | Ctrl+3 Hide | Ctrl+F/B Paste | Ctrl+[ Order | Ctrl+S Save | Ctrl+Shift+I Invert | Esc Cancel')
+  store.setStatusMessage('Shortcuts: V Select | A Direct | Q Lasso | P Pen | N Pencil | Shift+E Eraser | Shift+B Blob | B Brush | C Scissors | Shift+M Builder | Shift+W Width | Shift+R Rotate | Shift+S Scale | Shift+O Mirror | Shift+F FreeTf | +/- & Shift+C Anchors | Space Pan | Ctrl+0 Fit | Arrows Nudge | Ctrl+A Select | Ctrl+G Group | Ctrl+2 Lock | Ctrl+3 Hide | Ctrl+F/B Paste | Ctrl+[ Order | Ctrl+S Save | Ctrl+Shift+I Invert | Esc Cancel')
 }
 </script>
 

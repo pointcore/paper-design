@@ -39,7 +39,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, provide } from 'vue'
+import { computed, ref, provide, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useEditorStore } from './editor/store'
 import { rulerUnitFactor } from './editor/geometry'
@@ -57,6 +57,25 @@ const { tool } = storeToRefs(store)
 
 const engineRef = ref<EditorEngine | null>(null)
 provide('engine', engineRef)
+
+// Restore dock prefs saved by the Actions panel (best effort).
+onMounted(() => {
+  try {
+    const raw = localStorage.getItem('vve.ui')
+    if (!raw) return
+    const prefs = JSON.parse(raw) as {
+      workspace?: string; density?: string; controlBar?: boolean; navigator?: boolean
+    }
+    if (prefs.workspace === 'essentials' || prefs.workspace === 'typography' || prefs.workspace === 'print') {
+      store.setWorkspace(prefs.workspace)
+    }
+    if (prefs.density === 'single' || prefs.density === 'double') {
+      store.setToolRailDensity(prefs.density)
+    }
+    if (typeof prefs.controlBar === 'boolean') store.setShowControlBar(prefs.controlBar)
+    if (typeof prefs.navigator === 'boolean') store.setShowNavigator(prefs.navigator)
+  } catch { /* private mode: defaults stand */ }
+})
 
 const zoomPercent = computed(() => `${Math.round(store.view.zoom * 100)}%`)
 const snapLabel = computed(() => store.snap.enable ? 'Snap On' : 'Snap Off')
@@ -98,6 +117,7 @@ const currentToolName = computed(() => {
   const names: Record<string, string> = {
     select: 'Select',
     'direct-select': 'Direct Select',
+    lasso: 'Lasso',
     'free-transform': 'Free Transform',
     pen: 'Pen',
     curvature: 'Curvature',
