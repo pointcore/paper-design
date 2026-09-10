@@ -13,6 +13,7 @@
         <div class="status-bar">
           <div class="status-left">
             <span class="status-item">{{ cursorReadout }}</span>
+            <span v-if="selectionLabel" class="status-item">{{ selectionLabel }}</span>
             <span class="status-item status-click" :title="'Toggle snapping'" @click="toggleSnap">{{ snapLabel }}</span>
             <span v-if="store.keyObjectId" class="status-item status-click" title="Clear key object" @click="clearKey">Key ●</span>
           </div>
@@ -79,6 +80,14 @@ onMounted(() => {
 
 const zoomPercent = computed(() => `${Math.round(store.view.zoom * 100)}%`)
 const snapLabel = computed(() => store.snap.enable ? 'Snap On' : 'Snap Off')
+/** Selection readout (AI Info parity): count + united size. */
+const selectionLabel = computed(() => {
+  const n = store.selectedItemIds.length
+  if (n === 0) return ''
+  const w = Math.round(store.transform.width * 10) / 10
+  const h = Math.round(store.transform.height * 10) / 10
+  return `${n} selected · ${w}×${h}`
+})
 const artboardLabel = computed(() => {
   const boards = store.artboards
   if (boards.length === 0) return 'No boards'
@@ -141,6 +150,8 @@ const currentToolName = computed(() => {
     'blob-brush': 'Blob Brush',
     brush: 'Brush',
     eraser: 'Eraser',
+    gradient: 'Gradient',
+    wand: 'Wand',
     eyedropper: 'Eyedropper',
     scissors: 'Scissors',
     'shape-builder': 'Shape Builder',

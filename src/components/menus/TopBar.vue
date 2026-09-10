@@ -1335,7 +1335,7 @@ function onNudgeStepChange(val: number | undefined) {
 }
 
 function onHelp() {
-  store.setStatusMessage('Shortcuts: V Select | A Direct | Q Lasso | P Pen | N Pencil | Shift+E Eraser | Shift+B Blob | B Brush | C Scissors | Shift+M Builder | Shift+W Width | Shift+R Rotate | Shift+S Scale | Shift+O Mirror | Shift+F FreeTf | +/- & Shift+C Anchors | Space Pan | Ctrl+0 Fit | Arrows Nudge | Ctrl+A Select | Ctrl+G Group | Ctrl+2 Lock | Ctrl+3 Hide | Ctrl+F/B Paste | Ctrl+[ Order | Ctrl+S Save | Ctrl+Shift+I Invert | Esc Cancel')
+  store.setStatusMessage('Shortcuts: V Select | A Direct | Q Lasso | Y Wand | P Pen | N Pencil | Shift+E Eraser | Shift+B Blob | B Brush | G Gradient | C Scissors | Shift+M Builder | Shift+W Width | Shift+R Rotate | Shift+S Scale | Shift+O Mirror | Shift+F FreeTf | +/- & Shift+C Anchors | Space Pan | Ctrl+0 Fit | Arrows Nudge | Ctrl+A Select | Ctrl+G Group | Ctrl+2 Lock | Ctrl+3 Hide | Ctrl+F/B Paste | Ctrl+[ Order | Ctrl+S Save | Ctrl+Shift+I Invert | Esc Cancel')
 }
 </script>
 

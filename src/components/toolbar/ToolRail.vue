@@ -93,6 +93,7 @@ const groups: ToolGroup[] = [
     { name: 'select', tip: 'Select Tool (V)', icon: Pointer },
     { name: 'direct-select', tip: 'Direct Select Tool (A)', icon: Aim },
     { name: 'lasso', tip: 'Lasso Tool (Q, drag a loop)', glyph: '◎' },
+    { name: 'wand', tip: 'Magic Wand (Y, click a fill)', glyph: '🪄' },
     { name: 'free-transform', tip: 'Free Transform (Shift+F)', glyph: '⛶' },
   ] },
   { key: 'draw', members: [
@@ -129,6 +130,7 @@ const groups: ToolGroup[] = [
     { name: 'scissors', tip: 'Scissors Tool (C)', icon: Scissor },
     { name: 'shape-builder', tip: 'Shape Builder Tool (Shift+M)', icon: Share },
     { name: 'width', tip: 'Width Tool (Shift+W)', icon: Expand },
+    { name: 'gradient', tip: 'Gradient Tool (G, drag to set angle)', glyph: '🌈' },
     { name: 'eyedropper', tip: 'Eyedropper Tool (I)', icon: Stamp },
   ] },
   { key: 'transform', members: [

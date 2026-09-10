@@ -75,6 +75,29 @@
       <el-input-number v-model="scalePct" :min="1" :max="1600" size="small" style="width: 88px" @change="onScalePct" />
     </template>
 
+    <!-- Gradient tool: angle + type -->
+    <template v-else-if="store.tool === 'gradient'">
+      <span class="cb-label">Angle</span>
+      <el-input-number v-model="gradientAngle" :min="0" :max="360" size="small" style="width: 88px" @change="onGradientAngle" />
+      <el-radio-group v-model="gradientType" size="small" @change="onGradientType">
+        <el-radio-button value="linear">Linear</el-radio-button>
+        <el-radio-button value="radial">Radial</el-radio-button>
+      </el-radio-group>
+      <span class="cb-hint">Drag on canvas to set the angle</span>
+    </template>
+
+    <!-- Callout tool: leader + label style -->
+    <template v-else-if="store.tool === 'callout'">
+      <span class="cb-label">Line</span>
+      <el-color-picker v-model="calloutColor" size="small" @change="onCalloutStyle" />
+      <el-input-number v-model="calloutWidth" :min="0.5" :max="20" size="small" style="width: 76px" title="Leader width" @change="onCalloutStyle" />
+      <span class="cb-label">Fill</span>
+      <el-color-picker v-model="calloutFill" size="small" @change="onCalloutStyle" />
+      <span class="cb-label">Text</span>
+      <el-color-picker v-model="calloutText" size="small" @change="onCalloutStyle" />
+      <el-input-number v-model="calloutSize" :min="6" :max="120" size="small" style="width: 76px" title="Label size" @change="onCalloutStyle" />
+    </template>
+
     <!-- Paint tools: stroke width + opacity quick -->
     <template v-else-if="isPaintTool">
       <span class="cb-label">Stroke</span>
@@ -108,13 +131,13 @@ const getEngine = () => engineRef?.value ?? null
 
 const toolLabel = computed(() => {
   const names: Record<string, string> = {
-    select: 'Select', 'direct-select': 'Direct Select', lasso: 'Lasso', pen: 'Pen', curvature: 'Curvature',
+    select: 'Select', 'direct-select': 'Direct Select', lasso: 'Lasso', wand: 'Wand', pen: 'Pen', curvature: 'Curvature',
     'add-anchor': 'Add Anchor', 'delete-anchor': 'Delete Anchor', 'convert-anchor': 'Convert Anchor',
     type: 'Point Text', 'area-type': 'Area Text', 'type-on-path': 'Type on Path', 'vertical-type': 'Vertical Text',
     rect: 'Rectangle', 'rounded-rect': 'Rounded Rect', ellipse: 'Ellipse', polygon: 'Polygon',
     arc: 'Arc', spiral: 'Spiral', line: 'Line', 'rect-grid': 'Rect Grid', 'polar-grid': 'Polar Grid',
     pencil: 'Pencil', 'blob-brush': 'Blob Brush', brush: 'Brush', eraser: 'Eraser',
-    scissors: 'Scissors', 'shape-builder': 'Shape Builder', width: 'Width', eyedropper: 'Eyedropper',
+    scissors: 'Scissors', 'shape-builder': 'Shape Builder', width: 'Width', gradient: 'Gradient', eyedropper: 'Eyedropper',
     rotate: 'Rotate', scale: 'Scale', mirror: 'Mirror', 'free-transform': 'Free Transform',
     callout: 'Callout', measure: 'Measure', zoom: 'Zoom', 'view-hand': 'Hand',
   }
@@ -123,6 +146,8 @@ const toolLabel = computed(() => {
 const toolHint = computed(() => {
   switch (store.tool) {
     case 'lasso': return 'Drag a loop · Shift adds · Alt removes'
+    case 'wand': return 'Click a fill · Shift-click adds'
+    case 'gradient': return 'Drag to set the angle · Shift = 45° snap'
     case 'rotate': return 'Drag to rotate · Shift = 45° snap'
     case 'scale': return 'Drag to scale · Shift = 10% snap'
     case 'mirror': return 'Click = flip H · Shift-click = flip V'
@@ -187,12 +212,21 @@ const gridRows = ref((store as any).gridRows ?? 4)
 const gridCols = ref((store as any).gridCols ?? 4)
 const strokeWidth = ref(store.style.strokeWidth)
 const opacityPct = ref(Math.round(store.style.opacity * 100))
+const gradientAngle = ref(Math.round(store.style.gradient?.angle ?? 0))
+const gradientType = ref<'linear' | 'radial'>(store.style.gradient?.type ?? 'linear')
+const calloutColor = ref(store.calloutStyle.color)
+const calloutWidth = ref(store.calloutStyle.lineWidth)
+const calloutFill = ref(store.calloutStyle.fillColor)
+const calloutText = ref(store.calloutStyle.textColor)
+const calloutSize = ref(store.calloutStyle.fontSize)
 const rotateBy = ref(0)
 const scalePct = ref(100)
 
 watch(() => store.charStyle.fontFamily, (v) => { fontFamily.value = v })
 watch(() => store.charStyle.fontSize, (v) => { fontSize.value = v })
 watch(() => store.style.strokeWidth, (v) => { strokeWidth.value = v })
+watch(() => store.style.gradient?.angle, (v) => { gradientAngle.value = Math.round(v ?? 0) })
+watch(() => store.style.gradient?.type, (v) => { gradientType.value = v ?? 'linear' })
 
 function setTool(name: ToolName) {
   store.setTool(name)
@@ -283,6 +317,34 @@ function onOpacity(v: number | undefined) {
   if (v === undefined) return
   const o = Math.min(100, Math.max(0, v)) / 100
   store.updateStyle({ opacity: o })
+}
+function applyGradientEdit(label: string) {
+  const e = getEngine()
+  if (!e) return
+  const current = store.style.gradient
+  const stops = current && current.stops.length > 0
+    ? current.stops.map((s) => ({ ...s }))
+    : [{ offset: 0, color: '#000000' }, { offset: 1, color: '#ffffff' }]
+  const angle = ((Number(gradientAngle.value) || 0) % 360 + 360) % 360
+  gradientAngle.value = angle
+  store.updateStyle({ gradient: { type: gradientType.value, stops, angle } })
+  e.getSelection().forEach((item: any) => {
+    e.applyStyleToItem(item, e.store.style)
+  })
+  e.scope.view.update()
+  if (store.hasSelection) e.pushHistory(label)
+  else store.setStatusMessage('Gradient default updated')
+}
+function onGradientAngle() { applyGradientEdit('Change Gradient') }
+function onGradientType() { applyGradientEdit('Change Gradient') }
+function onCalloutStyle() {
+  store.updateCalloutStyle({
+    color: calloutColor.value,
+    lineWidth: Number(calloutWidth.value) || 1.5,
+    fillColor: calloutFill.value,
+    textColor: calloutText.value,
+    fontSize: Number(calloutSize.value) || 12,
+  })
 }
 function onRotateBy(v: number | undefined) {
   const e = getEngine()

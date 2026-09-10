@@ -4,6 +4,7 @@
       <span>Artboards</span>
       <div class="header-actions">
         <el-icon size="14" class="action-btn" title="New Artboard" @click="addBoard"><Plus /></el-icon>
+        <el-icon size="14" class="action-btn" title="Duplicate active artboard (with artwork)" @click="duplicateBoard"><CopyDocument /></el-icon>
         <el-icon size="14" class="action-btn" title="Delete Artboard" @click="removeBoard"><Delete /></el-icon>
       </div>
     </div>
@@ -33,7 +34,7 @@
 
 <script setup lang="ts">
 import { ref, watch, inject, type Ref } from 'vue'
-import { Plus, Delete } from '@element-plus/icons-vue'
+import { Plus, Delete, CopyDocument } from '@element-plus/icons-vue'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
 
@@ -84,6 +85,39 @@ function removeBoard() {
   if (e) {
     e.refreshArtboards()
     e.pushHistory('Delete Artboard')
+  }
+}
+
+function duplicateBoard() {
+  const e = getEngine()
+  const active = store.activeArtboard
+  if (!active) return
+  if (e) {
+    if (!e.duplicateArtboard(active.id)) {
+      store.setStatusMessage('Cannot duplicate that artboard')
+      return
+    }
+    const board = store.activeArtboard
+    if (board) {
+      e.panViewTo(new e.scope.Point(board.x + board.width / 2, board.y + board.height / 2))
+    }
+  } else {
+    // No engine (tests): duplicate the sheet without artwork.
+    const names = new Set(store.artboards.map((b) => b.name))
+    let name = `${active.name} copy`
+    let n = 2
+    while (names.has(name)) {
+      name = `${active.name} copy ${n}`
+      n++
+    }
+    store.addArtboard({
+      id: `artboard-${Date.now()}`,
+      name,
+      x: active.x + active.width + 100,
+      y: active.y,
+      width: active.width,
+      height: active.height,
+    })
   }
 }
 
