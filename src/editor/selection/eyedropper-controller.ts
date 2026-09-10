@@ -2,10 +2,10 @@
  * Eyedropper tool controller.
  *
  * Click artwork to pick its appearance into the store defaults (fill
- * including gradients, stroke, dash, opacity and blend; font styling for
- * text). When a selection exists the picked appearance is also painted
- * onto every unlocked non-group member in one history entry. Locked items
- * still share their appearance when clicked.
+ * including gradients and patterns, stroke, dash, opacity and blend; font
+ * styling for text). When a selection exists the picked appearance is also
+ * painted onto every unlocked non-group member in one history entry.
+ * Locked and hidden artwork is never hit, like every other tool.
  */
 import { EditorEngine } from '../engine'
 import { applyToolCursor } from '../cursors'
@@ -36,8 +36,8 @@ export class EyedropperController {
     new scope.Tool()
 
     scope.tool.onMouseDown = (event: paper.ToolEvent) => {
-      const native = (event as any).event as MouseEvent
-      if (native.button !== 0) return
+      const native = (event as any).event as MouseEvent | undefined
+      if (!native || native.button !== 0) return
       const picked = this.pickTarget(event.point)
       if (!picked) return
       this.applyEyedropper(picked)
@@ -119,10 +119,15 @@ export class EyedropperController {
     const scope = engine.scope
     // The engine selection is top-most (a selected group counts as one
     // unit), so descend into groups to reach the paintable leaves, exactly
-    // as before when descendants arrived in the raw selection.
+    // as before when descendants arrived in the raw selection. Pattern
+    // fills keep their motifs (repaint the group via the panel instead)
+    // and clip masks are scaffolding, never paint targets.
     const selection: paper.Item[] = []
     const collect = (item: paper.Item): void => {
       if (item.locked) return
+      const data = (item.data as any) ?? {}
+      if (data.isPatternFill) return
+      if ((item as any).clipMask) return
       if (item instanceof scope.Group) {
         for (const child of item.children) collect(child as paper.Item)
         return
@@ -167,7 +172,8 @@ export class EyedropperController {
     return node
   }
 
-  /** First style-carrying leaf under an item (itself when it is one). */  private resolveLeaf(item: paper.Item): paper.Item | null {
+  /** First style-carrying leaf under an item (itself when it is one). */
+  private resolveLeaf(item: paper.Item): paper.Item | null {
     const engine = this.engine
     if (!engine) return null
     const scope = engine.scope
