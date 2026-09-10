@@ -374,6 +374,11 @@ export class AnchorController {
     if (!engine) return
     const scope = engine.scope
 
+    // Locked / hidden subtrees are never anchor-edited; pattern tiles are
+    // regenerable exhaust (the clip mask itself stays editable).
+    if ((item as any).locked || (item as any).visible === false) return
+    if ((item.data as any)?.isPatternTile) return
+
     // Direct path: leaf item.
     if (item instanceof scope.Path && !(item instanceof scope.CompoundPath)) {
       out.push(item as paper.Path)
@@ -495,8 +500,9 @@ export class AnchorController {
     // Its outgoing handle comes from the second half.
     newSeg.handleOut = p123.subtract(split)
     // The "trailing" segment (end of original curve) now has a new
-    // incoming handle from the second half.
-    const trailing = path.segments[insertAt + 1]
+    // incoming handle from the second half. On a closed path's last curve
+    // the end wraps to segment 0, so index modulo the new length.
+    const trailing = path.segments[(insertAt + 1) % path.segments.length]
     if (trailing) {
       trailing.handleIn = p23.subtract(p3)
     }
@@ -599,9 +605,13 @@ export class AnchorController {
     const scope = engine.scope
     const n = path.segments.length
 
-    // Minimum viable segments: 2 for open, 3 for closed.
-    const minSegs = path.closed ? 3 : 2
-    if (n <= minSegs) {
+    // Survival rule mirrors direct-select deletes: open paths need 2
+    // anchors, closed paths stay closed down to a triangle, open into a
+    // line at 2 and vanish below that (a triangle minus one anchor opens
+    // instead of deleting the whole shape).
+    const remaining = n - 1
+    const opensUp = path.closed && remaining === 2
+    if (remaining < 2) {
       path.remove()
       if (path.selected) engine.clearSelection()
       scope.view.update()
@@ -639,6 +649,7 @@ export class AnchorController {
     }
 
     path.removeSegment(index)
+    if (opensUp) path.closed = false
     const newN = path.segments.length
 
     // Reconnect neighbours with adjusted handles to approximate curvature.
