@@ -50,7 +50,7 @@ Not yet implemented: mesh gradients, opacity masks, and multi-fill/stroke appear
 | State management | Pinia |
 | UI components | Element Plus 2.14 + `@element-plus/icons-vue` |
 | Build tool | Vite 5 + `vue-tsc` type checking |
-| Testing | `npm test` runs `scripts/check-engine-size.js` (no committed test suite) |
+| Testing | `npm test` runs `scripts/check-engine-size.js` plus `vitest run` (unit tests for pure modules like color conversion and shortcut routing) |
 
 ---
 

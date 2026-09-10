@@ -93,19 +93,17 @@ export function cssToCmykString(css: string | null | undefined): string | null {
 }
 
 /**
- * Whether a CSS color likely shifts on a CMYK press: round-trips through
- * the naive model and flags a max-channel drift above ~24 steps. Neutrals
- * and press-safe mixes pass; vivid RGB greens/blues/oranges trip.
+ * Whether a CSS color likely shifts on a CMYK press. The naive conversion
+ * above is near-exact invertible (round-trip drift peaks at ~2 steps), so
+ * drift cannot detect anything — instead this flags fully saturated RGB
+ * vertices (one channel at 255, another at 0: pure red/green/blue/cyan/
+ * magenta/yellow). Those sit outside the process gamut and visibly shift
+ * on press; everything else passes. Coarse by design, documented as such.
  */
 export function isOutOfCmykGamut(css: string | null | undefined): boolean {
   const rgba = parseCssColor(css)
   if (!rgba) return false
-  const cmyk = rgbToCmyk(rgba.r, rgba.g, rgba.b)
-  const back = cmykToRgb(cmyk.c, cmyk.m, cmyk.y, cmyk.k)
-  const drift = Math.max(
-    Math.abs(back.r - rgba.r),
-    Math.abs(back.g - rgba.g),
-    Math.abs(back.b - rgba.b)
-  )
-  return drift > 24
+  const peak = Math.max(rgba.r, rgba.g, rgba.b)
+  const floor = Math.min(rgba.r, rgba.g, rgba.b)
+  return peak === 255 && floor === 0
 }
