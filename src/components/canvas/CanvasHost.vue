@@ -68,7 +68,6 @@ let guideDragActive = false
 let guideDragOrientation: 'horizontal' | 'vertical' = 'horizontal'
 let guideDragGhost: paper.Path | null = null
 let guideDragGhostLayer: paper.Layer | null = null
-let guideDragStartClient = { x: 0, y: 0 }
 
 // Middle-drag pan state (works in every tool; paper tools ignore button 1)
 let middlePanActive = false
@@ -475,7 +474,6 @@ function onRulerMouseDown(e: MouseEvent, orientation: 'horizontal' | 'vertical')
   }
   guideDragActive = true
   guideDragOrientation = orientation
-  guideDragStartClient = { x: e.clientX, y: e.clientY }
   e.preventDefault()
   e.stopPropagation()
   // Prevent the canvas from receiving events while the user drags out a guide.

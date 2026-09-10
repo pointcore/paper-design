@@ -1632,7 +1632,6 @@ export class EditorEngine {
     }
     this.historyIndex = this.history.length - 1
     this.store.setHistory(this.history, this.historyIndex)
-    this.store.lastOperation = name
     if (!EditorEngine.FRAME_SAFE_HISTORY.has(name)) {
       this.geometryVersion++
     }

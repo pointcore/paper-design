@@ -45,7 +45,6 @@ export class PenController {
   private pressSegment = -1
   private pressAction: PressAction = 'none'
   private grabIsIn = false         // which side of a handle is grabbed
-  private draggedDuringPress = false
   private previewPath: paper.Path | null = null
   private closeRing: paper.Path | null = null
   private resumeHint: paper.Path | null = null
@@ -147,8 +146,6 @@ export class PenController {
       const seg = segments[this.pressSegment]
       if (!seg) return
 
-      this.draggedDuringPress = true
-
       if (this.pressAction === 'move-anchor') {
         this.moveAnchorDrag(seg, point, event.modifiers)
       } else if (this.pressAction === 'adjust-handle') {
@@ -182,7 +179,6 @@ export class PenController {
       this.pressAction = 'none'
       this.pressSegment = -1
       this.grabIsIn = false
-      this.draggedDuringPress = false
       this.refreshChrome()
     }
 
@@ -638,7 +634,6 @@ export class PenController {
     this.pressSegment = -1
     this.pressAction = 'none'
     this.grabIsIn = false
-    this.draggedDuringPress = false
     this.chrome.clear()
   }
 }

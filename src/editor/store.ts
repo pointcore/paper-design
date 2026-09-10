@@ -16,7 +16,6 @@ import type {
   ReferencePoint,
   TransformState,
   HistoryEntry,
-  LiveShapeParams,
   CalloutStyle,
 } from './types'
 
@@ -107,8 +106,6 @@ export const useEditorStore = defineStore('editor', {
     activeLayerId: '',
     /** List of selected Paper.js item ids */
     selectedItemIds: [] as string[],
-    /** Name of the last operation (for menu state) */
-    lastOperation: '',
     /** Ruler unit */
     rulerUnit: 'px' as RulerUnit,
     /** Arrow-key nudge distance in document units (Shift = x10) */
@@ -144,8 +141,6 @@ export const useEditorStore = defineStore('editor', {
     } as TransformState,
     /** Reference point */
     referencePoint: 'center' as ReferencePoint,
-    /** Live shape parameters */
-    liveShape: null as LiveShapeParams | null,
     /** History list */
     history: [] as HistoryEntry[],
     /** History index (-1 means empty) */
@@ -154,8 +149,6 @@ export const useEditorStore = defineStore('editor', {
     historyLimit: 100,
     /** Callout style */
     calloutStyle: createDefaultCalloutStyle() as CalloutStyle,
-    /** Current annotation tool subtype */
-    annotationTool: 'callout' as 'callout' | 'measure',
     /** Cursor position (shown in the status bar) */
     cursorPos: { x: 0, y: 0 },
     /** Status bar message */
@@ -308,11 +301,6 @@ export const useEditorStore = defineStore('editor', {
       this.referencePoint = point
     },
 
-    /** Update live shape parameters */
-    setLiveShape(params: LiveShapeParams | null) {
-      this.liveShape = params
-    },
-
     /** Set history index */
     setHistoryIndex(index: number) {
       this.historyIndex = index
@@ -325,11 +313,6 @@ export const useEditorStore = defineStore('editor', {
     setHistory(history: HistoryEntry[], index: number) {
       this.history = history.slice()
       this.historyIndex = index
-    },
-
-    /** Set annotation tool */
-    setAnnotationTool(tool: 'callout' | 'measure') {
-      this.annotationTool = tool
     },
 
     /** Mark dragging state */
