@@ -36,11 +36,16 @@ describe('resolveToolShortcut', () => {
     expect(resolveToolShortcut(key({ key: 'e', shiftKey: true }))).toBe('eraser')
     expect(resolveToolShortcut(key({ key: 'b', shiftKey: true }))).toBe('blob-brush')
     expect(resolveToolShortcut(key({ key: 'c', shiftKey: true }))).toBe('convert-anchor')
+    expect(resolveToolShortcut(key({ key: 'r', shiftKey: true }))).toBe('rotate')
+    expect(resolveToolShortcut(key({ key: 's', shiftKey: true }))).toBe('scale')
+    expect(resolveToolShortcut(key({ key: 'o', shiftKey: true }))).toBe('mirror')
+    expect(resolveToolShortcut(key({ key: 'f', shiftKey: true }))).toBe('free-transform')
   })
 
   it('keeps plain letters for the base tools', () => {
     expect(resolveToolShortcut(key({ key: 'b' }))).toBe('brush')
     expect(resolveToolShortcut(key({ key: 'c' }))).toBe('scissors')
+    expect(resolveToolShortcut(key({ key: 'r' }))).toBe('rect')
   })
 
   it('returns null for unbound keys', () => {

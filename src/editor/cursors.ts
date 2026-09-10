@@ -205,7 +205,7 @@ function buildToolCursors(): Record<ToolName, string> {
     eraser: eraserRing,
     scissors: CURSOR_SCISSORS,
     width: crosshair,
-    rotate: crosshair,
+    rotate: CURSOR_ROTATE,
     scale: crosshair,
     mirror: crosshair,
     'free-transform': crosshair,

@@ -254,7 +254,19 @@ export type EnvelopePreset = 'arc-upper' | 'arc-lower' | 'bulge' | 'wave'
 export type RulerUnit = 'px' | 'pt' | 'mm' | 'cm' | 'in'
 
 /** Right-panel tab */
-export type RightPanelTab = 'property' | 'layer' | 'history' | 'symbols'
+export type RightPanelTab = 'property' | 'align' | 'layer' | 'artboards' | 'swatches' | 'symbols' | 'history' | 'actions'
+
+/** Align target: united selection, active artboard, or a picked key object. */
+export type AlignTarget = 'selection' | 'board' | 'key'
+
+/** Extended shaper ops built from the four boolean primitives. */
+export type ExtendedBooleanOp = 'minusBack' | 'divide' | 'trim' | 'outline'
+
+/** Saved workspace layout preset. */
+export type WorkspacePreset = 'essentials' | 'typography' | 'print'
+
+/** Tool-rail density (single column like AI, or double column). */
+export type ToolRailDensity = 'single' | 'double'
 
 /** Symbol library entry (resolved from keeper instances). */
 export interface SymbolEntry {

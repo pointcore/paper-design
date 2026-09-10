@@ -3042,6 +3042,195 @@ export class EditorEngine {
   }
 
   /**
+   * Scale every unlocked selected item about a pivot (default: united
+   * selection bounds center). Factors must be finite and non-zero.
+   * Callers record history.
+   */
+  scaleSelection(sx: number, sy: number, pivot?: paper.Point): void {
+    if (!Number.isFinite(sx) || !Number.isFinite(sy)) return
+    if (Math.abs(sx) < 1e-9 || Math.abs(sy) < 1e-9) return
+    const items = this.getSelection().filter((item) => !item.locked)
+    if (items.length === 0) return
+    const center = pivot ?? this.getSelectionBounds()?.center
+    if (!center) return
+    for (const item of items) {
+      item.scale(sx, sy, center)
+      this.refreshItemGradient(item)
+    }
+    this.reflowTextsForItems(items)
+    this.scope.view.update()
+  }
+
+  /**
+   * Distribute with an exact gap value (first item stays, the rest follow
+   * with `gap` document units between neighbors). Needs 3+ unlocked items.
+   */
+  distributeSpacingExact(axis: DistributeAxis, gap: number): boolean {
+    if (!Number.isFinite(gap) || gap < 0) return false
+    const items = this.getSelection().filter((item) => !item.locked && item.bounds)
+    if (items.length < 3) return false
+    const horizontal = axis === 'horizontal'
+    const leading = (b: paper.Rectangle) => (horizontal ? b.x : b.y)
+    const sizeOf = (b: paper.Rectangle) => (horizontal ? b.width : b.height)
+    const sorted = items.slice().sort((a, b) => leading(a.bounds) - leading(b.bounds))
+    let cursor = leading(sorted[0].bounds)
+    let moved = false
+    for (const item of sorted) {
+      const b = item.bounds
+      const delta = cursor - leading(b)
+      if (Math.abs(delta) > 1e-9) {
+        const shift = horizontal
+          ? new this.scope.Point(delta, 0)
+          : new this.scope.Point(0, delta)
+        item.position = item.position.add(shift)
+        this.refreshItemGradient(item)
+        moved = true
+      }
+      cursor += sizeOf(item.bounds) + gap
+    }
+    if (moved) this.reflowTextsForItems(items)
+    this.scope.view.update()
+    return moved
+  }
+
+  /** Bounds of the align key object, or null when unset/unusable. */
+  getKeyObjectBounds(): paper.Rectangle | null {
+    const id = (this.store as any).keyObjectId as string | undefined
+    if (!id) return null
+    const item = this.getItemById(id)
+    if (!item || item.locked || !item.parent || !item.bounds) return null
+    return item.bounds.clone()
+  }
+
+  /**
+   * Extended shaper ops composed from the four boolean primitives.
+   * - minusBack: top-most path minus everything below (keeps top style).
+   * - divide: exactly two paths -> intersect + remainders (keeps per-piece styles).
+   * - trim: exactly two paths -> back-minus-front plus the intact front.
+   * - outline: alias for Outline Stroke (one history entry).
+   * Returns false when the selection does not satisfy the op.
+   */
+  extendedBoolean(op: 'minusBack' | 'divide' | 'trim' | 'outline'): boolean {
+    if (op === 'outline') return this.outlineStroke()
+    const scope = this.scope
+    const paths = this.getSelection().filter(
+      (item) =>
+        !item.locked &&
+        item.parent &&
+        (item instanceof scope.Path || item instanceof scope.CompoundPath)
+    ) as paper.PathItem[]
+    if (paths.length < 2) return false
+    const ordered = paths
+      .slice()
+      .sort((a, b) => (a.isBelow(b) ? -1 : a.isAbove(b) ? 1 : 0))
+    const parent = ordered[0].parent ?? this.getActiveLayer()
+    const at = Math.max(0, parent.children.indexOf(ordered[0] as any))
+    try {
+      if (op === 'minusBack') {
+        const top = ordered[ordered.length - 1]
+        const style = this.getStyleFromItem(top)
+        let working = (top.clone({ insert: false }) as paper.PathItem)
+        for (let i = ordered.length - 2; i >= 0; i--) {
+          const cutter = ordered[i].clone({ insert: false }) as paper.PathItem
+          const next = (working.subtract(cutter, { insert: false } as any) as paper.PathItem)
+          working.remove()
+          cutter.remove()
+          working = next
+        }
+        for (const o of ordered) o.remove()
+        if (this.isEmptyPathResult(working)) {
+          working.remove()
+          this.clearSelection()
+          this.pushHistory('Minus Back')
+          this.scope.view.update()
+          return true
+        }
+        parent.insertChild(Math.min(at, parent.children.length), working as any)
+        working.data.id = this.genId()
+        working.data.isUserItem = true
+        this.applyStyleToItem(working, style)
+        this.clearSelection()
+        working.selected = true
+        this.syncSelectionToStore()
+        this.pushHistory('Minus Back')
+        this.scope.view.update()
+        return true
+      }
+      if (ordered.length !== 2) return false
+      const back = ordered[0]
+      const front = ordered[1]
+      const backStyle = this.getStyleFromItem(back)
+      const frontStyle = this.getStyleFromItem(front)
+      if (op === 'divide') {
+        const a = back.clone({ insert: false }) as paper.PathItem
+        const b = front.clone({ insert: false }) as paper.PathItem
+        const inter = (a.clone({ insert: false }) as paper.PathItem).intersect(b, { insert: false } as any) as paper.PathItem
+        const aMinus = (a.subtract(b, { insert: false } as any) as paper.PathItem)
+        const bMinus = ((front.clone({ insert: false }) as paper.PathItem).subtract(back.clone({ insert: false }) as paper.PathItem, { insert: false } as any) as paper.PathItem)
+        a.remove()
+        b.remove()
+        const pieces: Array<{ node: paper.PathItem; style: ReturnType<EditorEngine['getStyleFromItem']> }> = []
+        if (!this.isEmptyPathResult(aMinus)) pieces.push({ node: aMinus, style: backStyle })
+        else aMinus.remove()
+        if (!this.isEmptyPathResult(bMinus)) pieces.push({ node: bMinus, style: frontStyle })
+        else bMinus.remove()
+        if (!this.isEmptyPathResult(inter)) pieces.push({ node: inter, style: frontStyle })
+        else inter.remove()
+        back.remove()
+        front.remove()
+        if (pieces.length === 0) {
+          this.clearSelection()
+          this.pushHistory('Divide')
+          this.scope.view.update()
+          return true
+        }
+        this.clearSelection()
+        pieces.forEach(({ node, style }, i) => {
+          parent.insertChild(Math.min(at + i, parent.children.length), node as any)
+          node.data.id = this.genId()
+          node.data.isUserItem = true
+          this.applyStyleToItem(node, style)
+          node.selected = true
+        })
+        this.syncSelectionToStore()
+        this.pushHistory('Divide')
+        this.scope.view.update()
+        return true
+      }
+      // trim: back gets cut by front, front stays intact on top.
+      const cut = (back.clone({ insert: false }) as paper.PathItem).subtract(
+        front.clone({ insert: false }) as paper.PathItem, { insert: false } as any
+      ) as paper.PathItem
+      const frontCopy = front.clone({ insert: false }) as paper.PathItem
+      back.remove()
+      front.remove()
+      this.clearSelection()
+      let idx = 0
+      if (!this.isEmptyPathResult(cut)) {
+        parent.insertChild(Math.min(at, parent.children.length), cut as any)
+        cut.data.id = this.genId()
+        cut.data.isUserItem = true
+        this.applyStyleToItem(cut, backStyle)
+        cut.selected = true
+        idx++
+      } else {
+        cut.remove()
+      }
+      parent.insertChild(Math.min(at + idx, parent.children.length), frontCopy as any)
+      frontCopy.data.id = this.genId()
+      frontCopy.data.isUserItem = true
+      this.applyStyleToItem(frontCopy, frontStyle)
+      frontCopy.selected = true
+      this.syncSelectionToStore()
+      this.pushHistory('Trim')
+      this.scope.view.update()
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /**
    * Spot-color placeholder names on the selection (first item wins on read;
    * empty strings clear). Names ride on `item.data` so they persist in
    * project JSON; paints still render/export with their RGB preview.

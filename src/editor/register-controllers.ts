@@ -18,6 +18,7 @@ import { ShapeController } from './shapes/shape-controller'
 import { TextController } from './text/text-controller'
 import { CalloutController } from './annotation/callout-controller'
 import { MeasureController } from './annotation/measure-controller'
+import { TransformController } from './transform/transform-controller'
 import { ViewController } from './view-controller'
 
 export function registerAllControllers(engine: EditorEngine) {
@@ -66,10 +67,18 @@ export function registerAllControllers(engine: EditorEngine) {
   // ToolName shapes stay available for scripts but have no drawing UI)
   const shapeCtrl = new ShapeController()
   for (const shape of [
-    'rect', 'rounded-rect', 'ellipse', 'polygon', 'line', 'spiral'
+    'rect', 'rounded-rect', 'ellipse', 'polygon', 'arc', 'line', 'spiral', 'rect-grid', 'polar-grid'
   ] as const) {
     engine.registerController(shape, shapeCtrl)
   }
+
+  // Transform tools (rotate / scale / mirror drag about the reference pivot;
+  // free-transform reuses the select bbox so handles stay identical)
+  const transformCtrl = new TransformController()
+  engine.registerController('rotate', transformCtrl)
+  engine.registerController('scale', transformCtrl)
+  engine.registerController('mirror', transformCtrl)
+  engine.registerController('free-transform', selectCtrl)
 
   // Text tools (one shared controller; the mode follows the active tool)
   const textCtrl = new TextController()

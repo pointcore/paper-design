@@ -17,6 +17,9 @@ import type {
   TransformState,
   HistoryEntry,
   CalloutStyle,
+  AlignTarget,
+  ToolRailDensity,
+  WorkspacePreset,
 } from './types'
 
 // --- Defaults ---
@@ -149,6 +152,22 @@ export const useEditorStore = defineStore('editor', {
     historyLimit: 100,
     /** Callout style */
     calloutStyle: createDefaultCalloutStyle() as CalloutStyle,
+    /** Key object id for align-to-key (AI Alt-click parity, '' = none) */
+    keyObjectId: '',
+    /** Align target for the Align panel / control bar */
+    alignTarget: 'selection' as AlignTarget,
+    /** Exact gap used by distribute-gap-exact (document units) */
+    distributeGap: 10,
+    /** Recent fill/stroke colors for the Swatches panel + color bar */
+    recentColors: [] as string[],
+    /** Live-shape options surfaced in the contextual control bar */
+    polygonSides: 5,
+    spiralTurns: 3,
+    roundedRadius: 12,
+    gridRows: 4,
+    gridCols: 4,
+    /** Path-text start offset (document units along the path) */
+    textPathOffset: 0,
     /** Cursor position (shown in the status bar) */
     cursorPos: { x: 0, y: 0 },
     /** Status bar message */
@@ -170,6 +189,9 @@ export const useEditorStore = defineStore('editor', {
       rightTab: 'property' as RightPanelTab,
       settingsOpen: false,
       showNavigator: true,
+      showControlBar: true,
+      toolRailDensity: 'single' as ToolRailDensity,
+      workspace: 'essentials' as WorkspacePreset,
     },
     /** Whether isolated group editing is active */
     isolationActive: false,
@@ -335,6 +357,21 @@ export const useEditorStore = defineStore('editor', {
       this.ui.showNavigator = val
     },
 
+    /** Show or hide the contextual control bar (AI Control / CDR Property bar) */
+    setShowControlBar(val: boolean) {
+      this.ui.showControlBar = val
+    },
+
+    /** Single- vs double-column tool rail */
+    setToolRailDensity(val: ToolRailDensity) {
+      this.ui.toolRailDensity = val
+    },
+
+    /** Apply a saved workspace preset */
+    setWorkspace(val: WorkspacePreset) {
+      this.ui.workspace = val
+    },
+
     /** Switch the right-panel tab */
     setRightTab(tab: RightPanelTab) {
       this.ui.rightTab = tab
@@ -399,6 +436,49 @@ export const useEditorStore = defineStore('editor', {
     /** Set ruler unit */
     setRulerUnit(unit: RulerUnit) {
       this.rulerUnit = unit
+    },
+
+    /** Set/clear the align key object */
+    setKeyObject(id: string) {
+      this.keyObjectId = id
+    },
+
+    /** Set the align target mode */
+    setAlignTarget(target: AlignTarget) {
+      this.alignTarget = target
+    },
+
+    /** Set the exact distribute gap (must stay finite, >= 0) */
+    setDistributeGap(gap: number) {
+      if (Number.isFinite(gap) && gap >= 0) {
+        this.distributeGap = gap
+      }
+    },
+
+    /** Push a color to the recent-colors strip (dedupe, cap 12) */
+    pushRecentColor(color: string) {
+      const c = (color || '').trim()
+      if (!c) return
+      const next = [c, ...this.recentColors.filter((x) => x.toLowerCase() !== c.toLowerCase())]
+      this.recentColors = next.slice(0, 12)
+    },
+
+    /** Live-shape option setters (clamped to sane ranges) */
+    setPolygonSides(n: number) {
+      if (Number.isFinite(n)) this.polygonSides = Math.min(64, Math.max(3, Math.round(n)))
+    },
+    setSpiralTurns(n: number) {
+      if (Number.isFinite(n)) this.spiralTurns = Math.min(12, Math.max(1, Math.round(n)))
+    },
+    setRoundedRadius(n: number) {
+      if (Number.isFinite(n)) this.roundedRadius = Math.min(500, Math.max(0, n))
+    },
+    setGridOptions(rows: number, cols: number) {
+      if (Number.isFinite(rows)) this.gridRows = Math.min(20, Math.max(1, Math.round(rows)))
+      if (Number.isFinite(cols)) this.gridCols = Math.min(20, Math.max(1, Math.round(cols)))
+    },
+    setTextPathOffset(n: number) {
+      if (Number.isFinite(n)) this.textPathOffset = n
     },
 
     /** Set arrow-key nudge distance (must stay positive) */
