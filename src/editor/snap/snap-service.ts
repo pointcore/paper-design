@@ -191,8 +191,15 @@ export class SnapService {
     const out: paper.Point[] = []
     const walk = (item: paper.Item) => {
       if (excluded.has(item)) return
+      // Locked / hidden art never pulls the pointer (AI); pattern tiles
+      // and path-text glyph runs are layout exhaust, not snap targets.
+      if ((item as any).locked || (item as any).visible === false) return
       const data = (item.data as any) ?? {}
       if (data.isPreview || data.isChrome) return
+      // Pattern tiles are layout exhaust (the clip mask itself stays a
+      // valid outline target); path-text glyph runs reflow constantly.
+      if (data.isPatternTile) return
+      if (data.textMode === 'path') return
       if (item instanceof scope.Path && !(item instanceof scope.CompoundPath)) {
         for (const seg of item.segments) out.push(seg.point.clone())
         return
@@ -237,11 +244,11 @@ export class SnapService {
     const scope = engine.scope
     const out: paper.Rectangle[] = []
     for (const layer of engine.project.layers) {
-      if (!(layer.data as any)?.isUserLayer || !layer.visible) continue
+      if (!(layer.data as any)?.isUserLayer || !layer.visible || layer.locked) continue
       for (const child of layer.children) {
         const item = child as paper.Item
         if (excluded.has(item)) continue
-        if (!item.visible) continue
+        if (!item.visible || (item as any).locked) continue
         if ((item.data as any)?.isPreview) continue
         const b = item.bounds
         if (!b) continue
