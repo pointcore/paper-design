@@ -1,5 +1,6 @@
 <template>
-  <div class="canvas-host" ref="containerRef" :class="{ 'transparent-bg': store.view.transparentBackground }">
+  <div class="canvas-host" ref="containerRef" :class="{ 'transparent-bg': store.view.transparentBackground }"
+       @dragover.prevent="onDragOver" @drop.prevent="onDropFiles">
     <!-- Horizontal ruler bar -->
     <div v-if="store.view.rulersVisible" class="ruler ruler-h" ref="rulerHRef"
          @mousedown.left="onRulerMouseDown($event, 'horizontal')">
@@ -569,6 +570,50 @@ function ctxSameStroke() {
     store.setStatusMessage(`Selected ${n} items with the same stroke`)
   }
   hideMenu()
+}
+
+/** Drag files from the OS onto the canvas to import (SVG + images). */
+function onDragOver(e: DragEvent) {
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+}
+
+async function onDropFiles(e: DragEvent) {
+  if (!engine) return
+  const files = [...(e.dataTransfer?.files ?? [])]
+  if (files.length === 0) return
+  let imported = 0
+  for (const file of files) {
+    try {
+      if (/\.svg$/i.test(file.name) || file.type === 'image/svg+xml') {
+        const text = await file.text()
+        if (engine.importSVGText(text, 'Import SVG')) imported++
+      } else if (/^image\/(png|jpeg|webp|gif)$/.test(file.type)) {
+        if (file.size > 15 * 1024 * 1024) {
+          store.setStatusMessage(`"${file.name}" too large (15 MB max)`)
+          continue
+        }
+        engine.placeImage(await readFileAsDataURL(file))
+        imported++
+      }
+    } catch {
+      store.setStatusMessage(`Could not import "${file.name}"`)
+    }
+  }
+  if (imported > 0) {
+    store.setStatusMessage(
+      imported === 1 ? 'File imported' : `${imported} files imported`
+    )
+  }
+}
+
+/** Read a file as a data URL (embeddable, unlike object URLs). */
+function readFileAsDataURL(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
+  })
 }
 
 function hideMenu() {

@@ -61,7 +61,11 @@
               <el-dropdown-item command="releaseCompound" :disabled="!store.hasSelection">Release Compound Path</el-dropdown-item>
               <el-dropdown-item command="joinPaths" :disabled="!store.hasSelection">Join Paths</el-dropdown-item>
               <el-dropdown-item command="outlineStroke" :disabled="!store.hasSelection">Outline Stroke</el-dropdown-item>
+              <el-dropdown-item command="offsetPath" :disabled="!store.hasSelection">Offset Path...</el-dropdown-item>
               <el-dropdown-item command="simplifyPath" :disabled="!store.hasSelection">Simplify Path</el-dropdown-item>
+              <el-dropdown-item command="addAnchors" :disabled="!store.hasSelection">Add Anchor Points</el-dropdown-item>
+              <el-dropdown-item command="reversePath" :disabled="!store.hasSelection">Reverse Path Direction</el-dropdown-item>
+              <el-dropdown-item command="cleanUp">Clean Up...</el-dropdown-item>
               <el-dropdown-item command="closePath" :disabled="!store.hasSelection">Close Path</el-dropdown-item>
               <el-dropdown-item command="openPath" :disabled="!store.hasSelection">Open Path</el-dropdown-item>
               <el-dropdown-item command="envArcUpper" divided :disabled="!store.hasSelection">Envelope: Arc Upper</el-dropdown-item>
@@ -92,6 +96,7 @@
             <el-dropdown-menu>
               <el-dropdown-item command="fitAll">Fit to Window</el-dropdown-item>
               <el-dropdown-item command="zoomSelection" :disabled="!store.hasSelection">Zoom to Selection</el-dropdown-item>
+              <el-dropdown-item command="zoomArtboard">Zoom to Artboard</el-dropdown-item>
               <el-dropdown-item command="zoomIn">Zoom In</el-dropdown-item>
               <el-dropdown-item command="zoomOut">Zoom Out</el-dropdown-item>
               <el-dropdown-item command="zoom100" divided>Actual Size</el-dropdown-item>
@@ -321,8 +326,7 @@
       </div>
     </AppDialog>
 
-    <!-- Guides Dialog (positions edit live; Clear All empties the guide layer) -->
-    <AppDialog
+    <!-- Guides Dialog (positions edit live; Clear All empties the guide layer) -->    <AppDialog
       v-model="guidesVisible"
       title="Guides"
       :width="380"
@@ -345,6 +349,37 @@
             <span class="setting-name">All guides</span>
           </div>
           <el-button size="small" @click="onGuidesClear">Clear All</el-button>
+        </div>
+      </div>
+    </AppDialog>
+
+    <!-- Offset Path Dialog (AI Offset Path parity) -->
+    <AppDialog
+      v-model="offsetVisible"
+      title="Offset Path"
+      :width="360"
+      confirm-text="Apply"
+      cancel-text="Close"
+      @confirm="onOffsetConfirm"
+      @cancel="offsetVisible = false"
+    >
+      <div class="settings-body app-settings">
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Distance</span>
+            <span class="setting-desc">Positive expands, negative insets</span>
+          </div>
+          <el-input-number v-model="offsetForm.distance" :precision="1" size="small" style="width: 130px" />
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Join</span>
+          </div>
+          <el-select v-model="offsetForm.join" size="small" style="width: 130px">
+            <el-option value="miter" label="Miter" />
+            <el-option value="round" label="Round" />
+            <el-option value="bevel" label="Bevel" />
+          </el-select>
         </div>
       </div>
     </AppDialog>
@@ -407,6 +442,29 @@ function onGuidesClear() {
   e.clearGuides()
   e.pushHistory('Clear Guides')
   guidesTick.value++
+}
+
+const offsetVisible = ref(false)
+const offsetForm = reactive({
+  distance: 10,
+  join: 'miter' as 'miter' | 'round' | 'bevel',
+})
+function onOffsetConfirm() {
+  const e = engineRef?.value
+  if (!e) {
+    offsetVisible.value = false
+    return
+  }
+  const d = Number(offsetForm.distance)
+  if (!Number.isFinite(d) || Math.abs(d) < 1e-9) {
+    store.setStatusMessage('Offset needs a non-zero distance')
+    return
+  }
+  if (e.offsetPaths(d, offsetForm.join) === 0) {
+    store.setStatusMessage('Offset needs a path selection')
+    return
+  }
+  offsetVisible.value = false
 }
 const exportForm = reactive({
   format: 'png' as RasterExportFormat,
@@ -1062,6 +1120,24 @@ function onObjectCmd(cmd: string) {
         store.setStatusMessage('Nothing to simplify')
       }
       break
+    case 'offsetPath':
+      offsetVisible.value = true
+      break
+    case 'addAnchors':
+      if (e.addAnchorPoints() === 0) {
+        store.setStatusMessage('Add Anchors needs a path selection')
+      }
+      break
+    case 'reversePath':
+      if (e.reversePaths() === 0) {
+        store.setStatusMessage('Reverse needs a path selection')
+      }
+      break
+    case 'cleanUp': {
+      const n = e.cleanUp()
+      store.setStatusMessage(n > 0 ? `Cleaned up ${n} stray item${n === 1 ? '' : 's'}` : 'Nothing to clean')
+      break
+    }
     case 'closePath':
       if (e.setPathsClosed(true) === 0) {
         store.setStatusMessage('No open paths to close')
@@ -1132,6 +1208,9 @@ function onViewCmd(cmd: string) {
       break
     case 'zoomSelection':
       e.zoomToSelection()
+      break
+    case 'zoomArtboard':
+      e.zoomToArtboard()
       break
     case 'zoomIn':
       e.zoomAt(1.2, e.canvas.width / 2, e.canvas.height / 2)

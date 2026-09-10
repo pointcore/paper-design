@@ -238,16 +238,32 @@
               <el-option v-for="j in lineJoins" :key="j.value" :label="j.label" :value="j.value" />
             </el-select>
           </div>
-          <div class="prop-row" v-if="lineJoin === 'miter'">
-            <span class="prop-label-sm">Miter</span>
-            <el-input-number v-model="miterLimit" :min="1" :max="100" size="small" controls-position="right" @change="onStrokeAppearanceChange" />
-            <span class="prop-label-sm">Dash</span>
-            <el-input v-model="dashPattern" size="small" placeholder="e.g. 4 2" @change="onDashChange" />
-          </div>
-          <div class="prop-row" v-else>
-            <span class="prop-label-sm">Dash</span>
-            <el-input v-model="dashPattern" size="small" placeholder="e.g. 4 2" @change="onDashChange" />
-          </div>
+          <template v-if="lineJoin === 'miter'">
+            <div class="prop-row">
+              <span class="prop-label-sm">Miter</span>
+              <el-input-number v-model="miterLimit" :min="1" :max="100" size="small" controls-position="right" @change="onStrokeAppearanceChange" />
+              <span class="prop-label-sm">Dash</span>
+              <el-select v-model="dashPreset" size="small" class="flex-ctl" placeholder="Preset" @change="onDashPreset">
+                <el-option v-for="d in dashPresets" :key="d.value" :label="d.label" :value="d.value" />
+              </el-select>
+            </div>
+            <div class="prop-row">
+              <span class="prop-label-sm" />
+              <el-input v-model="dashPattern" size="small" placeholder="e.g. 4 2" @change="onDashChange" />
+            </div>
+          </template>
+          <template v-else>
+            <div class="prop-row">
+              <span class="prop-label-sm">Dash</span>
+              <el-select v-model="dashPreset" size="small" class="flex-ctl" placeholder="Preset" @change="onDashPreset">
+                <el-option v-for="d in dashPresets" :key="d.value" :label="d.label" :value="d.value" />
+              </el-select>
+            </div>
+            <div class="prop-row">
+              <span class="prop-label-sm" />
+              <el-input v-model="dashPattern" size="small" placeholder="e.g. 4 2" @change="onDashChange" />
+            </div>
+          </template>
           <div class="op-row">
             <span class="app-name">Opacity</span>
             <el-slider v-model="opacityValue" :min="0" :max="100" size="small" @change="onOpacityChange" />
@@ -341,6 +357,12 @@
             </el-radio-group>
           </div>
           <div class="prop-row">
+            <span class="prop-label-sm">Case</span>
+            <el-button size="small" class="fmt-btn" title="UPPERCASE" @click="onChangeCase('upper')">AA</el-button>
+            <el-button size="small" class="fmt-btn" title="lowercase" @click="onChangeCase('lower')">aa</el-button>
+            <el-button size="small" class="fmt-btn" title="Title Case" @click="onChangeCase('title')">Aa</el-button>
+          </div>
+          <div class="prop-row">
             <span class="prop-label-sm">Leading</span>
             <el-input-number v-model="leadingValue" :min="1" :max="1000" size="small" controls-position="right" :disabled="leadingAuto" @change="onLeadingChange" />
             <el-button size="small" class="fmt-btn" :type="leadingAuto ? 'primary' : ''" title="Auto leading (1.2x)" @click="toggleLeadingAuto">A</el-button>
@@ -419,6 +441,20 @@
             <el-button size="small" class="grid-btn" :disabled="booleanOperandCount() < 2" @click="onBoolean('subtract')">Subtract</el-button>
             <el-button size="small" class="grid-btn" :disabled="booleanOperandCount() < 2" @click="onBoolean('intersect')">Intersect</el-button>
             <el-button size="small" class="grid-btn" :disabled="booleanOperandCount() < 2" @click="onBoolean('exclude')">Exclude</el-button>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label-sm">Offset</span>
+            <el-input-number v-model="offsetDist" size="small" controls-position="right" title="Positive expands, negative insets" />
+            <el-select v-model="offsetJoin" size="small" class="flex-ctl" title="Join">
+              <el-option value="miter" label="Miter" />
+              <el-option value="round" label="Round" />
+              <el-option value="bevel" label="Bevel" />
+            </el-select>
+            <el-button size="small" class="grid-btn" :disabled="!store.hasSelection" @click="onOffset">Apply</el-button>
+          </div>
+          <div class="btn-grid-2">
+            <el-button size="small" class="grid-btn" :disabled="!store.hasSelection" title="Add a midpoint anchor to every curve" @click="onAddAnchors">Add Anchors</el-button>
+            <el-button size="small" class="grid-btn" :disabled="!store.hasSelection" title="Reverse path direction" @click="onReverse">Reverse</el-button>
           </div>
         </div>
       </div>
@@ -1015,12 +1051,19 @@ function onPathOffsetChange(val: number | undefined) {
   store.setStatusMessage(`Path text offset ${val}`)
 }
 
-function onAlignChange(val: TextAlign) {
-  // Paper.js justification has no justify: it renders as left (stored on
+function onAlignChange(val: TextAlign) {  // Paper.js justification has no justify: it renders as left (stored on
   // the paragraph style so SVG/export can honour it later).
   const justification = val === 'center' ? 'center' : val === 'right' ? 'right' : 'left'
   store.updateParagraphStyle({ align: val })
   applyTextStyle((item) => { (item as any).justification = justification }, 'Change Text Alignment')
+}
+
+function onChangeCase(mode: 'upper' | 'lower' | 'title') {
+  const e = getEngine()
+  if (!e) return
+  if (e.changeCase(mode) === 0) {
+    store.setStatusMessage('Change Case needs selected text')
+  }
 }
 
 function onLeadingChange(val: number | undefined) {
@@ -1288,6 +1331,20 @@ function onDashChange() {
   e.pushHistory('Change Dash Pattern')
 }
 
+const dashPresets = [
+  { value: '', label: 'Solid' },
+  { value: '4 2', label: 'Dashed' },
+  { value: '1 2', label: 'Dotted' },
+  { value: '6 2 1 2', label: 'Dash-Dot' },
+  { value: '8 3 2 3', label: 'Long Dash' },
+]
+const dashPreset = ref('')
+
+function onDashPreset(val: string) {
+  dashPattern.value = val || ''
+  onDashChange()
+}
+
 function onBlendChange() {
   const e = getEngine()
   if (!e) return
@@ -1481,6 +1538,38 @@ function onBoolean(op: BooleanOperation) {
   if (!e) return
   if (!e.booleanOperation(op)) {
     store.setStatusMessage('Boolean needs at least two unlocked paths')
+  }
+}
+
+const offsetDist = ref(10)
+const offsetJoin = ref<'miter' | 'round' | 'bevel'>('miter')
+
+function onOffset() {
+  const e = getEngine()
+  if (!e) return
+  const d = Number(offsetDist.value)
+  if (!Number.isFinite(d) || Math.abs(d) < 1e-9) {
+    store.setStatusMessage('Offset needs a non-zero distance')
+    return
+  }
+  if (e.offsetPaths(d, offsetJoin.value) === 0) {
+    store.setStatusMessage('Offset needs a path selection')
+  }
+}
+
+function onAddAnchors() {
+  const e = getEngine()
+  if (!e) return
+  if (e.addAnchorPoints() === 0) {
+    store.setStatusMessage('Add Anchors needs a path selection')
+  }
+}
+
+function onReverse() {
+  const e = getEngine()
+  if (!e) return
+  if (e.reversePaths() === 0) {
+    store.setStatusMessage('Reverse needs a path selection')
   }
 }
 

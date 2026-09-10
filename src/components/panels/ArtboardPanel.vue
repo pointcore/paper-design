@@ -5,6 +5,8 @@
       <div class="header-actions">
         <el-icon size="14" class="action-btn" title="New Artboard" @click="addBoard"><Plus /></el-icon>
         <el-icon size="14" class="action-btn" title="Duplicate active artboard (with artwork)" @click="duplicateBoard"><CopyDocument /></el-icon>
+        <el-icon size="14" class="action-btn" title="Fit artboard to artwork" @click="fitBoard"><Expand /></el-icon>
+        <el-icon size="14" class="action-btn" title="Arrange artboards in a row" @click="arrangeBoards"><Grid /></el-icon>
         <el-icon size="14" class="action-btn" title="Delete Artboard" @click="removeBoard"><Delete /></el-icon>
       </div>
     </div>
@@ -34,7 +36,7 @@
 
 <script setup lang="ts">
 import { ref, watch, inject, type Ref } from 'vue'
-import { Plus, Delete, CopyDocument } from '@element-plus/icons-vue'
+import { Plus, Delete, CopyDocument, Expand, Grid } from '@element-plus/icons-vue'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
 
@@ -88,8 +90,27 @@ function removeBoard() {
   }
 }
 
-function duplicateBoard() {
+function fitBoard() {
   const e = getEngine()
+  const active = store.activeArtboard
+  if (!active) return
+  if (e) {
+    if (!e.fitArtboardToArtwork(active.id)) {
+      store.setStatusMessage('No artwork on this artboard')
+    }
+  } else {
+    store.setStatusMessage('No engine')
+  }
+}
+
+function arrangeBoards() {
+  const e = getEngine()
+  if (!e) return
+  e.arrangeArtboards()
+  store.setStatusMessage('Artboards arranged in a row')
+}
+
+function duplicateBoard() {  const e = getEngine()
   const active = store.activeArtboard
   if (!active) return
   if (e) {
