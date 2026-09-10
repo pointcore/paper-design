@@ -113,7 +113,6 @@ export class SelectController {
   private grab: 'none' | 'anchor' | 'anchor-group' | 'handle' | 'segment' | 'object' | 'guide' | 'transform' = 'none'
   private grabSegmentIndex = -1
   private grabIsIn = false
-  private lastSegmentCount = -1
   private grabGuide: paper.Path | null = null
   private guideOriginalPos = 0
   // Path currently grabbed for anchor / handle editing (identity-safe, the
@@ -415,7 +414,6 @@ export class SelectController {
     this.grabSegmentIndex = -1
     this.grabCurveIndex = -1
     this.grabIsIn = false
-    this.lastSegmentCount = -1
     this.grabPath = null
     this.dragStartPoint = null
     this.dragConstrainOrigin = null

@@ -107,14 +107,12 @@ export class PenController {
           // inactive so an accidental drag does not mutate the old path.
           this.pressAction = 'none'
           this.pressSegment = -1
-          this.pressStart(point)
           engine.store.setDragging(true)
           return
         }
         this.beginPath(point)
         this.pressAction = 'place'
         this.pressSegment = this.currentPath ? this.currentPath.segments.length - 1 : 0
-        this.pressStart(point)
         engine.store.setDragging(true)
         return
       }
@@ -132,7 +130,6 @@ export class PenController {
         this.pressSegment = hit.index
         this.grabIsIn = hit.isIn
         this.pressAction = hit.kind === 'anchor' ? 'move-anchor' : 'adjust-handle'
-        this.pressStart(point)
         return
       }
 
@@ -140,7 +137,6 @@ export class PenController {
       this.placeCorner(point)
       this.pressAction = 'place'
       this.pressSegment = this.currentPath ? this.currentPath.segments.length - 1 : 0
-      this.pressStart(point)
       engine.store.setDragging(true)
     }
 
@@ -215,10 +211,6 @@ export class PenController {
   // ------------------------------------------------------------------
   // Lifecycle: begin / place / resume
   // ------------------------------------------------------------------
-
-  private pressStart(_point: paper.Point) {
-    // Reserved hook for future gesture bookkeeping.
-  }
 
   /** Begin a brand new path and place the very first anchor. */
   private beginPath(point: paper.Point) {

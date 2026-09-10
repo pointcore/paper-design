@@ -64,7 +64,9 @@ export class WidthController {
       if (!hit) return
       this.target = hit
       this.baseWidth = Number((hit as any).strokeWidth) || 1
-      this.profile = this.readProfile(hit)
+      // Fresh flat profile per gesture: the tool expands destructively on
+      // commit, so there is no profile to resume from a previous run.
+      this.profile = [{ offset: 0, scale: 1 }, { offset: 1, scale: 1 }]
       const length = hit.length || 1
       const grabOffset = Math.min(1, Math.max(0, (hit.getOffsetOf(event.point) ?? 0) / length))
       this.activeStop = this.nearestStop(this.profile, grabOffset)
@@ -166,22 +168,6 @@ export class WidthController {
     let node: paper.Item | null = item
     while (node && !(node instanceof engine.scope.Layer)) node = node.parent
     return !!node && !!(node.data as any)?.isUserLayer
-  }
-
-  /** Stored profile or a flat default. */
-  private readProfile(path: paper.Path): WidthStop[] {
-    const raw = (path.data as any)?.widthProfile as unknown
-    if (Array.isArray(raw)) {
-      const stops = (raw as any[])
-        .filter((s) => s && Number.isFinite(s.offset) && Number.isFinite(s.scale))
-        .map((s) => ({
-          offset: Math.min(1, Math.max(0, Number(s.offset))),
-          scale: Math.min(5, Math.max(0.05, Number(s.scale))),
-        }))
-        .sort((a, b) => a.offset - b.offset)
-      if (stops.length >= 2) return stops
-    }
-    return [{ offset: 0, scale: 1 }, { offset: 1, scale: 1 }]
   }
 
   private nearestStop(profile: WidthStop[], offset: number): number {
