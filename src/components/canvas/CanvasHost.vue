@@ -120,6 +120,10 @@ onMounted(() => {
   window.addEventListener('resize', onResize)
   window.addEventListener('keydown', onGlobalKeydown)
   window.addEventListener('keyup', onGlobalKeyUp)
+  // Capture phase runs before Paper's document-level key handling: an open
+  // context menu swallows Escape (close only) so tool shortcuts below never
+  // see it and the selection survives.
+  window.addEventListener('keydown', onCaptureKeydown, true)
   document.addEventListener('click', onDocumentClick)
 
   // Watch for view setting changes
@@ -165,6 +169,7 @@ onUnmounted(() => {
   window.removeEventListener('resize', onResize)
   window.removeEventListener('keydown', onGlobalKeydown)
   window.removeEventListener('keyup', onGlobalKeyUp)
+  window.removeEventListener('keydown', onCaptureKeydown, true)
   document.removeEventListener('click', onDocumentClick)
   window.removeEventListener('mousemove', onGuideDragMove)
   window.removeEventListener('mouseup', onGuideDragEnd)
@@ -421,12 +426,28 @@ function onDocumentClick() {
   contextMenu.value.visible = false
 }
 
+/** Capture-phase Escape: close the context menu without touching tools. */
+function onCaptureKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape' && contextMenu.value.visible) {
+    e.stopPropagation()
+    e.preventDefault()
+    hideMenu()
+  }
+}
+
 function exitIsolation() {
   engine?.exitIsolation()
 }
 
 function onContextMenu(e: MouseEvent) {
-  contextMenu.value = { visible: true, x: e.clientX, y: e.clientY }
+  // Clamp inside the viewport so edge clicks keep every item clickable.
+  const MENU_W = 180
+  const MENU_H = 240
+  contextMenu.value = {
+    visible: true,
+    x: Math.min(e.clientX, window.innerWidth - MENU_W),
+    y: Math.min(e.clientY, window.innerHeight - MENU_H),
+  }
 }
 
 function ctxCopy() {
