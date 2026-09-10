@@ -57,6 +57,13 @@ export class PenController {
 
   activate() {
     if (!this.engine) return
+    // Committing on tool switch (like Enter) beats orphaning an id-less
+    // path in the scene: singles vanish, valid strokes persist selected.
+    // Returns from transient view tools (space-pan, zoom) keep drawing.
+    const lastTool = this.engine.store.lastTool
+    if (this.isDrawing && lastTool !== 'view-hand' && lastTool !== 'zoom') {
+      this.finishPath()
+    }
     this.setupTool()
     this.restoreDefaultCursor()
   }
@@ -162,7 +169,9 @@ export class PenController {
     scope.tool.onMouseMove = (event: paper.ToolEvent) => {
       engine.store.setCursorPos(event.point.x, event.point.y)
       if (this.isDrawing && this.currentPath) {
-        this.updatePreview(event.point)
+        // Preview through the same snap as placement so the rubber band
+        // lands where the next click will.
+        this.updatePreview(this.snapService.snapPoint(event.point))
         this.refreshChrome()
       } else if (!this.isDrawing) {
         this.chrome.clear()
@@ -475,7 +484,11 @@ export class PenController {
     const walk = (item: paper.Item) => {
       if (item instanceof scope.Path) {
         const p = item as paper.Path
-        if (!p.closed && p.visible && !p.data?.isPreview) candidates.push(p)
+        // Resume extends real artwork only: never clipped pattern tiles
+        // (id-less) and never locked paths.
+        if (!p.closed && p.visible && !(p as any).locked && !p.data?.isPreview && !p.data?.isPatternTile) {
+          candidates.push(p)
+        }
       }
       if (item.children) item.children.forEach(walk)
     }
