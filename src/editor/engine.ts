@@ -2737,6 +2737,7 @@ export class EditorEngine {
     const targetTop = bounds.y
     const targetCenterY = bounds.y + bounds.height / 2
     const targetBottom = bounds.y + bounds.height
+    let moved = false
     for (const item of items) {
       const b = item.bounds
       if (!b) continue
@@ -2753,10 +2754,12 @@ export class EditorEngine {
       if (dx !== 0 || dy !== 0) {
         item.position = item.position.add(new this.scope.Point(dx, dy))
         this.refreshItemGradient(item)
+        moved = true
       }
     }
+    if (moved) this.reflowTextsForItems(items)
     this.scope.view.update()
-    return true
+    return moved
   }
 
   /** Active artboard rectangle, or null when none is usable. */
@@ -2800,6 +2803,7 @@ export class EditorEngine {
       }
       cursor += sizeOf(item.bounds) + gap
     }
+    if (moved) this.reflowTextsForItems(items)
     this.scope.view.update()
     return moved
   }
@@ -2836,6 +2840,7 @@ export class EditorEngine {
       this.refreshItemGradient(item)
       moved = true
     })
+    if (moved) this.reflowTextsForItems(items)
     this.scope.view.update()
     return moved
   }

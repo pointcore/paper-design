@@ -1249,6 +1249,7 @@ function onTransformChange() {
     item.scale(scaleX, scaleY, pivot)
     e.refreshItemGradient(item)
   })
+  e.reflowTextsForItems(items)
   e.scope.view.update()
   e.pushHistory('Transform')
 }
