@@ -29,6 +29,8 @@ describe('resolveToolShortcut', () => {
     expect(resolveToolShortcut(key({ key: 'z' }))).toBe('zoom')
     expect(resolveToolShortcut(key({ key: 'h' }))).toBe('view-hand')
     expect(resolveToolShortcut(key({ key: 'q' }))).toBe('lasso')
+    expect(resolveToolShortcut(key({ key: 'g' }))).toBe('gradient')
+    expect(resolveToolShortcut(key({ key: 'y' }))).toBe('wand')
   })
 
   it('prefers shifted bindings over plain letters', () => {

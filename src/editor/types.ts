@@ -30,6 +30,8 @@ export type ToolName =
   | 'blob-brush'      // Blob brush Shift+B
   | 'brush'           // Brush B
   | 'eraser'          // Eraser Shift+E
+  | 'gradient'        // Gradient G
+  | 'wand'            // Magic wand Y
   | 'scissors'        // Scissors C
   | 'width'             // Width tool Shift+W
   | 'rotate'          // Rotate R

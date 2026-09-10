@@ -4,11 +4,13 @@
 import { EditorEngine } from './engine'
 import { SelectController } from './selection/select-controller'
 import { LassoController } from './selection/lasso-controller'
+import { WandController } from './selection/wand-controller'
 import { PenController } from './path-drawing/pen-controller'
 import { PencilController } from './path-drawing/pencil-controller'
 import { EraserController } from './path-drawing/eraser-controller'
 import { BlobBrushController } from './path-drawing/blob-brush-controller'
 import { BrushController } from './path-drawing/brush-controller'
+import { GradientController } from './path-drawing/gradient-controller'
 import { ScissorsController } from './path-drawing/scissors-controller'
 import { ShapeBuilderController } from './path-drawing/shape-builder-controller'
 import { WidthController } from './path-drawing/width-controller'
@@ -31,6 +33,9 @@ export function registerAllControllers(engine: EditorEngine) {
   // Lasso tool (freehand loop selection, object level)
   engine.registerController('lasso', new LassoController())
 
+  // Magic wand (click to select the same fill)
+  engine.registerController('wand', new WandController())
+
   // Pen tool
   engine.registerController('pen', new PenController())
 
@@ -45,6 +50,9 @@ export function registerAllControllers(engine: EditorEngine) {
 
   // Calligraphic brush (flat-nib ribbon strokes)
   engine.registerController('brush', new BrushController())
+
+  // Gradient annotator (drag to set the linear angle)
+  engine.registerController('gradient', new GradientController())
 
   // Scissors tool (cut path at click)
   engine.registerController('scissors', new ScissorsController())

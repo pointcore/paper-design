@@ -246,6 +246,104 @@ export class EditorEngine {
     return true
   }
 
+  /**
+   * Duplicate an artboard sheet plus the artwork overlapping it (AI
+   * duplicate-artboard parity). The copy lands beside the source with an
+   * offset clone of every intersecting top-level user item (fresh ids,
+   * thread links remapped inside the cloned set, selection preserved).
+   * Returns false when the board is missing.
+   */
+  duplicateArtboard(boardId: string): boolean {
+    const scope = this.scope
+    const src = this.store.artboards.find((b) => b.id === boardId)
+    if (!src || !(src.width > 0) || !(src.height > 0)) return false
+    const names = new Set(this.store.artboards.map((b) => b.name))
+    let base = `${src.name} copy`
+    let n = 2
+    while (names.has(base)) {
+      base = `${src.name} copy ${n}`
+      n++
+    }
+    const board = {
+      id: this.genId(),
+      name: base,
+      x: src.x + src.width + 100,
+      y: src.y,
+      width: src.width,
+      height: src.height,
+    }
+    const dx = board.x - src.x
+    const dy = board.y - src.y
+    const srcRect = new scope.Rectangle(src.x, src.y, src.width, src.height)
+    // Intersecting top-level user items (visible layers; locked art rides
+    // along so the copy stays faithful).
+    const targets: paper.Item[] = []
+    for (const layer of this.project.layers) {
+      if (!(layer.data as any)?.isUserLayer || !layer.visible) continue
+      for (const child of layer.children) {
+        const c = child as paper.Item
+        if ((c as any).data?.isPreview || !c.visible) continue
+        const bounds = (c as any).bounds as paper.Rectangle | undefined
+        if (!bounds) continue
+        try {
+          if (bounds.intersects(srcRect)) targets.push(c)
+        } catch {
+          targets.push(c)
+        }
+      }
+    }
+    const idMap = new Map<string, string>()
+    const clones: Array<{ node: paper.Item; parent: paper.Item }> = []
+    for (const item of targets) {
+      const parent = item.parent ?? this.getActiveLayer()
+      const clone = (item as any).clone({ insert: false }) as paper.Item
+      clone.translate(new scope.Point(dx, dy))
+      const walk = (node: paper.Item) => {
+        const data = (node as any).data ?? ((node as any).data = {})
+        if (data.id || data.isUserItem) {
+          const fresh = this.genId()
+          if (typeof data.id === 'string') idMap.set(data.id, fresh)
+          data.id = fresh
+          data.isUserItem = true
+        }
+        delete data.isPreview
+        ;(node as any).selected = false
+        const children = (node as any).children as paper.Item[] | undefined
+        if (children) for (const child of children) walk(child)
+      }
+      walk(clone)
+      clones.push({ node: clone, parent })
+    }
+    // Remap thread links that point inside the cloned set.
+    for (const { node } of clones) {
+      const walk = (n: paper.Item) => {
+        const data = (n as any).data ?? {}
+        if (typeof data.threadNext === 'string' && idMap.has(data.threadNext)) {
+          data.threadNext = idMap.get(data.threadNext)
+        }
+        if (typeof data.threadPrev === 'string' && idMap.has(data.threadPrev)) {
+          data.threadPrev = idMap.get(data.threadPrev)
+        }
+        const children = (n as any).children as paper.Item[] | undefined
+        if (children) for (const child of children) walk(child)
+      }
+      walk(node)
+    }
+    this.store.addArtboard(board)
+    for (const { node, parent } of clones) {
+      ;(parent as paper.Item).addChild(node)
+    }
+    this.refreshArtboards()
+    if (clones.length > 0) {
+      this.clearSelection()
+      for (const { node } of clones) node.selected = true
+      this.syncSelectionToStore()
+    }
+    this.pushHistory('Duplicate Artboard')
+    this.scope.view.update()
+    return true
+  }
+
   /** Center the view on a document point (artboard activation). */
   panViewTo(point: paper.Point): void {
     this.scope.view.center = point.clone()
@@ -3774,9 +3872,10 @@ export class EditorEngine {
   /**
    * Select every appearance leaf sharing an attribute of the
    * first selected leaf (fill / stroke color, stroke width, opacity or
-   * blend mode). Returns how many items were selected.
+   * blend mode). Returns how many items were selected. Additive mode
+   * keeps the existing selection (wand Shift-click parity).
    */
-  selectSame(attribute: 'fill' | 'stroke' | 'strokeWidth' | 'opacity' | 'blendMode'): number {
+  selectSame(attribute: 'fill' | 'stroke' | 'strokeWidth' | 'opacity' | 'blendMode', additive = false): number {
     const leaves = this.appearanceLeaves()
     if (leaves.length === 0) return 0
     const reference = this.getSelection()
@@ -3785,7 +3884,7 @@ export class EditorEngine {
     if (!reference) return 0
     const key = this.appearanceKey(reference, attribute)
     const matches = leaves.filter((leaf) => this.appearanceKey(leaf, attribute) === key)
-    this.clearSelection()
+    if (!additive) this.clearSelection()
     matches.forEach((item) => {
       item.selected = true
     })

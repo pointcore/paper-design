@@ -201,6 +201,8 @@ function buildToolCursors(): Record<ToolName, string> {
     'rect-grid': crosshair,
     'polar-grid': crosshair,
     pencil: CURSOR_PENCIL,
+    gradient: crosshair,
+    wand: crosshair,
     'blob-brush': blobRing,
     brush: brushRing,
     eraser: eraserRing,
