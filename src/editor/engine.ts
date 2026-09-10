@@ -6,6 +6,7 @@ import { PaperOffset } from 'paperjs-offset'
 import type { ToolName, StyleState, LayerMeta, LayerItemNode, ArtboardMeta, SymbolEntry, HistoryEntry, GuideOrientation, ProjectFileData, ReferencePoint, AlignMode, DistributeAxis, BooleanOperation, RasterExportOptions, GradientState, PatternFillState, EnvelopePreset } from './types'
 import { createDefaultStyle } from './store'
 import { cursorForTool } from './cursors'
+import { parseProjectFile } from './project-file'
 import type { EditorStore } from './store-types'
 
 /** Identifier stamped into every saved project file. */
@@ -1739,26 +1740,9 @@ export class EditorEngine {
    * Throws an Error with an English message when the file is invalid.
    */
   importProjectFile(fileText: string): void {
-    if (fileText.length > 150 * 1024 * 1024) {
-      throw new Error('Project file too large (over 150 MB)')
-    }
-    let parsed: ProjectFileData
-    try {
-      parsed = JSON.parse(fileText) as ProjectFileData
-    } catch {
-      throw new Error('Invalid project file: not valid JSON')
-    }
-    const rawSnapshot = (parsed as any)?.snapshot as unknown
-    const snapshotOk =
-      typeof rawSnapshot === 'string'
-        ? rawSnapshot.length > 0
-        : typeof rawSnapshot === 'object' && rawSnapshot !== null
-    if (!parsed || !snapshotOk) {
-      throw new Error('Invalid project file: missing snapshot')
-    }
-    if (typeof parsed.version === 'number' && parsed.version > PROJECT_FILE_VERSION) {
-      throw new Error('Unsupported project file version')
-    }
+    // Parsing/validation is unit-tested pure logic; only apply below.
+    const parsed = parseProjectFile(fileText, PROJECT_FILE_VERSION)
+    const rawSnapshot = parsed.snapshot as unknown
     // Trial-restore first: importJSON throws on malformed snapshots AFTER
     // project.clear(), which used to wipe the open document with no way
     // back. Roll back to a backup snapshot when the file is unreadable.
