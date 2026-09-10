@@ -3,7 +3,6 @@
     <div class="hs-subheader">
       <span class="hs-title">History</span>
       <div class="hs-actions">
-        <el-icon size="14" class="action-btn" title="Panel menu"><Operation /></el-icon>
         <el-icon size="14" class="action-btn" title="Clear history" @click="clearHistory"><Delete /></el-icon>
       </div>
     </div>
@@ -23,7 +22,7 @@
 
 <script setup lang="ts">
 import { ref, watch, inject, type Ref } from 'vue'
-import { Delete, Document, Operation } from '@element-plus/icons-vue'
+import { Delete, Document } from '@element-plus/icons-vue'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
 

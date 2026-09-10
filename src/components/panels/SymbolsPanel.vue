@@ -71,11 +71,15 @@ function makeSymbol() {
 }
 
 function placeSymbol(id: string) {
-  getEngine()?.placeSymbol(id)
+  if (!getEngine()?.placeSymbol(id)) {
+    store.setStatusMessage('Cannot place that symbol')
+  }
 }
 
 function deleteSymbol(id: string) {
-  getEngine()?.deleteSymbol(id)
+  if (!getEngine()?.deleteSymbol(id)) {
+    store.setStatusMessage('Cannot delete that symbol')
+  }
 }
 
 function breakLinks() {
