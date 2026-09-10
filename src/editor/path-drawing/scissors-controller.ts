@@ -67,6 +67,9 @@ export class ScissorsController {
     if (!item || (item as any).locked) return null
     const data = (item.data as any) ?? {}
     if (data.annotation || data.isChrome || data.isPreview || data.isGuide || data.isArtboard) return null
+    // Pattern tiles and clip masks hold their hosts together; cut the host
+    // shape instead of its scaffolding.
+    if (data.isPatternTile || (item as any).clipMask) return null
     if (item instanceof scope.Path && !(item instanceof scope.CompoundPath)) {
       return item.segments.length >= 2 ? (item as paper.Path) : null
     }
@@ -77,8 +80,15 @@ export class ScissorsController {
   private cutAt(path: paper.Path, point: paper.Point) {
     const engine = this.engine
     if (!engine) return
+    const scope = engine.scope
     const location = path.getLocationOf(point)
-    if (!location) {
+    // getLocationOf answers even for far fill clicks: only cut near the
+    // actual stroke, or fills would split at surprising places.
+    if (
+      !location ||
+      !location.point ||
+      location.point.getDistance(point) > 4 / scope.view.zoom
+    ) {
       engine.store.setStatusMessage('Click closer to the path to cut')
       return
     }
@@ -93,9 +103,12 @@ export class ScissorsController {
       second.remove()
       second = null
     }
-    if (!wasClosed && !second) {
-      // Endpoint clicks (or defeated geometry) change nothing.
-      engine.store.setStatusMessage('Click away from endpoints to cut')
+    if (!second) {
+      // Endpoint clicks (or defeated geometry) change nothing — for closed
+      // paths too, since a clean split always yields a second part.
+      engine.store.setStatusMessage(
+        wasClosed ? 'Click away from anchors to open the path' : 'Click away from endpoints to cut'
+      )
       return
     }
     const parts: paper.Item[] = [path]

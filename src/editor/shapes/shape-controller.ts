@@ -30,6 +30,8 @@ export class ShapeController {
   activate() {
     if (!this.engine) return
     this.shapeKind = this.getShapeKind()
+    // A mid-drag tool switch must not orphan the overlay preview.
+    this.cancelShape()
     applyToolCursor(this.engine.canvas, this.engine.store.tool)
     this.setupTool()
   }
@@ -77,12 +79,6 @@ export class ShapeController {
       const snapped = this.snapService.snapPoint(event.point)
       this.updatePreview(snapped, event.modifiers)
       engine.store.setCursorPos(snapped.x, snapped.y)
-    }
-
-    scope.tool.onMouseUp = () => {
-      if (!this.isDrawing) return
-      this.finishShape()
-      engine.store.setDragging(false)
     }
 
     scope.tool.onMouseUp = () => {
