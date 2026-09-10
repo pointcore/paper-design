@@ -2467,13 +2467,18 @@ export class EditorEngine {
     ) as paper.Group[]
     if (groups.length === 0) return false
     const released: paper.Item[] = []
+    let changed = false
     for (const group of groups) {
       const kids = group.children.slice() as paper.Item[]
       if (kids.length === 0) {
         group.remove()
+        changed = true
         continue
       }
+      let dissolved = false
       for (const kid of kids) {
+        // Locked children stay behind: releasing must not steal them.
+        if ((kid as any).locked) continue
         const layer = new scope.Layer()
         const id = this.genId()
         const label = ((kid as any).name as string | undefined)?.trim()
@@ -2483,9 +2488,16 @@ export class EditorEngine {
         this.parkUserLayer(layer)
         layer.addChild(kid)
         released.push(kid)
+        dissolved = true
       }
-      group.remove()
+      // Only dissolve containers that actually emptied; locked leftovers
+      // keep their group alive.
+      if (dissolved) {
+        if (group.children.length === 0) group.remove()
+        changed = true
+      }
     }
+    if (!changed) return false
     this.syncLayersToStore()
     const users = this.project.layers.filter((l) => (l.data as any)?.isUserLayer)
     const last = users[users.length - 1]
@@ -2526,6 +2538,16 @@ export class EditorEngine {
     return false
   }
 
+  /** Whether the item or any ancestor up to the layer is locked. */
+  private isEffectivelyLocked(item: paper.Item): boolean {
+    let at: paper.Item | null = item
+    while (at && !(at instanceof this.scope.Layer)) {
+      if ((at as any).locked) return true
+      at = at.parent
+    }
+    return !!at && !!(at as any).locked
+  }
+
   /**
    * Move one tree entry to a new parent / position (panel drag-drop).
    * `destParentId` is a group id, or '' for layer top level (then
@@ -2542,7 +2564,7 @@ export class EditorEngine {
     const scope = this.scope
     const item = this.getItemById(itemId)
     if (!item || !item.parent) return false
-    if ((item as any).locked) {
+    if (this.isEffectivelyLocked(item)) {
       this.showStatus('Item is locked')
       return false
     }
@@ -2560,7 +2582,7 @@ export class EditorEngine {
       if (!layer || !(layer.data as any)?.isUserLayer) return false
       destParent = layer
     }
-    if ((destParent as any).locked) {
+    if (this.isEffectivelyLocked(destParent)) {
       this.showStatus('Target is locked')
       return false
     }
