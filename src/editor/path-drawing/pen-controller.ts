@@ -23,6 +23,7 @@ import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
 import { AnchorChrome } from './anchor-chrome'
 import { SnapService } from '../snap/snap-service'
+import { snap45 } from '../geometry'
 import { CURSOR_PEN, CURSOR_PEN_CONTINUE } from '../cursors'
 
 /** What an active mouse press is doing while a pen stroke is open. */
@@ -648,21 +649,4 @@ export class PenController {
     this.draggedDuringPress = false
     this.chrome.clear()
   }
-}
-
-/**
- * Snap a direction vector to the nearest 45-degree increment (including the
- * axes). Returns a new vector of the same length constrained to one of the
- * eight cardinal / diagonal directions.
- */
-function snap45(v: paper.Point, scope: paper.PaperScope): paper.Point {
-  const length = Math.hypot(v.x, v.y)
-  if (length < 1e-6) return new scope.Point(0, 0)
-  const angle = Math.atan2(v.y, v.x)
-  const oct = Math.round(angle / (Math.PI / 4))
-  const snappedAngle = oct * (Math.PI / 4)
-  return new scope.Point(
-    Math.cos(snappedAngle) * length,
-    Math.sin(snappedAngle) * length
-  )
 }
