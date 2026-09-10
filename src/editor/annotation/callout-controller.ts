@@ -4,19 +4,28 @@
 import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
 import { applyToolCursor } from '../cursors'
+import { SnapService } from '../snap/snap-service'
 
 export class CalloutController {
   engine: EditorEngine | null = null
+  snapService: SnapService = new SnapService()
   private isDrawing = false
   private currentPath: paper.Path | null = null
   private points: paper.Point[] = []
 
   attachEngine(engine: EditorEngine) {
     this.engine = engine
+    this.snapService.attachEngine(engine)
   }
 
   activate() {
     if (!this.engine) return
+    // Commit an in-progress draft on real tool switches (transient
+    // space-pan / zoom returns keep drafting).
+    const lastTool = this.engine.store.lastTool
+    if (this.isDrawing && lastTool !== 'view-hand' && lastTool !== 'zoom') {
+      this.finishCallout()
+    }
     applyToolCursor(this.engine.canvas, 'callout')
     this.setupTool()
   }
@@ -41,16 +50,17 @@ export class CalloutController {
       const native = this.getNativeEvent(event)
       if (native.button !== 0) return
 
-      const point = event.point
+      const point = this.snapService.snapPoint(event.point)
 
       if (!this.isDrawing) {
         this.isDrawing = true
         this.points = [point]
 
         const annotationLayer = engine.getAnnotationLayer()
+        const style = engine.store.calloutStyle
         this.currentPath = new scope.Path() as paper.Path
-        this.currentPath.strokeColor = new scope.Color('#333333')
-        this.currentPath.strokeWidth = 1.5
+        this.currentPath.strokeColor = new scope.Color(style.color)
+        this.currentPath.strokeWidth = style.lineWidth
         this.currentPath.strokeCap = 'round' as any
         annotationLayer.addChild(this.currentPath)
         this.currentPath.add(new scope.Segment(point))
@@ -74,15 +84,10 @@ export class CalloutController {
     }
 
     scope.tool.onMouseUp = () => {
-      const native = this.getNativeEventFromUp()
       engine.store.setDragging(false)
     }
 
     scope.view.update()
-  }
-
-  private getNativeEventFromUp(): MouseEvent | null {
-    return null
   }
 
   private finishCallout() {

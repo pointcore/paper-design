@@ -4,7 +4,7 @@
  * Drag to measure: a dashed preview line follows the cursor while the
  * status bar reads out length (in the current ruler unit) and angle.
  * Nothing is committed to the document and no history is recorded;
- * releasing keeps the last reading visible, Escape discards the preview.
+ * releasing or Escape clears the preview.
  */
 import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
@@ -43,8 +43,8 @@ export class MeasureController {
     new scope.Tool()
 
     scope.tool.onMouseDown = (event: paper.ToolEvent) => {
-      const native = (event as any).event as MouseEvent
-      if (native.button !== 0 || this.isMeasuring) return
+      const native = (event as any).event as MouseEvent | undefined
+      if (!native || native.button !== 0 || this.isMeasuring) return
       this.startPoint = { x: event.point.x, y: event.point.y }
       this.isMeasuring = true
       engine.store.setDragging(true)
