@@ -2304,7 +2304,7 @@ export class EditorEngine {
   /** Select one object-tree entry (shift extends the selection). */
   selectItemById(id: string, additive = false): void {
     const item = this.getItemById(id)
-    if (!item) return
+    if (!item || (item as any).locked) return
     if (!additive) this.project.deselectAll()
     item.selected = true
     this.syncSelectionToStore()
