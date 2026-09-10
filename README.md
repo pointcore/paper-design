@@ -32,9 +32,9 @@ A vector graphics editor built with **Vue 3 + TypeScript + Paper.js**, offering 
 - **Pattern fills**: Procedural dots/stripes/grid/crosshatch swatches (motif color + background + scale + angle) rendered as clipped tile groups, so they survive history, Save/Open and SVG export. Apply/retile/remove from the Properties panel or Object menu; eyedropper picks patterns; remove before boolean ops.
 - **Page setup**: Canvas Settings page size (presets, custom W/H, orientation swap) driving New Document, Save/Open persistence and page-area raster export, plus document bleed (dashed canvas guide, persisted, vector PDF pages grow with crop marks).
 - **Guides & grid**: Ruler drag-out guides with move/delete (drag back to a ruler), line grid with size control (major line every 5 steps, Ctrl+" toggles, grid never leaks into history/files/exports), transparent checkerboard background.
-- **Navigator**: Floating whole-scene minimap (artwork plus artboard sheets) with a live viewport rectangle; click or drag to pan, collapsible, toggleable from the View menu.
+- **Navigator**: Floating whole-scene minimap (artwork plus artboard sheets) with a live viewport rectangle; click or drag to pan (clicking a sheet also activates its artboard), collapsible, toggleable from the View menu.
 - **History**: Whole-project JSON snapshots with a 100-entry limit, listed in the History panel with click-to-jump and clearing; Ctrl+Z to undo, Ctrl+Shift+Z / Ctrl+Y to redo.
-- **Annotation tools**: Callout annotations with persisted content/style models.
+- **Annotation tools**: Callout annotations (leader line plus label, painted from the stored callout style; label text is fixed for now).
 - **Measure tool**: Drag for a dashed preview with length (ruler units) and angle in the status bar; transient, nothing is committed.
 
 Not yet implemented: mesh gradients, opacity masks, and multi-fill/stroke appearance stacks.
@@ -83,10 +83,11 @@ npm run preview      # Preview the production build locally
 ### Run checks
 
 ```bash
-npm test             # Engine size check (scripts/check-engine-size.js)
+npm test             # Engine size check (scripts/check-engine-size.js) + unit tests (vitest run)
+npm run test:unit    # Unit tests only
 ```
 
-Available scripts are exactly `dev`, `build`, `preview` and `test` (see `package.json`).
+Available scripts are `dev`, `build`, `preview`, `test` and `test:unit` (see `package.json`).
 
 ---
 
@@ -132,7 +133,7 @@ scripts/
 
 ## Notes
 
-- `tests/` and `src/api/` are gitignored and intended for local use (no test suite or credentials are committed).
+- Unit tests live next to the source (`src/**/*.test.ts`, run by `vitest run`); `src/api/` is gitignored and intended for local-only credentials.
 - `package-lock.json` is gitignored and untracked, so `npm ci` will fail; dependency versions are not locked.
 - Build outputs (`dist/`) and `*.tsbuildinfo` files are generated — do not hand-edit them.
 
