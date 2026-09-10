@@ -142,6 +142,22 @@ function onPointerDown(e: PointerEvent) {
   if (!point) return
   panning = true
   bodyRef.value?.setPointerCapture?.(e.pointerId)
+  // Clicking a board sheet activates it (top-most first), then pans there.
+  const board = [...store.artboards]
+    .reverse()
+    .find(
+      (b) =>
+        b.width > 0 &&
+        b.height > 0 &&
+        point.x >= b.x &&
+        point.x <= b.x + b.width &&
+        point.y >= b.y &&
+        point.y <= b.y + b.height
+    )
+  if (board && board.id !== store.activeArtboardId) {
+    store.setActiveArtboard(board.id)
+    engine.refreshArtboards()
+  }
   engine.panViewTo(point)
 }
 
