@@ -33,8 +33,22 @@
       <div class="menu-item" @click="ctxPaste">Paste</div>
       <div class="menu-item" @click="ctxDelete">Delete</div>
       <div class="menu-divider"></div>
+      <div class="menu-item" @click="ctxGroup">Group</div>
+      <div class="menu-item" @click="ctxUngroup">Ungroup</div>
+      <div class="menu-item" @click="ctxJoin">Join Paths</div>
+      <div class="menu-item" @click="ctxCompound">Make Compound Path</div>
+      <div class="menu-divider"></div>
       <div class="menu-item" @click="ctxBringToFront">Bring to Front</div>
+      <div class="menu-item" @click="ctxBringForward">Bring Forward</div>
+      <div class="menu-item" @click="ctxSendBackward">Send Backward</div>
       <div class="menu-item" @click="ctxSendToBack">Send to Back</div>
+      <div class="menu-divider"></div>
+      <div class="menu-item" @click="ctxMakeMask">Make Clipping Mask</div>
+      <div class="menu-item" @click="ctxSetKey">Set as Key Object</div>
+      <div class="menu-divider"></div>
+      <div class="menu-item" @click="ctxLock">Lock</div>
+      <div class="menu-item" @click="ctxHide">Hide</div>
+      <div class="menu-item" @click="ctxSameFill">Select Same Fill</div>
     </div>
   </div>
 </template>
@@ -441,8 +455,8 @@ function exitIsolation() {
 
 function onContextMenu(e: MouseEvent) {
   // Clamp inside the viewport so edge clicks keep every item clickable.
-  const MENU_W = 180
-  const MENU_H = 240
+  const MENU_W = 200
+  const MENU_H = 460
   contextMenu.value = {
     visible: true,
     x: Math.min(e.clientX, window.innerWidth - MENU_W),
@@ -478,8 +492,73 @@ function ctxBringToFront() {
   hideMenu()
 }
 
+function ctxBringForward() {
+  engine?.bringForward()
+  hideMenu()
+}
+
+function ctxSendBackward() {
+  engine?.sendBackward()
+  hideMenu()
+}
+
 function ctxSendToBack() {
   engine?.sendSelectionToBack()
+  hideMenu()
+}
+
+function ctxGroup() {
+  if (engine && !engine.groupSelection()) store.setStatusMessage('Select 2 or more objects to group')
+  hideMenu()
+}
+
+function ctxUngroup() {
+  if (engine && !engine.ungroupSelection()) store.setStatusMessage('Select a group to ungroup')
+  hideMenu()
+}
+
+function ctxJoin() {
+  if (engine && !engine.joinPaths()) store.setStatusMessage('Join needs exactly two unlocked open paths')
+  hideMenu()
+}
+
+function ctxCompound() {
+  if (engine && !engine.makeCompoundPath()) store.setStatusMessage('Compound needs at least two unlocked paths')
+  hideMenu()
+}
+
+function ctxMakeMask() {
+  if (engine && !engine.makeClippingMask()) store.setStatusMessage('Clipping needs art plus a path on top')
+  hideMenu()
+}
+
+function ctxSetKey() {
+  const id = store.selectedItemIds[0]
+  if (!id) {
+    store.setStatusMessage('Select an object first')
+  } else {
+    ;(store as any).setKeyObject?.(id)
+    ;(store as any).setAlignTarget?.('key')
+    store.setStatusMessage('Key object set (align target)')
+  }
+  hideMenu()
+}
+
+function ctxLock() {
+  engine?.setSelectedLocked(true)
+  hideMenu()
+}
+
+function ctxHide() {
+  engine?.setSelectedVisible(false)
+  hideMenu()
+}
+
+function ctxSameFill() {
+  if (engine) {
+    const n = engine.selectSame('fill')
+    store.setStatusMessage(`Selected ${n} items with the same fill`)
+  }
   hideMenu()
 }
 

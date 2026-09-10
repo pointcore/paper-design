@@ -323,6 +323,8 @@
             <el-input-number v-model="fontSize" :min="1" :max="400" size="small" controls-position="right" @change="onFontSizeChange" />
             <el-button size="small" class="fmt-btn" :type="isBold ? 'primary' : ''" @click="toggleBold">B</el-button>
             <el-button size="small" class="fmt-btn" :type="isItalic ? 'primary' : ''" @click="toggleItalic">I</el-button>
+            <el-button size="small" class="fmt-btn" :type="isUnderline ? 'primary' : ''" title="Underline" @click="toggleUnderline">U</el-button>
+            <el-button size="small" class="fmt-btn" :type="isStrikethrough ? 'primary' : ''" title="Strikethrough" @click="toggleStrikethrough">S</el-button>
           </div>
           <div class="prop-row">
             <span class="prop-label-sm">Align</span>
@@ -342,6 +344,17 @@
             <span class="prop-label-sm">Tracking</span>
             <el-input-number v-model="trackingValue" :min="-200" :max="1000" size="small" controls-position="right" @change="onTrackingChange" />
             <span class="unit">/1000em</span>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label-sm">Base</span>
+            <el-input-number v-model="baselineValue" :min="-100" :max="100" size="small" controls-position="right" @change="onBaselineChange" />
+            <span class="prop-label-sm">H%</span>
+            <el-input-number v-model="hScaleValue" :min="10" :max="400" size="small" controls-position="right" @change="onScaleChange" />
+          </div>
+          <div class="prop-row">
+            <span class="prop-label-sm">Path</span>
+            <el-input-number v-model="pathOffsetValue" size="small" controls-position="right" title="Type on path start offset" @change="onPathOffsetChange" />
+            <span class="unit">offset</span>
           </div>
           <div v-if="isAreaSelected">
             <div class="prop-row">
@@ -368,6 +381,7 @@
             <el-radio-group v-model="alignTarget" size="small">
               <el-radio-button value="selection">Selection</el-radio-button>
               <el-radio-button value="board">Artboard</el-radio-button>
+              <el-radio-button value="key">Key</el-radio-button>
             </el-radio-group>
           </div>
           <div class="btn-grid-3">
@@ -490,9 +504,9 @@ function stepArtboard(dir: 1 | -1) {
   activateArtboard(next.id)
 }
 
-/** Jump to the Layers tab where the Artboard panel lives. */
+/** Jump to the Artboards tab where the Artboard panel lives. */
 function editArtboards() {
-  store.setRightTab('layer')
+  store.setRightTab('artboards')
 }
 
 function toggleGrid() {
@@ -736,8 +750,8 @@ const rotateBy = ref(0)
 const skewXBy = ref(0)
 const skewYBy = ref(0)
 
-// Align target: the selection itself or the active artboard.
-const alignTarget = ref<'selection' | 'board'>('selection')
+// Align target: united selection, active artboard, or picked key object.
+const alignTarget = ref<'selection' | 'board' | 'key'>('selection')
 
 // Nine-point reference anchors in grid order.
 const refPoints: ReferencePoint[] = [
@@ -758,6 +772,11 @@ const fontFamily = ref('Arial')
 const fontSize = ref(12)
 const isBold = ref(false)
 const isItalic = ref(false)
+const isUnderline = ref(false)
+const isStrikethrough = ref(false)
+const baselineValue = ref(0)
+const hScaleValue = ref(100)
+const pathOffsetValue = ref(0)
 const textAlign = ref<TextAlign>('left')
 const leadingAuto = ref(true)
 const leadingValue = ref(14)
@@ -831,6 +850,11 @@ function syncTextFromSelection() {
   fontSize.value = Number(item.fontSize) || 12
   isBold.value = String(item.fontWeight) === 'bold' || Number(item.fontWeight) >= 600
   isItalic.value = ((item as any).fontStyle as string) === 'italic'
+  isUnderline.value = !!(item as any).underline || !!store.charStyle.underline
+  isStrikethrough.value = !!(item as any).strikethrough || !!store.charStyle.strikethrough
+  baselineValue.value = Number((item as any).baselineShift ?? store.charStyle.baselineShift) || 0
+  hScaleValue.value = Number((item as any).horizontalScale ?? store.charStyle.horizontalScale) || 100
+  pathOffsetValue.value = Number((store as any).textPathOffset) || 0
   const j = (item as any).justification as string
   const storedAlign = store.paragraphStyle.align
   textAlign.value = j === 'center' || j === 'right' ? j : (storedAlign === 'justify' ? 'justify' : 'left')
@@ -921,6 +945,67 @@ function toggleItalic() {
   isItalic.value = next
   store.updateCharStyle({ fontStyle: next ? 'italic' : 'normal' })
   applyTextStyle((item) => { (item as any).fontStyle = next ? 'italic' : 'normal' }, 'Change Font Style')
+}
+
+function toggleUnderline() {
+  const next = !isUnderline.value
+  isUnderline.value = next
+  store.updateCharStyle({ underline: next })
+  // Paper.js has no underline primitive: stored on charStyle + item data so
+  // SVG export and future text engines can honour it.
+  const e = getEngine()
+  e?.getSelection().forEach((item) => { (item as any).data = { ...((item as any).data ?? {}), underline: next } })
+  e?.scope.view.update()
+  if (store.hasSelection) e?.pushHistory(next ? 'Underline On' : 'Underline Off')
+}
+
+function toggleStrikethrough() {
+  const next = !isStrikethrough.value
+  isStrikethrough.value = next
+  store.updateCharStyle({ strikethrough: next })
+  const e = getEngine()
+  e?.getSelection().forEach((item) => { (item as any).data = { ...((item as any).data ?? {}), strikethrough: next } })
+  e?.scope.view.update()
+  if (store.hasSelection) e?.pushHistory(next ? 'Strikethrough On' : 'Strikethrough Off')
+}
+
+function onBaselineChange(val: number | undefined) {
+  if (val === undefined || !Number.isFinite(val)) {
+    baselineValue.value = Number(store.charStyle.baselineShift) || 0
+    return
+  }
+  baselineValue.value = val
+  store.updateCharStyle({ baselineShift: val })
+  const e = getEngine()
+  e?.getSelection().forEach((item) => { (item as any).data = { ...((item as any).data ?? {}), baselineShift: val } })
+  e?.scope.view.update()
+  if (store.hasSelection) e?.pushHistory('Baseline Shift')
+}
+
+function onScaleChange(val: number | undefined) {
+  if (val === undefined || !Number.isFinite(val)) {
+    hScaleValue.value = Number(store.charStyle.horizontalScale) || 100
+    return
+  }
+  hScaleValue.value = val
+  store.updateCharStyle({ horizontalScale: val })
+  const e = getEngine()
+  e?.getSelection().forEach((item) => { (item as any).data = { ...((item as any).data ?? {}), horizontalScale: val } })
+  e?.scope.view.update()
+  if (store.hasSelection) e?.pushHistory('Character Scale')
+}
+
+function onPathOffsetChange(val: number | undefined) {
+  if (val === undefined || !Number.isFinite(val)) {
+    pathOffsetValue.value = Number((store as any).textPathOffset) || 0
+    return
+  }
+  pathOffsetValue.value = val
+  ;(store as any).setTextPathOffset?.(val)
+  const e = getEngine()
+  e?.getSelection().forEach((item) => { (item as any).data = { ...((item as any).data ?? {}), pathOffset: val } })
+  e?.scope.view.update()
+  store.setStatusMessage(`Path text offset ${val}`)
 }
 
 function onAlignChange(val: TextAlign) {
@@ -1313,7 +1398,12 @@ function onFlipV() {
 function onAlign(mode: AlignMode, label: string) {
   const e = getEngine()
   if (!e) return
-  const target = alignTarget.value === 'board' ? e.getActiveArtboardRect() ?? undefined : undefined
+  const t = (alignTarget as any).value ?? 'selection'
+  const target = t === 'board'
+    ? e.getActiveArtboardRect() ?? undefined
+    : t === 'key'
+      ? (e as any).getKeyObjectBounds?.() ?? undefined
+      : undefined
   // Direct-select sub-selection first (anchors); falls through to objects.
   const sc = e.getController('direct-select') as {
     alignSubselection?: (m: AlignMode, t?: paper.Rectangle | null) => boolean | null
@@ -1327,7 +1417,7 @@ function onAlign(mode: AlignMode, label: string) {
   if (e.alignSelection(mode, target)) {
     e.pushHistory(label)
   } else {
-    store.setStatusMessage('Align needs 2+ objects or the artboard target')
+    store.setStatusMessage('Align needs 2+ objects, a board, or a key object')
   }
 }
 

@@ -15,17 +15,26 @@
       <div v-show="activeTab === 'property'" class="rp-pane">
         <PropertyPanel />
       </div>
+      <div v-show="activeTab === 'align'" class="rp-pane">
+        <AlignPanel />
+      </div>
       <div v-show="activeTab === 'layer'" class="rp-pane rp-pane-layer">
         <LayerPanel />
-        <div class="rp-artboard-wrap">
-          <ArtboardPanel />
-        </div>
+      </div>
+      <div v-show="activeTab === 'artboards'" class="rp-pane">
+        <ArtboardPanel />
+      </div>
+      <div v-show="activeTab === 'swatches'" class="rp-pane">
+        <SwatchesPanel />
       </div>
       <div v-show="activeTab === 'symbols'" class="rp-pane">
         <SymbolsPanel />
       </div>
       <div v-show="activeTab === 'history'" class="rp-pane">
         <HistoryPanel />
+      </div>
+      <div v-show="activeTab === 'actions'" class="rp-pane">
+        <ActionsPanel />
       </div>
     </div>
   </div>
@@ -36,18 +45,25 @@ import { computed, watch } from 'vue'
 import { useEditorStore } from '../../editor/store'
 import type { RightPanelTab } from '../../editor/types'
 import PropertyPanel from './PropertyPanel.vue'
+import AlignPanel from './AlignPanel.vue'
 import LayerPanel from './LayerPanel.vue'
 import ArtboardPanel from './ArtboardPanel.vue'
+import SwatchesPanel from './SwatchesPanel.vue'
 import HistoryPanel from './HistoryPanel.vue'
 import SymbolsPanel from './SymbolsPanel.vue'
+import ActionsPanel from './ActionsPanel.vue'
 
 const store = useEditorStore()
 
 const tabs = [
-  { key: 'property', label: 'Properties' },
+  { key: 'property', label: 'Props' },
+  { key: 'align', label: 'Align' },
   { key: 'layer', label: 'Layers' },
-  { key: 'symbols', label: 'Symbols' },
-  { key: 'history', label: 'History' },
+  { key: 'artboards', label: 'Boards' },
+  { key: 'swatches', label: 'Swatch' },
+  { key: 'symbols', label: 'Symbol' },
+  { key: 'history', label: 'Hist' },
+  { key: 'actions', label: 'Action' },
 ] as const
 
 // Shared tab state so other panels (e.g. "Edit Artboards") can jump here.
@@ -86,10 +102,15 @@ watch(
   flex-shrink: 0;
   background: #1e1e1e;
   border-bottom: 1px solid #161616;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
+.rp-tabs::-webkit-scrollbar { display: none; }
 
 .rp-tab {
-  flex: 1;
+  flex: 1 0 auto;
+  min-width: 52px;
+  padding: 0 6px;
   background: transparent;
   border: none;
   outline: none;
