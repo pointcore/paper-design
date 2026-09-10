@@ -473,6 +473,17 @@ export class SelectController {
             return
           }
         }
+        // Double-clicking a callout label re-enters label editing.
+        const annotationText = this.annotationTextAt(event.point)
+        if (annotationText) {
+          const calloutCtrl = engine.getController('callout') as {
+            editLabel?: (item: paper.PointText) => void
+          } | null
+          if (calloutCtrl?.editLabel) {
+            calloutCtrl.editLabel(annotationText)
+            return
+          }
+        }
         if (this.mode === 'select') {
           const group = this.groupAt(event.point)
           if (group && engine.enterIsolation(group)) return
@@ -2433,6 +2444,26 @@ export class SelectController {
     if ((item as any)?.locked) return null
     if ((item as any)?.data?.isArtboard) return null
     if (item instanceof scope.PointText && !(item as any).data?.annotation) {
+      return item as paper.PointText
+    }
+    return null
+  }
+
+  /** Callout label under a point (double-click re-enters label editing). */
+  private annotationTextAt(point: paper.Point): paper.PointText | null {
+    const engine = this.engine
+    if (!engine) return null
+    const scope = engine.scope
+    const hit = engine.project.hitTest(point, {
+      fill: true,
+      stroke: true,
+      segments: false,
+      tolerance: 3 / scope.view.zoom,
+    })
+    const item = hit?.item
+    if (!item || (item as any).locked || (item as any).visible === false) return null
+    if ((item as any)?.data?.isArtboard) return null
+    if (item instanceof scope.PointText && (item as any).data?.annotation) {
       return item as paper.PointText
     }
     return null

@@ -12,10 +12,20 @@ export class CalloutController {
   private isDrawing = false
   private currentPath: paper.Path | null = null
   private points: paper.Point[] = []
+  /** Label item under edit (hidden while the overlay mirrors it). */
+  private editingItem: paper.PointText | null = null
+  private overlay: HTMLInputElement | null = null
+  private unsubscribeStore: (() => void) | null = null
 
   attachEngine(engine: EditorEngine) {
     this.engine = engine
     this.snapService.attachEngine(engine)
+    // Commit an open label edit when the active tool changes.
+    this.unsubscribeStore = engine.store.$subscribe((_mutation, state) => {
+      if (state.tool !== 'callout' && this.editingItem) {
+        this.commitLabel()
+      }
+    })
   }
 
   activate() {
@@ -131,5 +141,115 @@ export class CalloutController {
     this.points = []
     this.currentPath = null
     scope.view.update()
+  }
+
+  // ------------------------------------------------------------------
+  // Label editing (double-click a callout label with a select tool)
+  // ------------------------------------------------------------------
+
+  /**
+   * Edit a callout label through a single-line overlay input. Enter or a
+   * click elsewhere commits (empty input keeps the old text), Escape
+   * cancels, tool switches commit like the text tool.
+   */
+  editLabel(item: paper.PointText) {
+    const engine = this.engine
+    if (!engine || !item.parent || (item as any).locked) return
+    if (!((item.data as any)?.annotation)) return
+    if (this.editingItem) this.commitLabel()
+    this.editingItem = item
+    item.visible = false
+    engine.scope.view.update()
+
+    const container = engine.canvas.parentElement
+    if (!container) {
+      item.visible = true
+      this.editingItem = null
+      return
+    }
+    const overlay = document.createElement('input')
+    overlay.type = 'text'
+    overlay.value = item.content
+    overlay.spellcheck = false
+    const style = overlay.style
+    style.position = 'absolute'
+    style.margin = '0'
+    style.padding = '0 2px'
+    style.border = 'none'
+    style.outline = '1px dashed rgba(74, 144, 217, 0.8)'
+    style.background = 'transparent'
+    style.zIndex = '20'
+    style.fontFamily = (item.fontFamily as string) || 'Arial'
+    style.fontWeight = String(item.fontWeight ?? 'normal')
+    style.fontStyle = ((item as any).fontStyle as string) ?? 'normal'
+    const color = item.fillColor ? item.fillColor.toCSS(true) : '#000000'
+    style.color = color
+    style.caretColor = color
+    const viewPt = engine.scope.view.projectToView(item.point)
+    const zoom = engine.zoom || 1
+    const fontPx = (Number(item.fontSize) || 12) * zoom
+    style.fontSize = `${fontPx}px`
+    style.left = `${viewPt.x + engine.canvas.offsetLeft}px`
+    // Align the input top with the text baseline like the text overlay.
+    style.top = `${viewPt.y + engine.canvas.offsetTop - fontPx * 0.9}px`
+    const fit = () => {
+      overlay.style.width = `${Math.max(60, overlay.value.length * fontPx * 0.62 + 12)}px`
+    }
+    overlay.addEventListener('input', fit)
+    overlay.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        this.commitLabel()
+      } else if (e.key === 'Escape') {
+        e.preventDefault()
+        e.stopPropagation()
+        this.cancelLabel()
+      }
+    })
+    // Clicking elsewhere commits (capture so canvas tools never see it).
+    overlay.addEventListener(
+      'blur',
+      () => {
+        if (this.editingItem) this.commitLabel()
+      },
+      { capture: true }
+    )
+    container.appendChild(overlay)
+    this.overlay = overlay
+    fit()
+    overlay.focus()
+    overlay.select()
+  }
+
+  /** Write the overlay value back (unchanged or empty keeps old text). */
+  private commitLabel() {
+    const engine = this.engine
+    const item = this.editingItem
+    const overlay = this.overlay
+    this.editingItem = null
+    this.overlay = null
+    if (overlay) overlay.remove()
+    if (!engine || !item || !item.parent) {
+      engine?.scope.view.update()
+      return
+    }
+    item.visible = true
+    const next = (overlay?.value ?? '').trim()
+    if (next.length > 0 && next !== item.content) {
+      item.content = next
+      engine.pushHistory('Edit Callout')
+    }
+    engine.scope.view.update()
+  }
+
+  /** Drop the overlay and restore the untouched label. */
+  private cancelLabel() {
+    const engine = this.engine
+    const item = this.editingItem
+    this.editingItem = null
+    this.overlay?.remove()
+    this.overlay = null
+    if (item && item.parent) item.visible = true
+    engine?.scope.view.update()
   }
 }
