@@ -3594,6 +3594,8 @@ export class EditorEngine {
       hidden = hidden || (item as any).visible === false
       locked = locked || !!(item as any).locked
       if (data.isPatternTile) return
+      // Clip masks are scaffolding: match the visible content instead.
+      if ((item as any).clipMask) return
       if (
         item instanceof scope.Path ||
         item instanceof scope.CompoundPath ||
