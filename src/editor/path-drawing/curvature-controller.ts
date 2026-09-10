@@ -15,9 +15,11 @@
 import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
 import { applyToolCursor } from '../cursors'
+import { SnapService } from '../snap/snap-service'
 
 export class CurvatureController {
   engine: EditorEngine | null = null
+  snapService: SnapService = new SnapService()
 
   private isDrawing = false
   private path: paper.Path | null = null
@@ -27,10 +29,17 @@ export class CurvatureController {
 
   attachEngine(engine: EditorEngine) {
     this.engine = engine
+    this.snapService.attachEngine(engine)
   }
 
   activate() {
     if (!this.engine) return
+    // Like the pen tool: commit on real tool switches, keep drawing after
+    // transient space-pan / zoom returns.
+    const lastTool = this.engine.store.lastTool
+    if (this.isDrawing && lastTool !== 'view-hand' && lastTool !== 'zoom') {
+      this.finish()
+    }
     applyToolCursor(this.engine.canvas, 'curvature')
     this.setupTool()
   }
@@ -59,7 +68,9 @@ export class CurvatureController {
       }
       if (native && native.button === 1) return
 
-      const point = event.point
+      // Placement follows snapping like the pen tool; the preview below
+      // uses the same snapped point so it lands where the click will.
+      const point = this.snapService.snapPoint(event.point)
       const now = Date.now()
 
       if (!this.isDrawing) {
@@ -99,7 +110,7 @@ export class CurvatureController {
     scope.tool.onMouseMove = (event: paper.ToolEvent) => {
       engine.store.setCursorPos(event.point.x, event.point.y)
       if (this.isDrawing && this.path) {
-        this.updatePreview(event.point)
+        this.updatePreview(this.snapService.snapPoint(event.point))
       }
     }
 
@@ -266,9 +277,8 @@ export class CurvatureController {
     if (this.path) {
       const path = this.path
       if (path.segments.length >= 3) {
-        // Drop the anchor that was clicked as a closing point if it duplicated
-        // the start anchor; then close the loop.
-        path.removeSegment(path.segments.length - 1)
+        // The closing click never added a segment, so every placed point
+        // survives: just close the loop and smooth it.
         path.closed = true
         this.smooth()
         path.data.id = engine.genId()
