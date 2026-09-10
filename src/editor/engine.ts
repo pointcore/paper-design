@@ -7,6 +7,7 @@ import type { ToolName, StyleState, LayerMeta, LayerItemNode, ArtboardMeta, Symb
 import { createDefaultStyle } from './store'
 import { cursorForTool } from './cursors'
 import { gradientAngleFromVector, linearGradientEndpoints, normalizeAngleDeg } from './geometry'
+import { changeCaseText } from './text/text-case'
 import { parseProjectFile } from './project-file'
 import type { EditorStore } from './store-types'
 
@@ -340,6 +341,66 @@ export class EditorEngine {
       this.syncSelectionToStore()
     }
     this.pushHistory('Duplicate Artboard')
+    this.scope.view.update()
+    return true
+  }
+
+  /**
+   * Shrink-wrap the artboard around its overlapping artwork (AI Fit to
+   * Artwork Bounds parity). Padding expands the united bounds; empty
+   * boards stay silent. Returns false when nothing fits.
+   */
+  fitArtboardToArtwork(boardId: string, padding = 20): boolean {
+    const board = this.store.artboards.find((b) => b.id === boardId)
+    if (!board) return false
+    const pad = Number.isFinite(padding) ? Math.min(500, Math.max(0, padding)) : 20
+    const rect = new this.scope.Rectangle(board.x, board.y, board.width, board.height)
+    const hits: paper.Rectangle[] = []
+    for (const layer of this.project.layers) {
+      if (!(layer.data as any)?.isUserLayer || !layer.visible) continue
+      for (const child of layer.children) {
+        const c = child as paper.Item
+        if ((c as any).data?.isPreview || !c.visible) continue
+        const bounds = (c as any).bounds as paper.Rectangle | undefined
+        if (!bounds || bounds.width <= 0 || bounds.height <= 0) continue
+        try {
+          if (bounds.intersects(rect)) hits.push(bounds)
+        } catch { /* treat untestable bounds as a hit */ hits.push(bounds) }
+      }
+    }
+    if (hits.length === 0) return false
+    let united = hits[0].clone()
+    for (let i = 1; i < hits.length; i++) united = united.unite(hits[i])
+    const w = Math.min(16384, Math.max(1, Math.round(united.width + pad * 2)))
+    const h = Math.min(16384, Math.max(1, Math.round(united.height + pad * 2)))
+    this.store.updateArtboard(boardId, {
+      x: Math.round((united.x - pad) * 10) / 10,
+      y: Math.round((united.y - pad) * 10) / 10,
+      width: w,
+      height: h,
+    })
+    this.refreshArtboards()
+    this.pushHistory('Fit Artboard to Artwork')
+    this.scope.view.update()
+    return true
+  }
+
+  /**
+   * Lay every artboard out in a single X-sorted row with even spacing
+   * (AI Rearrange Artboards, one-row v1). Records one history entry.
+   */
+  arrangeArtboards(spacing = 100): boolean {
+    const boards = this.store.artboards
+    if (boards.length === 0) return false
+    const gap = Number.isFinite(spacing) ? Math.min(2000, Math.max(0, spacing)) : 100
+    const ordered = boards.slice().sort((a, b) => a.x - b.x || a.y - b.y)
+    let cursor = ordered[0].x
+    for (const board of ordered) {
+      if (board.x !== cursor) this.store.updateArtboard(board.id, { x: Math.round(cursor * 10) / 10 })
+      cursor += board.width + gap
+    }
+    this.refreshArtboards()
+    this.pushHistory('Arrange Artboards')
     this.scope.view.update()
     return true
   }
@@ -1153,6 +1214,11 @@ export class EditorEngine {
   /** Fit the view to the current selection bounds (View menu). */
   zoomToSelection(): void {
     this.fitBounds(this.getSelectionBounds())
+  }
+
+  /** Fit the view to the active artboard sheet (View menu). */
+  zoomToArtboard(): void {
+    this.fitBounds(this.getActiveArtboardRect())
   }
 
   /** Zoom the view to frame bounds with padding (ignores empty bounds). */
@@ -5001,6 +5067,216 @@ export class EditorEngine {
     this.pushHistory(closed ? 'Close Path' : 'Open Path')
     this.scope.view.update()
     return paths.length
+  }
+
+  /**
+   * Offset every selected unlocked path by a distance (AI Offset Path
+   * parity, powered by paperjs-offset like Outline Stroke). Positive
+   * expands, negative insets. Results keep the source appearance, sit
+   * beside their sources and become the new selection. Returns how many
+   * offsets were created; records one history entry.
+   */
+  offsetPaths(distance: number, join: 'miter' | 'round' | 'bevel' = 'miter'): number {
+    if (!Number.isFinite(distance) || Math.abs(distance) < 1e-9) return 0
+    const dist = Math.min(2000, Math.max(-2000, distance))
+    const scope = this.scope
+    const targets = this.getSelection().filter(
+      (item) =>
+        !item.locked &&
+        item.parent &&
+        (item instanceof scope.Path || item instanceof scope.CompoundPath)
+    ) as Array<paper.Path | paper.CompoundPath>
+    if (targets.length === 0) return 0
+    const made: paper.Item[] = []
+    for (const target of targets) {
+      let result: paper.Path | paper.CompoundPath | null = null
+      try {
+        result = PaperOffset.offset(target as any, dist, { join, limit: 10, insert: false }) as any
+      } catch {
+        result = null
+      }
+      if (!result) continue
+      const parent = target.parent ?? this.getActiveLayer()
+      const at = parent.children.indexOf(target as any)
+      parent.insertChild(at < 0 ? parent.children.length : at + 1, result as any)
+      result.data.id = this.genId()
+      result.data.isUserItem = true
+      this.applyStyleToItem(result as paper.Item, this.getStyleFromItem(target as paper.Item))
+      made.push(result as paper.Item)
+    }
+    if (made.length === 0) return 0
+    this.clearSelection()
+    made.forEach((item) => {
+      item.selected = true
+    })
+    this.syncSelectionToStore()
+    this.pushHistory('Offset Path')
+    this.scope.view.update()
+    return made.length
+  }
+
+  /**
+   * Add a midpoint anchor to every curve of the selected unlocked paths
+   * (AI Add Anchor Points parity). Returns anchors added; one history.
+   */
+  addAnchorPoints(): number {
+    const scope = this.scope
+    const paths: paper.Path[] = []
+    for (const item of this.getSelection()) {
+      if ((item as any).locked || !item.parent) continue
+      if (item instanceof scope.CompoundPath) {
+        for (const child of ((item as any).children ?? []) as paper.Item[]) {
+          if (child instanceof scope.Path) paths.push(child)
+        }
+      } else if (item instanceof scope.Path) {
+        paths.push(item)
+      }
+    }
+    if (paths.length === 0) return 0
+    let added = 0
+    for (const path of paths) {
+      const curves = path.curves.slice()
+      for (const curve of curves) {
+        try {
+          const c = curve as any
+          const seg = typeof c.divideAtTime === 'function'
+            ? c.divideAtTime(0.5)
+            : typeof c.divide === 'function'
+              ? c.divide(0.5)
+              : null
+          if (seg) added++
+        } catch {
+          continue
+        }
+      }
+      this.refreshItemGradient(path as paper.Item)
+    }
+    if (added > 0) {
+      this.pushHistory('Add Anchor Points')
+      this.scope.view.update()
+    }
+    return added
+  }
+
+  /**
+   * Reverse selected unlocked paths (winding/draw direction, matters for
+   * compound and subtract operand order). Returns paths reversed.
+   */
+  reversePaths(): number {
+    const scope = this.scope
+    const targets = this.getSelection().filter(
+      (item) =>
+        !(item as any).locked &&
+        item.parent &&
+        (item instanceof scope.Path || item instanceof scope.CompoundPath)
+    )
+    if (targets.length === 0) return 0
+    for (const item of targets) {
+      try {
+        if (typeof (item as any).reverse === 'function') (item as any).reverse()
+        else {
+          const kids = (item as any).children as paper.Item[] | undefined
+          if (kids) for (const k of kids) (k as any).reverse?.()
+        }
+      } catch {
+        continue
+      }
+      this.refreshItemGradient(item)
+    }
+    this.pushHistory('Reverse Path')
+    this.scope.view.update()
+    return targets.length
+  }
+
+  /**
+   * Remove stray geometry: empty paths/compounds, blank point text and
+   * groups emptied by the sweep (pattern tiles, clip scaffolding and
+   * annotations are never touched). Returns items removed.
+   */
+  cleanUp(): number {
+    const scope = this.scope
+    let removed = 0
+    const isEmptyText = (item: paper.Item): boolean =>
+      item instanceof scope.PointText &&
+      !(item as any).data?.annotation &&
+      String((item as any).content ?? '') === ''
+    const isEmptyPath = (item: paper.Item): boolean =>
+      (item instanceof scope.Path && !(item instanceof scope.CompoundPath) && item.segments.length === 0) ||
+      (item instanceof scope.CompoundPath && ((item as any).children?.length ?? 0) === 0)
+    const sweep = (node: paper.Item): boolean => {
+      const data = (node as any).data ?? {}
+      if (data.isPatternTile || data.annotation || (node as any).clipMask) return false
+      if ((node as any).locked) return false
+      const children = (node as any).children as paper.Item[] | undefined
+      if (children) {
+        for (const child of children.slice()) {
+          if (sweep(child)) removed++
+        }
+        const left = (node as any).children as paper.Item[] | undefined
+        // Prune emptied plain groups (never user layers or text runs).
+        if (
+          node instanceof scope.Group &&
+          !(data as any).isUserItem &&
+          !(data as any).textMode &&
+          (left?.length ?? 1) === 0
+        ) {
+          node.remove()
+          return true
+        }
+        return false
+      }
+      if (isEmptyPath(node) || isEmptyText(node)) {
+        node.remove()
+        return true
+      }
+      return false
+    }
+    for (const layer of this.project.layers) {
+      if (!(layer.data as any)?.isUserLayer) continue
+      for (const child of (layer.children as unknown as paper.Item[]).slice()) {
+        // Top-level user items keep their slot (AI never deletes layers
+        // here); only their contents sweep.
+        if ((child as any).data?.isUserItem && ((child as any).children as paper.Item[] | undefined)) {
+          const before = removed
+          for (const grand of (((child as any).children as paper.Item[]) ?? []).slice()) {
+            if (sweep(grand)) removed++
+          }
+          void before
+        } else if (sweep(child)) {
+          removed++
+        }
+      }
+    }
+    if (removed > 0) {
+      this.clearSelection()
+      this.pushHistory('Clean Up')
+      this.scope.view.update()
+    }
+    return removed
+  }
+
+  /**
+   * UPPER / lower / Title Case selected point text (AI Change Case
+   * parity, annotation labels excluded). Returns runs changed.
+   */
+  changeCase(mode: 'upper' | 'lower' | 'title'): number {
+    const scope = this.scope
+    let changed = 0
+    for (const item of this.getSelection()) {
+      if ((item as any).locked || !(item instanceof scope.PointText)) continue
+      if ((item as any).data?.annotation) continue
+      const before = String((item as any).content ?? '')
+      const after = changeCaseText(before, mode)
+      if (after !== before) {
+        ;(item as any).content = after
+        changed++
+      }
+    }
+    if (changed > 0) {
+      this.pushHistory('Change Case')
+      this.scope.view.update()
+    }
+    return changed
   }
 
   /**
