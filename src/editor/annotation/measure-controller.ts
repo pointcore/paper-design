@@ -9,16 +9,19 @@
 import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
 import { applyToolCursor } from '../cursors'
+import { SnapService } from '../snap/snap-service'
 import { rulerUnitFactor } from '../geometry'
 
 export class MeasureController {
   engine: EditorEngine | null = null
+  snapService: SnapService = new SnapService()
   private isMeasuring = false
   private startPoint: { x: number; y: number } | null = null
   private previewLine: paper.Path | null = null
 
   attachEngine(engine: EditorEngine) {
     this.engine = engine
+    this.snapService.attachEngine(engine)
   }
 
   activate() {
@@ -43,15 +46,18 @@ export class MeasureController {
     scope.tool.onMouseDown = (event: paper.ToolEvent) => {
       const native = (event as any).event as MouseEvent | undefined
       if (!native || native.button !== 0 || this.isMeasuring) return
-      this.startPoint = { x: event.point.x, y: event.point.y }
+      // Both ends snap like the pen tool so measurements land on geometry.
+      const snapped = this.snapService.snapPoint(event.point)
+      this.startPoint = { x: snapped.x, y: snapped.y }
       this.isMeasuring = true
       engine.store.setDragging(true)
     }
 
     scope.tool.onMouseDrag = (event: paper.ToolEvent) => {
       if (!this.isMeasuring || !this.startPoint) return
-      this.updatePreview(event.point)
-      this.reportReading(event.point)
+      const snapped = this.snapService.snapPoint(event.point)
+      this.updatePreview(snapped)
+      this.reportReading(snapped)
     }
 
     scope.tool.onMouseUp = () => {

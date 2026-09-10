@@ -35,7 +35,7 @@ A vector graphics editor built with **Vue 3 + TypeScript + Paper.js**, offering 
 - **Navigator**: Floating whole-scene minimap (artwork plus artboard sheets) with a live viewport rectangle; click or drag to pan (clicking a sheet also activates its artboard), collapsible, toggleable from the View menu.
 - **History**: Whole-project JSON snapshots with a 100-entry limit, listed in the History panel with click-to-jump and clearing; Ctrl+Z to undo, Ctrl+Shift+Z / Ctrl+Y to redo.
 - **Annotation tools**: Callout annotations (leader line plus label, painted from the stored callout style; double-click a label with a select tool to re-edit it).
-- **Measure tool**: Drag for a dashed preview with length (ruler units) and angle in the status bar; transient, nothing is committed.
+- **Measure tool**: Drag for a dashed preview with length (ruler units) and angle in the status bar; both ends snap to geometry; transient, nothing is committed.
 
 Not yet implemented: mesh gradients, opacity masks, and multi-fill/stroke appearance stacks.
 
