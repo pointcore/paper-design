@@ -1655,6 +1655,25 @@ export class SelectController {
     }
   }
 
+  /**
+   * Delete entry for menu callers (mirrors the controller keydown branch):
+   * sub-selections delete anchors/curves, otherwise false so the caller
+   * falls through to whole-object deletion.
+   */
+  deleteSubselection(): boolean {
+    const engine = this.engine
+    if (!engine || this.mode !== 'direct-select') return false
+    if (this.hasCurveSelection()) {
+      this.deleteSelectedCurves()
+    } else if (this.hasAnchorSelection()) {
+      this.deleteSelectedAnchors()
+    } else {
+      return false
+    }
+    this.refreshChrome()
+    return true
+  }
+
   /** Delete every sub-selected anchor and clear the sub-selection. */
   private deleteSelectedAnchors() {
     const engine = this.engine

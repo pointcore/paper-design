@@ -814,12 +814,24 @@ function onEditCmd(cmd: string) {
     case 'pasteBack':
       if (!e.pasteInPlace('back')) store.setStatusMessage('Clipboard is empty')
       break
-    case 'delete':
-      e.deleteSelected()
+    case 'delete': {
+      // Direct-select sub-selections delete anchors/curves (keyboard
+      // parity); otherwise whole objects go.
+      const sc = e.getController('direct-select') as {
+        deleteSubselection?: () => boolean
+      } | null
+      if (!sc?.deleteSubselection?.()) e.deleteSelected()
       break
-    case 'selectAll':
-      e.selectAllArtwork()
+    }
+    case 'selectAll': {
+      // Direct-select with a path selection takes every anchor (Ctrl+A
+      // parity); otherwise the whole artwork is selected.
+      const sc = e.getController('direct-select') as {
+        selectAllSubselection?: () => boolean
+      } | null
+      if (!(sc?.selectAllSubselection?.() ?? false)) e.selectAllArtwork()
       break
+    }
     case 'invertSelection':
       e.invertSelection()
       break
