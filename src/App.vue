@@ -1,20 +1,34 @@
 <template>
   <div class="editor-root">
     <TopBar />
+    <ControlBar />
     
     <div class="editor-main">
       <ToolRail />
       
       <div class="canvas-area">
+        <DocTabs />
         <CanvasHost />
+        <ColorBar />
         <div class="status-bar">
           <div class="status-left">
             <span class="status-item">{{ cursorReadout }}</span>
+            <span class="status-item status-click" :title="'Toggle snapping'" @click="toggleSnap">{{ snapLabel }}</span>
+            <span v-if="store.keyObjectId" class="status-item status-click" title="Clear key object" @click="clearKey">Key ●</span>
           </div>
           <div class="status-right">
+            <span class="status-item">{{ artboardLabel }}</span>
             <span class="status-item">{{ currentToolName }}</span>
             <span v-if="store.statusMessage" class="status-item status-msg">{{ store.statusMessage }}</span>
-            <span class="status-item zoom-display" :title="'Wheel to zoom / click resets to 100%'" @click="resetZoom">{{ zoomPercent }}</span>
+            <el-dropdown trigger="click" @command="onZoomCmd">
+              <span class="status-item zoom-display" title="Zoom presets">{{ zoomPercent }}</span>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item v-for="z in [25, 50, 100, 200, 400]" :key="z" :command="z">{{ z }}%</el-dropdown-item>
+                  <el-dropdown-item command="fit" divided>Fit to Window</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </div>
         </div>
       </div>
@@ -31,8 +45,11 @@ import { useEditorStore } from './editor/store'
 import { rulerUnitFactor } from './editor/geometry'
 import type { EditorEngine } from './editor/engine'
 import TopBar from './components/menus/TopBar.vue'
+import ControlBar from './components/menus/ControlBar.vue'
 import ToolRail from './components/toolbar/ToolRail.vue'
 import CanvasHost from './components/canvas/CanvasHost.vue'
+import DocTabs from './components/canvas/DocTabs.vue'
+import ColorBar from './components/canvas/ColorBar.vue'
 import RightPanel from './components/panels/RightPanel.vue'
 
 const store = useEditorStore()
@@ -42,6 +59,32 @@ const engineRef = ref<EditorEngine | null>(null)
 provide('engine', engineRef)
 
 const zoomPercent = computed(() => `${Math.round(store.view.zoom * 100)}%`)
+const snapLabel = computed(() => store.snap.enable ? 'Snap On' : 'Snap Off')
+const artboardLabel = computed(() => {
+  const boards = store.artboards
+  if (boards.length === 0) return 'No boards'
+  const idx = boards.findIndex((b) => b.id === store.activeArtboardId)
+  return `Board ${(idx < 0 ? 0 : idx) + 1}/${boards.length}`
+})
+
+function toggleSnap() {
+  store.updateSnap({ enable: !store.snap.enable })
+}
+function clearKey() {
+  ;(store as any).setKeyObject?.('')
+  ;(store as any).setAlignTarget?.('selection')
+}
+function onZoomCmd(cmd: string | number) {
+  const e = engineRef.value
+  if (!e) return
+  if (cmd === 'fit') {
+    e.fitToContent()
+    return
+  }
+  const pct = Number(cmd) / 100
+  if (!Number.isFinite(pct) || pct <= 0) return
+  e.zoomAt(pct / (e.scope.view.zoom || 1))
+}
 
 /** Cursor readout in the current ruler unit (geometry stays in px). */
 const cursorReadout = computed(() => {
@@ -51,17 +94,11 @@ const cursorReadout = computed(() => {
   return `${x}, ${y} ${store.rulerUnit}`
 })
 
-/** Reset the view zoom back to 100%. */
-function resetZoom() {
-  const e = engineRef.value
-  if (!e) return
-  e.zoomAt(1 / (e.scope.view.zoom || 1))
-}
-
 const currentToolName = computed(() => {
   const names: Record<string, string> = {
     select: 'Select',
     'direct-select': 'Direct Select',
+    'free-transform': 'Free Transform',
     pen: 'Pen',
     curvature: 'Curvature',
     'add-anchor': 'Add Anchor',
@@ -76,7 +113,10 @@ const currentToolName = computed(() => {
     'rounded-rect': 'Rounded Rectangle',
     ellipse: 'Ellipse',
     polygon: 'Polygon',
+    arc: 'Arc',
     spiral: 'Spiral',
+    'rect-grid': 'Rect Grid',
+    'polar-grid': 'Polar Grid',
     pencil: 'Pencil',
     'blob-brush': 'Blob Brush',
     brush: 'Brush',
@@ -85,6 +125,9 @@ const currentToolName = computed(() => {
     scissors: 'Scissors',
     'shape-builder': 'Shape Builder',
     width: 'Width',
+    rotate: 'Rotate',
+    scale: 'Scale',
+    mirror: 'Mirror',
     callout: 'Callout',
     measure: 'Measure',
     zoom: 'Zoom',
@@ -149,6 +192,12 @@ html, body, #app { height: 100%; width: 100%; overflow: hidden; }
 .status-msg {
   color: #8db4e3;
 }
+
+.status-click {
+  cursor: pointer;
+  color: #9ab8dd;
+}
+.status-click:hover { color: #fff; }
 
 .zoom-display {
   cursor: pointer;

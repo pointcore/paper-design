@@ -113,6 +113,9 @@
               <el-dropdown-item command="navigator" :icon="store.ui.showNavigator ? Check : undefined">
                 Navigator
               </el-dropdown-item>
+              <el-dropdown-item command="controlBar" :icon="store.ui.showControlBar ? Check : undefined">
+                Control Bar
+              </el-dropdown-item>
               <el-dropdown-item command="canvasSettings" divided>Canvas Settings...</el-dropdown-item>
             </el-dropdown-menu>
           </template>
@@ -1080,6 +1083,9 @@ function onViewCmd(cmd: string) {
     }
     case 'navigator':
       store.setShowNavigator(!store.ui.showNavigator)
+      break
+    case 'controlBar':
+      store.setShowControlBar(!store.ui.showControlBar)
       break
     case 'canvasSettings':
       settingsVisible.value = true
