@@ -36,3 +36,56 @@ export function rulerUnitFactor(unit: RulerUnit): number {
     default: return 1
   }
 }
+
+/**
+ * Anchor runs surviving a curve deletion (curve i spans anchors
+ * i → i+1, wrapping on closed paths). Open paths split at removed
+ * curves; closed paths rotate to start after a removed curve so the
+ * linearization stays contiguous, then split at each removed curve.
+ * Single-anchor runs survive (AI keeps lone anchors for later joins).
+ */
+export function remainingRuns(closed: boolean, n: number, removed: Set<number>): number[][] {
+  const runs: number[][] = []
+  if (!closed) {
+    let run: number[] = []
+    for (let i = 0; i < n; i++) {
+      run.push(i)
+      if (i < n - 1 && removed.has(i)) {
+        runs.push(run)
+        run = []
+      }
+    }
+    if (run.length > 0) runs.push(run)
+    return runs
+  }
+  let gap = -1
+  for (let c = 0; c < n; c++) {
+    if (removed.has(c)) {
+      gap = c
+      break
+    }
+  }
+  if (gap < 0) return [Array.from({ length: n }, (_, i) => i)]
+  let run: number[] = []
+  let prevEnd: number | null = null
+  for (let j = 0; j < n; j++) {
+    const c = (gap + 1 + j) % n
+    if (removed.has(c)) {
+      if (run.length > 0) {
+        runs.push(run)
+        run = []
+      }
+      prevEnd = null
+      continue
+    }
+    if (run.length === 0) run.push(c)
+    else if (prevEnd !== c) {
+      runs.push(run)
+      run = [c]
+    }
+    run.push((c + 1) % n)
+    prevEnd = (c + 1) % n
+  }
+  if (run.length > 0) runs.push(run)
+  return runs
+}

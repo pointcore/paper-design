@@ -10,6 +10,7 @@
 import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
 import { AnchorChrome } from '../path-drawing/anchor-chrome'
+import { remainingRuns } from '../geometry'
 import type { AlignMode, DistributeAxis } from '../types'
 import { selectionColorForItem, selectionColorForItems } from './selection-style'
 import { GuideController } from '../guides/guide-controller'
@@ -1737,7 +1738,7 @@ export class SelectController {
         path.remove()
         continue
       }
-      const runs = this.remainingRuns(path.closed, n, removed)
+      const runs = remainingRuns(path.closed, n, removed)
       const style = engine.getStyleFromItem(path)
       const name = (path as any).name as string | undefined
       const parent = path.parent ?? engine.getActiveLayer()
@@ -1780,58 +1781,6 @@ export class SelectController {
       engine.scope.view.update()
       this.refreshChrome()
     }
-  }
-
-  /**
-   * Anchor runs surviving a curve deletion. Open paths split at removed
-   * curves; closed paths rotate to start after a removed curve so the
-   * linearization stays contiguous, then split at each removed curve.
-   * Single-anchor runs survive (AI keeps lone anchors for later joins).
-   */
-  private remainingRuns(closed: boolean, n: number, removed: Set<number>): number[][] {
-    const runs: number[][] = []
-    if (!closed) {
-      let run: number[] = []
-      for (let i = 0; i < n; i++) {
-        run.push(i)
-        if (i < n - 1 && removed.has(i)) {
-          runs.push(run)
-          run = []
-        }
-      }
-      if (run.length > 0) runs.push(run)
-      return runs
-    }
-    let gap = -1
-    for (let c = 0; c < n; c++) {
-      if (removed.has(c)) {
-        gap = c
-        break
-      }
-    }
-    if (gap < 0) return [Array.from({ length: n }, (_, i) => i)]
-    let run: number[] = []
-    let prevEnd: number | null = null
-    for (let j = 0; j < n; j++) {
-      const c = (gap + 1 + j) % n
-      if (removed.has(c)) {
-        if (run.length > 0) {
-          runs.push(run)
-          run = []
-        }
-        prevEnd = null
-        continue
-      }
-      if (run.length === 0) run.push(c)
-      else if (prevEnd !== c) {
-        runs.push(run)
-        run = [c]
-      }
-      run.push((c + 1) % n)
-      prevEnd = (c + 1) % n
-    }
-    if (run.length > 0) runs.push(run)
-    return runs
   }
 
   /** Redraw editing chrome: bbox handles in select mode, anchors in direct-select. */

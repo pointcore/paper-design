@@ -2,7 +2,7 @@
  * Unit tests for shared geometry helpers — run with `vitest run`.
  */
 import { describe, expect, it } from 'vitest'
-import { rulerUnitFactor, snap45 } from './geometry'
+import { remainingRuns, rulerUnitFactor, snap45 } from './geometry'
 
 /** Minimal PaperScope stand-in (snap45 only news up points). */
 const scope = {
@@ -67,5 +67,34 @@ describe('rulerUnitFactor', () => {
 
   it('falls back to identity for unknown units', () => {
     expect(rulerUnitFactor('furlong' as any)).toBe(1)
+  })
+})
+
+describe('remainingRuns', () => {
+  it('keeps open paths whole without removals', () => {
+    expect(remainingRuns(false, 4, new Set())).toEqual([[0, 1, 2, 3]])
+  })
+
+  it('splits open paths at removed curves', () => {
+    expect(remainingRuns(false, 4, new Set([1]))).toEqual([[0, 1], [2, 3]])
+    expect(remainingRuns(false, 4, new Set([0]))).toEqual([[0], [1, 2, 3]])
+    expect(remainingRuns(false, 4, new Set([2]))).toEqual([[0, 1, 2], [3]])
+  })
+
+  it('opens closed paths at the removed curve', () => {
+    // Pentagon minus curve 2 (anchors 2→3): one run from 3 round to 2.
+    expect(remainingRuns(true, 5, new Set([2]))).toEqual([[3, 4, 0, 1, 2]])
+  })
+
+  it('splits closed paths at every removed curve', () => {
+    expect(remainingRuns(true, 5, new Set([1, 3]))).toEqual([[2, 3], [4, 0, 1]])
+  })
+
+  it('keeps a lone surviving curve as a two-anchor run', () => {
+    expect(remainingRuns(true, 4, new Set([0, 1, 2]))).toEqual([[3, 0]])
+  })
+
+  it('returns no runs when every curve is gone', () => {
+    expect(remainingRuns(true, 3, new Set([0, 1, 2]))).toEqual([])
   })
 })
