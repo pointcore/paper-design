@@ -1078,6 +1078,22 @@ export class EditorEngine {
     if (rebuilt) (item as any).fillColor = rebuilt
   }
 
+  /**
+   * Re-layout path-text runs attached to moved/reshaped items (AI: text
+   * follows its path). Piggybacks the caller's history entry. Never
+   * throws: text bookkeeping must not break document ops.
+   */
+  reflowTextsForItems(items: paper.Item[]): void {
+    try {
+      const tc = this.getController('type') as {
+        reflowPathTextsForPaths?: (targets: paper.Item[]) => void
+      } | null
+      tc?.reflowPathTextsForPaths?.(items)
+    } catch {
+      // Ignore: a stale text run never blocks the geometry op.
+    }
+  }
+
   getStyleFromItem(item: paper.Item): StyleState {
     const style = createDefaultStyle()
     const s = item as any
@@ -2566,6 +2582,7 @@ export class EditorEngine {
     }
     const next = (this.store.transform.rotation + angleDeg) % 360
     this.store.updateTransform({ rotation: (next + 360) % 360 })
+    this.reflowTextsForItems(items)
     this.scope.view.update()
   }
 
@@ -2585,6 +2602,7 @@ export class EditorEngine {
       item.skew(skew, center)
       this.refreshItemGradient(item)
     }
+    this.reflowTextsForItems(items)
     this.scope.view.update()
   }
 
@@ -2619,6 +2637,7 @@ export class EditorEngine {
     } else {
       this.store.updateTransform({ flipV: !this.store.transform.flipV })
     }
+    this.reflowTextsForItems(items)
     this.scope.view.update()
   }
 
@@ -2674,6 +2693,7 @@ export class EditorEngine {
       // Frame bookkeeping must never break document ops.
     }
     this.scope.view.update()
+    this.reflowTextsForItems(items)
     this.pushCoalescedHistory('Nudge')
     try {
       selectCtrl?.frameStamped?.()
@@ -4560,6 +4580,7 @@ export class EditorEngine {
         preset === 'arc-upper' ? 'Envelope Arc Upper' :
         preset === 'arc-lower' ? 'Envelope Arc Lower' :
         preset === 'bulge' ? 'Envelope Bulge' : 'Envelope Wave'
+      this.reflowTextsForItems(this.getSelection())
       this.pushHistory(label)
       this.scope.view.update()
     }

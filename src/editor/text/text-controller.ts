@@ -532,6 +532,77 @@ export class TextController {
   }
 
   /**
+   * Re-layout every path-text run attached to one of the given items
+   * (AI: text follows its path through moves, reshapes and transforms).
+   * Piggybacks the caller's history entry; skips runs being edited and
+   * paths that are gone. Runs that no longer fit are dropped like at
+   * commit time.
+   */
+  reflowPathTextsForPaths(items: paper.Item[]): void {
+    const engine = this.engine
+    if (!engine) return
+    const scope = engine.scope
+    const ids = new Set<string>()
+    const collectPaths = (item: paper.Item): void => {
+      if (
+        item instanceof scope.Path &&
+        !(item instanceof scope.CompoundPath) &&
+        typeof (item.data as any)?.id === 'string'
+      ) {
+        ids.add((item.data as any).id as string)
+      }
+      const children = (item as any).children as paper.Item[] | undefined
+      if (children) {
+        for (const child of children) collectPaths(child as paper.Item)
+      }
+    }
+    for (const item of items) {
+      if (item) collectPaths(item)
+    }
+    if (ids.size === 0) return
+    const groups: paper.Group[] = []
+    const collectGroups = (item: paper.Item): void => {
+      if (
+        item instanceof scope.Group &&
+        (item.data as any)?.textMode === 'path' &&
+        typeof (item.data as any)?.pathId === 'string' &&
+        ids.has((item.data as any).pathId as string)
+      ) {
+        groups.push(item as paper.Group)
+        return
+      }
+      const children = (item as any).children as paper.Item[] | undefined
+      if (children) {
+        for (const child of children) collectGroups(child as paper.Item)
+      }
+    }
+    for (const layer of engine.project.layers) {
+      if (!(layer.data as any)?.isUserLayer) continue
+      for (const child of layer.children) collectGroups(child as paper.Item)
+    }
+    if (groups.length === 0) return
+    for (const group of groups) {
+      if (this.editingGroup === group) continue
+      const info = (group.data as any) as {
+        pathId?: string
+        startOffset?: number
+        raw?: string
+      }
+      const path = (info.pathId ? this.findItemById(info.pathId) : null) as paper.Path | null
+      if (!path || !(path instanceof scope.Path) || !path.parent) continue
+      const raw = typeof info.raw === 'string' ? info.raw : ''
+      if (raw.length === 0) continue
+      // Clamp a stale start offset into the reshaped path instead of
+      // laying out past its end (which would empty the run).
+      const start = Math.min(Math.max(0, Number(info.startOffset) || 0), Math.max(0, path.length))
+      group.removeChildren()
+      this.layoutPathText(group, path, raw, start)
+      if (group.children.length === 0) group.remove()
+    }
+    engine.scope.view.update()
+  }
+
+  /**
    * Lay one centered, path-tangent-rotated glyph per character along `path
    * starting at `startOffset`. Glyphs that run past the path end are cut.
    */

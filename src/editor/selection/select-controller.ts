@@ -691,9 +691,11 @@ export class SelectController {
         this.removeMarquee()
       } else if (this.isDragging && this.grab === 'object') {
         this.isDragging = false
+        this.reflowEditedPaths()
         engine.pushHistory('Move')
         engine.stampSelectionFrame()
       } else if (this.grab === 'anchor' || this.grab === 'anchor-group' || this.grab === 'handle' || this.grab === 'segment') {
+        this.reflowEditedPaths()
         engine.pushHistory('Edit Path')
       }
       this.grab = 'none'
@@ -1320,6 +1322,24 @@ export class SelectController {
     return true
   }
 
+  /**
+   * Re-layout path-text runs attached to the paths touched by the current
+   * gesture (anchor/curve drags reshape them, object drags move them).
+   * Runs before the gesture's history push so snapshots include the text.
+   */
+  private reflowEditedPaths() {
+    const engine = this.engine
+    if (!engine) return
+    const touched: paper.Item[] = []
+    for (const p of this.anchorSelectionPaths()) touched.push(p)
+    if (this.grabPath && !touched.includes(this.grabPath)) touched.push(this.grabPath)
+    for (const s of this.selectedCurves) {
+      if (!touched.includes(s.path)) touched.push(s.path)
+    }
+    for (const item of this.dragItems) touched.push(item)
+    engine.reflowTextsForItems(touched)
+  }
+
   // ------------------------------------------------------------------
   // Anchor sub-selection (direct-select)
   // ------------------------------------------------------------------
@@ -1441,6 +1461,7 @@ export class SelectController {
       paths.add(path)
     }
     paths.forEach((path) => engine.refreshItemGradient(path))
+    engine.reflowTextsForItems([...paths])
     engine.scope.view.update()
     engine.pushCoalescedHistory('Nudge')
     this.refreshChrome()
