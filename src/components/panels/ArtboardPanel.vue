@@ -70,6 +70,7 @@ function addBoard() {
   if (e) {
     e.refreshArtboards()
     e.panViewTo(new e.scope.Point(board.x + board.width / 2, board.y + board.height / 2))
+    e.pushHistory('New Artboard')
   }
 }
 
@@ -80,7 +81,10 @@ function removeBoard() {
     return
   }
   store.removeArtboard(store.activeArtboardId)
-  e?.refreshArtboards()
+  if (e) {
+    e.refreshArtboards()
+    e.pushHistory('Delete Artboard')
+  }
 }
 
 function activateBoard(id: string) {
@@ -101,10 +105,16 @@ function finishRename() {
   if (renamingId.value) {
     const id = renamingId.value
     const newName = renameValue.value.trim() || 'Artboard'
-    store.updateArtboard(id, { name: newName })
-    getEngine()?.refreshArtboards()
+    const e = getEngine()
+    if (e && e.renameArtboard(id, newName)) {
+      renamingId.value = ''
+    } else if (!e) {
+      store.updateArtboard(id, { name: newName })
+      renamingId.value = ''
+    }
+  } else {
+    renamingId.value = ''
   }
-  renamingId.value = ''
 }
 
 function syncPositionFromStore() {
@@ -121,8 +131,12 @@ function onPositionChange() {
     syncPositionFromStore()
     return
   }
-  store.updateArtboard(board.id, { x: posX.value, y: posY.value })
-  getEngine()?.refreshArtboards()
+  const e = getEngine()
+  if (e) {
+    if (e.moveArtboard(board.id, posX.value, posY.value)) syncPositionFromStore()
+  } else {
+    store.updateArtboard(board.id, { x: posX.value, y: posY.value })
+  }
 }
 
 watch(() => store.activeArtboardId, syncPositionFromStore, { immediate: true })

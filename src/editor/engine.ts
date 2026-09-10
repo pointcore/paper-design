@@ -13,6 +13,14 @@ const PROJECT_FILE_APP = 'vue-vector-editor'
 /** Current project file format version. */
 const PROJECT_FILE_VERSION = 2
 
+/** Document metadata snapshotted alongside each history entry. */
+export interface HistoryDocMeta {
+  artboards: ArtboardMeta[]
+  activeArtboardId: string
+  bleed: number
+  pageSize: { width: number; height: number }
+}
+
 export class EditorEngine {
   project!: paper.Project
   scope!: paper.PaperScope
@@ -37,6 +45,8 @@ export class EditorEngine {
   history: HistoryEntry[] = []
   historyIndex = -1
   private historySnapshots: string[] = []
+  /** Document metadata riding alongside each paper snapshot (undoable). */
+  private historyMeta: Array<HistoryDocMeta | null> = []
 
   constructor(canvas: HTMLCanvasElement, store: EditorStore) {
     this.canvas = canvas
@@ -184,6 +194,54 @@ export class EditorEngine {
     }
     layer.locked = true
     scope.view.update()
+  }
+
+  /**
+   * Rename an artboard with history. Returns false when missing or
+   * unchanged so callers stay silent then.
+   */
+  renameArtboard(boardId: string, name: string): boolean {
+    const next = (name ?? '').trim() || 'Artboard'
+    const board = this.store.artboards.find((b) => b.id === boardId)
+    if (!board || board.name === next) return false
+    this.store.updateArtboard(boardId, { name: next })
+    this.refreshArtboards()
+    this.pushHistory('Rename Artboard')
+    this.scope.view.update()
+    return true
+  }
+
+  /**
+   * Move an artboard sheet with history. Returns false when missing,
+   * invalid or unmoved.
+   */
+  moveArtboard(boardId: string, x: number, y: number): boolean {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return false
+    const board = this.store.artboards.find((b) => b.id === boardId)
+    if (!board || (board.x === x && board.y === y)) return false
+    this.store.updateArtboard(boardId, { x, y })
+    this.refreshArtboards()
+    this.pushHistory('Move Artboard')
+    this.scope.view.update()
+    return true
+  }
+
+  /**
+   * Resize an artboard sheet with history (Canvas Settings drive the
+   * active board). Dimensions clamp to 1–16384; unchanged sizes stay
+   * silent. Returns false when nothing changed.
+   */
+  resizeArtboard(boardId: string, width: number, height: number): boolean {
+    if (!Number.isFinite(width) || !Number.isFinite(height)) return false
+    const w = Math.min(16384, Math.max(1, Math.round(width)))
+    const h = Math.min(16384, Math.max(1, Math.round(height)))
+    const board = this.store.artboards.find((b) => b.id === boardId)
+    if (!board || (board.width === w && board.height === h)) return false
+    this.store.updateArtboard(boardId, { width: w, height: h })
+    this.refreshArtboards()
+    this.pushHistory('Resize Artboard')
+    this.scope.view.update()
+    return true
   }
 
   /** Center the view on a document point (artboard activation). */
@@ -1477,6 +1535,18 @@ export class EditorEngine {
   }
 
   restoreSnapshot(snapshot: string | Record<string, unknown>) {
+    this.restoreSnapshotWithMeta(snapshot, null)
+  }
+
+  /**
+   * Restore paper state plus, when provided, the document metadata riding
+   * alongside history entries (artboards, bleed, page size) so board ops
+   * participate in undo/redo like artwork ops do.
+   */
+  private restoreSnapshotWithMeta(
+    snapshot: string | Record<string, unknown>,
+    meta: HistoryDocMeta | null
+  ) {
     // Project#importJSON appends a fresh layer stack whenever it runs (its
     // layer-merge path only triggers for an empty active layer of matching
     // type), so the project must be cleared first or every undo/redo would
@@ -1484,6 +1554,19 @@ export class EditorEngine {
     this.clearIsolationState()
     this.project.clear()
     this.project.importJSON(snapshot as string)
+    if (meta) {
+      const page = meta.pageSize
+      if (page && Number.isFinite(page.width) && Number.isFinite(page.height) && page.width > 0 && page.height > 0) {
+        this.store.setPageSize(page.width, page.height)
+      }
+      this.store.setBleed(Number(meta.bleed) || 0)
+      if (Array.isArray(meta.artboards) && meta.artboards.length > 0) {
+        this.store.setArtboards(meta.artboards.map((b) => ({ ...b })))
+        if (typeof meta.activeArtboardId === 'string') {
+          this.store.setActiveArtboard(meta.activeArtboardId)
+        }
+      }
+    }
     // Paste offsets step from the source: restart the stepping after any
     // restore so undo/redo cannot walk pastes out of the viewport.
     this.pasteCount = 0
@@ -1523,6 +1606,8 @@ export class EditorEngine {
     'Rearrange',
     'Lock', 'Unlock', 'Show', 'Hide', 'Show All', 'Unlock All',
     'New Sublayer', 'Duplicate Layer', 'Merge Layer Below', 'Rename',
+    'New Artboard', 'Delete Artboard', 'Rename Artboard', 'Move Artboard',
+    'Resize Artboard', 'Change Bleed',
     'Duplicate',
   ])
 
@@ -1535,12 +1620,15 @@ export class EditorEngine {
     const snapshot = this.snapshotProject()
     this.history = this.history.slice(0, this.historyIndex + 1)
     this.historySnapshots = this.historySnapshots.slice(0, this.historyIndex + 1)
+    this.historyMeta = this.historyMeta.slice(0, this.historyIndex + 1)
     this.history.push({ name, icon, timestamp: Date.now() })
     this.historySnapshots.push(snapshot)
+    this.historyMeta.push(this.captureDocMeta())
     const limit = this.store.historyLimit || 100
     if (this.history.length > limit) {
       this.history.shift()
       this.historySnapshots.shift()
+      this.historyMeta.shift()
     }
     this.historyIndex = this.history.length - 1
     this.store.setHistory(this.history, this.historyIndex)
@@ -1550,10 +1638,23 @@ export class EditorEngine {
     }
   }
 
+  /** Document metadata snapshot riding alongside each history entry. */
+  private captureDocMeta(): HistoryDocMeta {
+    return {
+      artboards: this.store.artboards.map((board) => ({ ...board })),
+      activeArtboardId: this.store.activeArtboardId,
+      bleed: Number(this.store.bleed) || 0,
+      pageSize: { ...this.store.pageSize },
+    }
+  }
+
   undo() {
     if (this.historyIndex > 0) {
       this.historyIndex--
-      this.restoreSnapshot(this.historySnapshots[this.historyIndex])
+      this.restoreSnapshotWithMeta(
+        this.historySnapshots[this.historyIndex],
+        this.historyMeta[this.historyIndex] ?? null
+      )
       this.store.setHistoryIndex(this.historyIndex)
     }
   }
@@ -1561,7 +1662,10 @@ export class EditorEngine {
   redo() {
     if (this.historyIndex < this.history.length - 1) {
       this.historyIndex++
-      this.restoreSnapshot(this.historySnapshots[this.historyIndex])
+      this.restoreSnapshotWithMeta(
+        this.historySnapshots[this.historyIndex],
+        this.historyMeta[this.historyIndex] ?? null
+      )
       this.store.setHistoryIndex(this.historyIndex)
     }
   }
@@ -1576,7 +1680,10 @@ export class EditorEngine {
     const clamped = Math.min(this.history.length - 1, Math.max(0, index))
     if (clamped === this.historyIndex) return
     this.historyIndex = clamped
-    this.restoreSnapshot(this.historySnapshots[this.historyIndex])
+    this.restoreSnapshotWithMeta(
+      this.historySnapshots[this.historyIndex],
+      this.historyMeta[this.historyIndex] ?? null
+    )
     this.store.setHistoryIndex(this.historyIndex)
   }
 
@@ -1584,6 +1691,7 @@ export class EditorEngine {
   clearHistory(): void {
     this.history = []
     this.historySnapshots = []
+    this.historyMeta = []
     this.historyIndex = -1
     this.store.setHistory([], -1)
     this.clearSelection()
@@ -1800,6 +1908,7 @@ export class EditorEngine {
   private resetHistory(name: string): void {
     this.history = []
     this.historySnapshots = []
+    this.historyMeta = []
     this.historyIndex = -1
     this.store.setHistory([], -1)
     this.pushHistory(name)
@@ -2713,6 +2822,7 @@ export class EditorEngine {
     const last = this.history[this.historyIndex]
     if (last && last.name === name && now - last.timestamp < windowMs) {
       this.historySnapshots[this.historyIndex] = this.snapshotProject()
+      this.historyMeta[this.historyIndex] = this.captureDocMeta()
       last.timestamp = now
       this.store.setHistory(this.history, this.historyIndex)
     } else {

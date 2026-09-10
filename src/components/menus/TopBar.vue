@@ -1161,8 +1161,12 @@ function syncPageSettings() {
 function resizeActiveBoard(width: number, height: number) {
   const board = store.activeArtboard
   if (!board) return
-  store.updateArtboard(board.id, { width, height })
-  engineRef?.value?.refreshArtboards()
+  const e = engineRef?.value
+  if (e) {
+    e.resizeArtboard(board.id, width, height)
+  } else {
+    store.updateArtboard(board.id, { width, height })
+  }
 }
 
 function onPagePresetChange(value: string) {
@@ -1197,9 +1201,14 @@ function onBleedChange(val: number | undefined) {
     settings.bleed = store.bleed
     return
   }
+  const before = store.bleed
   store.setBleed(val)
   settings.bleed = store.bleed
-  engineRef?.value?.refreshArtboards()
+  const e = engineRef?.value
+  if (e) {
+    e.refreshArtboards()
+    if (settings.bleed !== before) e.pushHistory('Change Bleed')
+  }
 }
 
 function onUnitChange(val: string) {
