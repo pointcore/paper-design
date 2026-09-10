@@ -9,9 +9,7 @@
 import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
 import { applyToolCursor } from '../cursors'
-
-/** CSS pixels per inch underpinning the ruler unit conversion. */
-const PX_PER_INCH = 96
+import { rulerUnitFactor } from '../geometry'
 
 export class MeasureController {
   engine: EditorEngine | null = null
@@ -85,11 +83,7 @@ export class MeasureController {
   private formatLength(docUnits: number): string {
     const engine = this.engine
     const unit = engine?.store.rulerUnit ?? 'px'
-    const factor =
-      unit === 'pt' ? 0.75 :
-      unit === 'in' ? 1 / PX_PER_INCH :
-      unit === 'mm' ? 25.4 / PX_PER_INCH :
-      unit === 'cm' ? 2.54 / PX_PER_INCH : 1
+    const factor = rulerUnitFactor(unit)
     return `${Math.round(docUnits * factor * 10) / 10} ${unit}`
   }
 

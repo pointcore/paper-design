@@ -9,7 +9,7 @@
         <CanvasHost />
         <div class="status-bar">
           <div class="status-left">
-            <span class="status-item">{{ store.cursorPos.x }}, {{ store.cursorPos.y }}</span>
+            <span class="status-item">{{ cursorReadout }}</span>
           </div>
           <div class="status-right">
             <span class="status-item">{{ currentToolName }}</span>
@@ -28,6 +28,7 @@
 import { computed, ref, provide } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useEditorStore } from './editor/store'
+import { rulerUnitFactor } from './editor/geometry'
 import type { EditorEngine } from './editor/engine'
 import TopBar from './components/menus/TopBar.vue'
 import ToolRail from './components/toolbar/ToolRail.vue'
@@ -41,6 +42,14 @@ const engineRef = ref<EditorEngine | null>(null)
 provide('engine', engineRef)
 
 const zoomPercent = computed(() => `${Math.round(store.view.zoom * 100)}%`)
+
+/** Cursor readout in the current ruler unit (geometry stays in px). */
+const cursorReadout = computed(() => {
+  const factor = rulerUnitFactor(store.rulerUnit)
+  const x = Math.round(store.cursorPos.x * factor * 10) / 10
+  const y = Math.round(store.cursorPos.y * factor * 10) / 10
+  return `${x}, ${y} ${store.rulerUnit}`
+})
 
 /** Reset the view zoom back to 100%. */
 function resetZoom() {

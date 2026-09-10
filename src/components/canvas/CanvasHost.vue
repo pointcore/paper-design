@@ -46,6 +46,7 @@ import { EditorEngine } from '../../editor/engine'
 import { registerAllControllers } from '../../editor/register-controllers'
 import { handleGlobalKeydown, handleGlobalKeyUp } from '../../editor/shortcuts'
 import { cursorForTool } from '../../editor/cursors'
+import { rulerUnitFactor } from '../../editor/geometry'
 import NavigatorPanel from './NavigatorPanel.vue'
 
 const store = useEditorStore()
@@ -372,7 +373,7 @@ function drawRulers() {
 
     if (isMajor || isZero) {
       hctx.fillStyle = textColor
-      hctx.fillText(String(Math.round(doc)), screenX + 2, 1)
+      hctx.fillText(unitLabel(doc), screenX + 2, 1)
     }
   }
 
@@ -402,10 +403,18 @@ function drawRulers() {
       vctx.fillStyle = textColor
       vctx.save()
       vctx.translate(1, screenY - 2)
-      vctx.fillText(String(Math.round(doc)), 1, 0)
+      vctx.fillText(unitLabel(doc), 1, 0)
       vctx.restore()
     }
   }
+}
+
+/** Ruler tick label in the current ruler unit (integers for px). */
+function unitLabel(doc: number): string {
+  const scaled = doc * rulerUnitFactor(store.rulerUnit)
+  return store.rulerUnit === 'px'
+    ? String(Math.round(scaled))
+    : String(Math.round(scaled * 10) / 10)
 }
 
 function onDocumentClick() {

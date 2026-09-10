@@ -2,7 +2,7 @@
  * Unit tests for shared geometry helpers — run with `vitest run`.
  */
 import { describe, expect, it } from 'vitest'
-import { snap45 } from './geometry'
+import { rulerUnitFactor, snap45 } from './geometry'
 
 /** Minimal PaperScope stand-in (snap45 only news up points). */
 const scope = {
@@ -53,5 +53,19 @@ describe('snap45', () => {
   it('maps zero vectors to zero without dividing', () => {
     expect(snap45(vec(0, 0), scope)).toMatchObject({ x: 0, y: 0 })
     expect(snap45(vec(1e-9, 0), scope)).toMatchObject({ x: 0, y: 0 })
+  })
+})
+
+describe('rulerUnitFactor', () => {
+  it('converts CSS px at 96dpi', () => {
+    expect(rulerUnitFactor('px')).toBe(1)
+    expect(rulerUnitFactor('pt')).toBe(0.75)
+    expect(rulerUnitFactor('mm')).toBeCloseTo(25.4 / 96, 12)
+    expect(rulerUnitFactor('cm')).toBeCloseTo(2.54 / 96, 12)
+    expect(rulerUnitFactor('in')).toBeCloseTo(1 / 96, 12)
+  })
+
+  it('falls back to identity for unknown units', () => {
+    expect(rulerUnitFactor('furlong' as any)).toBe(1)
   })
 })
