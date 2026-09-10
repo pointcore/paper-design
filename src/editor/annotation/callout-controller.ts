@@ -14,7 +14,7 @@ export class CalloutController {
   private points: paper.Point[] = []
   /** Label item under edit (hidden while the overlay mirrors it). */
   private editingItem: paper.PointText | null = null
-  private overlay: HTMLInputElement | null = null
+  private overlay: HTMLTextAreaElement | null = null
   private unsubscribeStore: (() => void) | null = null
 
   attachEngine(engine: EditorEngine) {
@@ -148,9 +148,9 @@ export class CalloutController {
   // ------------------------------------------------------------------
 
   /**
-   * Edit a callout label through a single-line overlay input. Enter or a
-   * click elsewhere commits (empty input keeps the old text), Escape
-   * cancels, tool switches commit like the text tool.
+   * Edit a callout label through a multi-line overlay, mirroring the text
+   * tool conventions: Enter adds a line, Escape or a click elsewhere
+   * commits (blank input keeps the old text), tool switches commit.
    */
   editLabel(item: paper.PointText) {
     const engine = this.engine
@@ -167,10 +167,10 @@ export class CalloutController {
       this.editingItem = null
       return
     }
-    const overlay = document.createElement('input')
-    overlay.type = 'text'
+    const overlay = document.createElement('textarea')
     overlay.value = item.content
     overlay.spellcheck = false
+    overlay.rows = 1
     const style = overlay.style
     style.position = 'absolute'
     style.margin = '0'
@@ -178,6 +178,10 @@ export class CalloutController {
     style.border = 'none'
     style.outline = '1px dashed rgba(74, 144, 217, 0.8)'
     style.background = 'transparent'
+    style.resize = 'none'
+    style.overflow = 'hidden'
+    style.whiteSpace = 'pre'
+    style.lineHeight = '1.2'
     style.zIndex = '20'
     style.fontFamily = (item.fontFamily as string) || 'Arial'
     style.fontWeight = String(item.fontWeight ?? 'normal')
@@ -193,17 +197,20 @@ export class CalloutController {
     // Align the input top with the text baseline like the text overlay.
     style.top = `${viewPt.y + engine.canvas.offsetTop - fontPx * 0.9}px`
     const fit = () => {
-      overlay.style.width = `${Math.max(60, overlay.value.length * fontPx * 0.62 + 12)}px`
+      // Wide enough for the longest line, tall enough for every line.
+      const lines = overlay.value.split('\n')
+      const longest = lines.reduce((n, line) => Math.max(n, line.length), 0)
+      overlay.style.width = `${Math.max(60, longest * fontPx * 0.62 + 12)}px`
+      overlay.style.height = '0px'
+      overlay.style.height = `${overlay.scrollHeight}px`
     }
     overlay.addEventListener('input', fit)
     overlay.addEventListener('keydown', (e: KeyboardEvent) => {
-      if (e.key === 'Enter') {
-        e.preventDefault()
-        this.commitLabel()
-      } else if (e.key === 'Escape') {
+      // Enter adds a line (text-tool convention); Escape commits.
+      if (e.key === 'Escape') {
         e.preventDefault()
         e.stopPropagation()
-        this.cancelLabel()
+        this.commitLabel()
       }
     })
     // Clicking elsewhere commits (capture so canvas tools never see it).
@@ -234,22 +241,12 @@ export class CalloutController {
       return
     }
     item.visible = true
-    const next = (overlay?.value ?? '').trim()
+    // Trailing whitespace trimmed; blank input keeps the old text.
+    const next = (overlay?.value ?? '').replace(/\s+$/, '')
     if (next.length > 0 && next !== item.content) {
       item.content = next
       engine.pushHistory('Edit Callout')
     }
     engine.scope.view.update()
-  }
-
-  /** Drop the overlay and restore the untouched label. */
-  private cancelLabel() {
-    const engine = this.engine
-    const item = this.editingItem
-    this.editingItem = null
-    this.overlay?.remove()
-    this.overlay = null
-    if (item && item.parent) item.visible = true
-    engine?.scope.view.update()
   }
 }
