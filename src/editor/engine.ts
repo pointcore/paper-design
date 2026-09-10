@@ -1607,7 +1607,7 @@ export class EditorEngine {
     'Lock', 'Unlock', 'Show', 'Hide', 'Show All', 'Unlock All',
     'New Sublayer', 'Duplicate Layer', 'Merge Layer Below', 'Rename',
     'New Artboard', 'Delete Artboard', 'Rename Artboard', 'Move Artboard',
-    'Resize Artboard', 'Change Bleed',
+    'Resize Artboard', 'Change Bleed', 'Layer Opacity',
     'Duplicate',
   ])
 
@@ -1935,14 +1935,16 @@ export class EditorEngine {
     return true
   }
 
-  /** Set the active user layer opacity (store stays in sync, no history). */
+  /** Set the active user layer opacity (store stays in sync, one history entry). */
   setActiveLayerOpacity(opacity: number): void {
     const layer = this.getActiveLayer()
     if (!layer) return
     const clamped = Math.min(1, Math.max(0, opacity))
+    if (layer.opacity === clamped) return
     layer.opacity = clamped
     const id = (layer.data as any)?.layerId as string | undefined
     if (id) this.store.updateLayer(id, { opacity: clamped })
+    this.pushHistory('Layer Opacity')
     this.scope.view.update()
   }
 
