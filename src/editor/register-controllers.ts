@@ -3,6 +3,7 @@
  */
 import { EditorEngine } from './engine'
 import { SelectController } from './selection/select-controller'
+import { LassoController } from './selection/lasso-controller'
 import { PenController } from './path-drawing/pen-controller'
 import { PencilController } from './path-drawing/pencil-controller'
 import { EraserController } from './path-drawing/eraser-controller'
@@ -26,6 +27,9 @@ export function registerAllControllers(engine: EditorEngine) {
   const selectCtrl = new SelectController()
   engine.registerController('select', selectCtrl)
   engine.registerController('direct-select', selectCtrl)
+
+  // Lasso tool (freehand loop selection, object level)
+  engine.registerController('lasso', new LassoController())
 
   // Pen tool
   engine.registerController('pen', new PenController())

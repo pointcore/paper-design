@@ -7,6 +7,7 @@
 export type ToolName =
   | 'select'          // Select tool V
   | 'direct-select'   // Direct select A
+  | 'lasso'           // Lasso Q
   | 'pen'             // Pen tool P
   | 'curvature'       // Curvature Shift+~
   | 'add-anchor'      // Add anchor +
@@ -92,6 +93,8 @@ export interface PatternFillState {
 export interface GradientState {
   type: 'linear' | 'radial'
   stops: GradientStopState[]
+  /** Linear direction in degrees (0 = left→right, 90 = top→bottom). */
+  angle?: number
 }
 
 /** Character style state */

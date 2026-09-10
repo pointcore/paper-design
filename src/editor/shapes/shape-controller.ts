@@ -285,7 +285,12 @@ export class ShapeController {
         const cx = left + width / 2
         const cy = top + height / 2
         const radius = Math.max(width, height) / 2
-        path = new scope.Path.RegularPolygon(new scope.Point(cx, cy), sides, radius) as paper.Path
+        if ((engine.store as any).polygonStar) {
+          const ratio = Math.min(0.9, Math.max(0.1, Number((engine.store as any).starRatio) || 0.5))
+          path = new scope.Path.Star(new scope.Point(cx, cy), sides, radius, radius * ratio) as paper.Path
+        } else {
+          path = new scope.Path.RegularPolygon(new scope.Point(cx, cy), sides, radius) as paper.Path
+        }
         break
       }
       case 'spiral': {

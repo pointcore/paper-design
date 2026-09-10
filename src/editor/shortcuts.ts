@@ -32,6 +32,7 @@ export interface ShortcutDef {
 export const TOOL_SHORTCUTS: Record<ToolName, ShortcutDef | null> = {
   select:          { label: 'V',    match: (e) => key(e) === 'v' },
   'direct-select': { label: 'A',    match: (e) => key(e) === 'a' },
+  lasso:           { label: 'Q',    match: (e) => key(e) === 'q' },
   pen:             { label: 'P',    match: (e) => key(e) === 'p' },
   curvature:       { label: 'Shift+~', match: (e) => !e.altKey && !e.ctrlKey && !e.metaKey && e.key === '~' },
   'add-anchor':    { label: '+',    match: (e) => !e.altKey && !e.ctrlKey && !e.metaKey && e.key === '+' },
@@ -88,6 +89,7 @@ const SHORTCUT_ORDER: ToolName[] = [
   'line',
   'select',
   'direct-select',
+  'lasso',
   'pen',
   'pencil',
   'eraser',

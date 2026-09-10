@@ -2,7 +2,7 @@
  * Unit tests for shared geometry helpers — run with `vitest run`.
  */
 import { describe, expect, it } from 'vitest'
-import { remainingRuns, rulerUnitFactor, snap45 } from './geometry'
+import { gradientAngleFromVector, linearGradientEndpoints, normalizeAngleDeg, remainingRuns, rulerUnitFactor, snap45 } from './geometry'
 
 /** Minimal PaperScope stand-in (snap45 only news up points). */
 const scope = {
@@ -67,6 +67,45 @@ describe('rulerUnitFactor', () => {
 
   it('falls back to identity for unknown units', () => {
     expect(rulerUnitFactor('furlong' as any)).toBe(1)
+  })
+})
+
+describe('gradient angle helpers', () => {
+  it('normalizes degrees into [0, 360)', () => {
+    expect(normalizeAngleDeg(0)).toBe(0)
+    expect(normalizeAngleDeg(720)).toBe(0)
+    expect(normalizeAngleDeg(-90)).toBe(270)
+    expect(normalizeAngleDeg(Number.NaN)).toBe(0)
+  })
+
+  it('reads vector angles in screen coords (y down)', () => {
+    expect(gradientAngleFromVector(10, 0)).toBe(0)
+    expect(gradientAngleFromVector(0, 10)).toBe(90)
+    expect(gradientAngleFromVector(-10, 0)).toBe(180)
+    expect(gradientAngleFromVector(0, 0)).toBe(0)
+  })
+
+  it('lays linear endpoints horizontally at 0 degrees', () => {
+    const e = linearGradientEndpoints(100, 50, 200, 100, 0)
+    expect(e.x1).toBeCloseTo(0, 9)
+    expect(e.x2).toBeCloseTo(200, 9)
+    expect(e.y1).toBeCloseTo(50, 9)
+    expect(e.y2).toBeCloseTo(50, 9)
+  })
+
+  it('lays linear endpoints vertically at 90 degrees', () => {
+    const e = linearGradientEndpoints(100, 50, 200, 100, 90)
+    expect(e.x1).toBeCloseTo(100, 9)
+    expect(e.x2).toBeCloseTo(100, 9)
+    expect(e.y1).toBeCloseTo(0, 9)
+    expect(e.y2).toBeCloseTo(100, 9)
+  })
+
+  it('keeps endpoints symmetric about the center at 45 degrees', () => {
+    const e = linearGradientEndpoints(0, 0, 100, 100, 45)
+    expect(e.x1).toBeCloseTo(-e.x2, 9)
+    expect(e.y1).toBeCloseTo(-e.y2, 9)
+    expect(gradientAngleFromVector(e.x2 - e.x1, e.y2 - e.y1)).toBeCloseTo(45, 9)
   })
 })
 

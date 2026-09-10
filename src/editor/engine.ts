@@ -6,6 +6,7 @@ import { PaperOffset } from 'paperjs-offset'
 import type { ToolName, StyleState, LayerMeta, LayerItemNode, ArtboardMeta, SymbolEntry, HistoryEntry, GuideOrientation, ProjectFileData, ReferencePoint, AlignMode, DistributeAxis, BooleanOperation, RasterExportOptions, GradientState, PatternFillState, EnvelopePreset } from './types'
 import { createDefaultStyle } from './store'
 import { cursorForTool } from './cursors'
+import { gradientAngleFromVector, linearGradientEndpoints, normalizeAngleDeg } from './geometry'
 import { parseProjectFile } from './project-file'
 import type { EditorStore } from './store-types'
 
@@ -374,7 +375,7 @@ export class EditorEngine {
    * pen / shape previews are never clobbered.
    */
   refreshSelectionChrome() {
-    if (this.toolName !== 'select' && this.toolName !== 'direct-select') return
+    if (this.toolName !== 'select' && this.toolName !== 'direct-select' && this.toolName !== 'lasso' && this.toolName !== 'free-transform') return
     const ctrl = this.controllers.get(this.toolName) as { refreshSelectionChrome?: () => void } | undefined
     try {
       ctrl?.refreshSelectionChrome?.()
@@ -740,6 +741,47 @@ export class EditorEngine {
     }
   }
 
+  /** Every guide as plain data (id / orientation / position), top-first. */
+  listGuides(): Array<{ id: string; orientation: GuideOrientation; position: number }> {
+    const layer = this.getGuideLayer()
+    if (!layer) return []
+    const out: Array<{ id: string; orientation: GuideOrientation; position: number }> = []
+    for (const child of layer.children) {
+      const data = (child as any).data ?? {}
+      if (!data.isGuide) continue
+      const orientation = (data.guideOrientation === 'vertical' ? 'vertical' : 'horizontal') as GuideOrientation
+      const segs = (child as paper.Path).segments
+      const p = segs.length > 0 ? (segs[0] as any).point : null
+      if (!p) continue
+      const position = orientation === 'vertical' ? Number(p.x) : Number(p.y)
+      if (!Number.isFinite(position)) continue
+      out.push({ id: String(data.guideId ?? ''), orientation, position: Math.round(position * 10) / 10 })
+    }
+    return out.reverse()
+  }
+
+  /** Move a guide by id; false when the id is unknown. Callers record history. */
+  moveGuideById(id: string, position: number): boolean {
+    if (!id || !Number.isFinite(position)) return false
+    const layer = this.getGuideLayer()
+    if (!layer) return false
+    const guide = layer.children.find((c) => String((c as any).data?.guideId ?? '') === id)
+    if (!guide) return false
+    this.moveGuide(guide as paper.Item, position)
+    return true
+  }
+
+  /** Delete a guide by id; false when the id is unknown. Callers record history. */
+  deleteGuideById(id: string): boolean {
+    if (!id) return false
+    const layer = this.getGuideLayer()
+    if (!layer) return false
+    const guide = layer.children.find((c) => String((c as any).data?.guideId ?? '') === id)
+    if (!guide || !(guide instanceof this.scope.Path)) return false
+    this.deleteGuide(guide as paper.Path)
+    return true
+  }
+
   /** Remove all guides from the guide layer. */
   clearGuides() {
     const layer = this.getGuideLayer()
@@ -1082,10 +1124,11 @@ export class EditorEngine {
   }
 
   /**
-   * Build a gradient fill anchored to the item bounds (linear runs
-   * left-center to right-center, radial spans the larger half-extent), or
-   * null when no gradient applies. Radial colors always carry an explicit
-   * highlight so linear vs radial stays detectable on readback.
+   * Build a gradient fill anchored to the item bounds (linear runs at the
+   * stored angle about the bounds center, default 0 = left→right; radial
+   * spans the larger half-extent), or null when no gradient applies.
+   * Radial colors always carry an explicit highlight so linear vs radial
+   * stays detectable on readback.
    */
   private gradientFillForItem(item: paper.Item, style: StyleState): paper.Color | null {
     const gradient = style.gradient
@@ -1107,12 +1150,14 @@ export class EditorEngine {
       const edge = new scope.Point(center.x + radius, center.y)
       return new scope.Color(paperGradient, center, edge, center.clone()) as paper.Color
     }
-    const origin = new scope.Point(bounds.x, bounds.y + bounds.height / 2)
-    const destination = new scope.Point(bounds.x + bounds.width, bounds.y + bounds.height / 2)
+    const angle = normalizeAngleDeg(gradient.angle ?? 0)
+    const e = linearGradientEndpoints(bounds.center.x, bounds.center.y, bounds.width, bounds.height, angle)
+    const origin = new scope.Point(e.x1, e.y1)
+    const destination = new scope.Point(e.x2, e.y2)
     return new scope.Color(paperGradient, origin, destination) as paper.Color
   }
 
-  /** Read a baked gradient back into parameters (stops survive the trip). */
+  /** Read a baked gradient back into parameters (stops + angle survive). */
   private gradientFromItem(item: paper.Item): GradientState | null {
     const fill = (item as any).fillColor as any
     if (!fill || !fill.gradient) return null
@@ -1121,12 +1166,18 @@ export class EditorEngine {
       color: (stop.color && this.colorToCSS(stop.color)) || '#000000',
     }))
     if (stops.length === 0) return null
-    return { type: fill.highlight ? 'radial' : 'linear', stops }
+    if (fill.highlight) return { type: 'radial', stops }
+    const o = fill.origin as any
+    const d = fill.destination as any
+    const angle = o && d
+      ? gradientAngleFromVector(Number(d.x) - Number(o.x), Number(d.y) - Number(o.y))
+      : 0
+    return { type: 'linear', stops, angle: Math.round(angle) }
   }
 
   /**
    * Re-anchor a baked gradient fill to the item's current bounds (linear
-   * keeps its direction, radial recenters). Non-gradient fills are
+   * keeps its angle, radial recenters). Non-gradient fills are
    * untouched. Call after any geometry change so gradients travel with
    * their objects instead of staying pinned to old bounds.
    */
@@ -3721,10 +3772,11 @@ export class EditorEngine {
   }
 
   /**
-   * Select every appearance leaf sharing the fill or stroke color of the
-   * first selected leaf. Returns how many items were selected.
+   * Select every appearance leaf sharing an attribute of the
+   * first selected leaf (fill / stroke color, stroke width, opacity or
+   * blend mode). Returns how many items were selected.
    */
-  selectSame(attribute: 'fill' | 'stroke'): number {
+  selectSame(attribute: 'fill' | 'stroke' | 'strokeWidth' | 'opacity' | 'blendMode'): number {
     const leaves = this.appearanceLeaves()
     if (leaves.length === 0) return 0
     const reference = this.getSelection()
@@ -3742,8 +3794,11 @@ export class EditorEngine {
     return matches.length
   }
 
-  /** Fill / stroke color key used by select-same (`none` when unset). */
-  private appearanceKey(item: paper.Item, attribute: 'fill' | 'stroke'): string {
+  /** Fill / stroke / width / opacity / blend key used by select-same. */
+  private appearanceKey(item: paper.Item, attribute: 'fill' | 'stroke' | 'strokeWidth' | 'opacity' | 'blendMode'): string {
+    if (attribute === 'strokeWidth') return `w:${Math.round((Number((item as any).strokeWidth) || 0) * 100) / 100}`
+    if (attribute === 'opacity') return `o:${Math.round((Number((item as any).opacity ?? 1)) * 1000) / 1000}`
+    if (attribute === 'blendMode') return `b:${String((item as any).blendMode ?? 'source-over')}`
     const color = (
       attribute === 'fill'
         ? (item as any).fillColor

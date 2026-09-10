@@ -162,6 +162,8 @@ export const useEditorStore = defineStore('editor', {
     recentColors: [] as string[],
     /** Live-shape options surfaced in the contextual control bar */
     polygonSides: 5,
+    polygonStar: false,
+    starRatio: 0.5,
     spiralTurns: 3,
     roundedRadius: 12,
     gridRows: 4,
@@ -466,6 +468,12 @@ export const useEditorStore = defineStore('editor', {
     /** Live-shape option setters (clamped to sane ranges) */
     setPolygonSides(n: number) {
       if (Number.isFinite(n)) this.polygonSides = Math.min(64, Math.max(3, Math.round(n)))
+    },
+    setPolygonStar(on: boolean) {
+      this.polygonStar = !!on
+    },
+    setStarRatio(n: number) {
+      if (Number.isFinite(n)) this.starRatio = Math.min(0.9, Math.max(0.1, n))
     },
     setSpiralTurns(n: number) {
       if (Number.isFinite(n)) this.spiralTurns = Math.min(12, Math.max(1, Math.round(n)))

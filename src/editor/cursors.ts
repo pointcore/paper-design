@@ -181,6 +181,7 @@ function buildToolCursors(): Record<ToolName, string> {
   return {
     select: 'default',
     'direct-select': CURSOR_DIRECT_SELECT,
+    lasso: crosshair,
     pen: CURSOR_PEN,
     curvature: CURSOR_CURVATURE,
     'add-anchor': CURSOR_ADD_ANCHOR,

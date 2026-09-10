@@ -23,6 +23,39 @@ export function snap45(v: paper.Point, scope: paper.PaperScope): paper.Point {
 }
 
 /**
+ * Normalize degrees into [0, 360). Non-finite values map to 0.
+ */
+export function normalizeAngleDeg(angle: number): number {
+  if (!Number.isFinite(angle)) return 0
+  return ((angle % 360) + 360) % 360
+}
+
+/**
+ * Gradient direction vector angle in degrees (screen coords, y down):
+ * 0 = +x (left→right), 90 = +y (top→bottom).
+ */
+export function gradientAngleFromVector(dx: number, dy: number): number {
+  if (!Number.isFinite(dx) || !Number.isFinite(dy)) return 0
+  if (Math.hypot(dx, dy) < 1e-9) return 0
+  return normalizeAngleDeg((Math.atan2(dy, dx) * 180) / Math.PI)
+}
+
+/**
+ * Linear-gradient endpoints rotated `angleDeg` about the bounds center.
+ * The half-extent covers the rotated box (|w·cos| + |h·sin|) / 2 so the
+ * gradient always spans the shape at any angle.
+ */
+export function linearGradientEndpoints(
+  cx: number, cy: number, w: number, h: number, angleDeg: number
+): { x1: number; y1: number; x2: number; y2: number } {
+  const a = (normalizeAngleDeg(angleDeg) * Math.PI) / 180
+  const dx = Math.cos(a)
+  const dy = Math.sin(a)
+  const half = (Math.abs(w * dx) + Math.abs(h * dy)) / 2
+  return { x1: cx - dx * half, y1: cy - dy * half, x2: cx + dx * half, y2: cy + dy * half }
+}
+
+/**
  * Document units (CSS px at 96dpi) → ruler unit factor for display
  * readouts. Geometry itself never converts; rulers, status bar and the
  * measure tool share this so their numbers agree.
