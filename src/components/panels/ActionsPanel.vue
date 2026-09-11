@@ -107,6 +107,7 @@ function persistUiPrefs() {
       density: store.ui.toolRailDensity,
       controlBar: store.ui.showControlBar,
       navigator: store.ui.showNavigator,
+      panelWidth: store.ui.panelWidth,
     }))
   } catch { /* private mode */ }
 }

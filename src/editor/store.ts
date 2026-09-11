@@ -210,7 +210,7 @@ export const useEditorStore = defineStore('editor', {
       panelCollapsed: false,
       showLayerPanel: true,
       showPropertyPanel: true,
-      panelWidth: 240,
+      panelWidth: 264,
       rightTab: 'property' as RightPanelTab,
       settingsOpen: false,
       showNavigator: true,
@@ -398,6 +398,12 @@ export const useEditorStore = defineStore('editor', {
     /** Update panel UI state */
     setPanelCollapsed(val: boolean) {
       this.ui.panelCollapsed = val
+    },
+
+    /** Right-panel width in px (drag handle; clamped to a usable range) */
+    setPanelWidth(val: number) {
+      if (!Number.isFinite(val)) return
+      this.ui.panelWidth = Math.min(440, Math.max(200, Math.round(val)))
     },
 
     /** Enter or leave isolated group editing (banner driver) */

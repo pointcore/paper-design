@@ -1,5 +1,14 @@
 <template>
-  <div class="right-panel">
+  <div class="right-panel" :style="panelStyle">
+    <div
+      class="rp-resizer"
+      title="Drag to resize · double-click to reset"
+      @pointerdown="onResizeStart"
+      @pointermove="onResizeMove"
+      @pointerup="onResizeEnd"
+      @pointercancel="onResizeEnd"
+      @dblclick="resetWidth"
+    ></div>
     <div class="rp-tabs">
       <button
         v-for="t in tabs"
@@ -41,7 +50,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useEditorStore } from '../../editor/store'
 import type { RightPanelTab } from '../../editor/types'
 import PropertyPanel from './PropertyPanel.vue'
@@ -54,6 +63,53 @@ import SymbolsPanel from './SymbolsPanel.vue'
 import ActionsPanel from './ActionsPanel.vue'
 
 const store = useEditorStore()
+
+// Draggable panel width (persisted with the other dock prefs). Dragging
+// computes from the window's right edge, which is where the panel sits.
+const DEFAULT_PANEL_WIDTH = 264
+const panelStyle = computed(() => {
+  const w = `${store.ui.panelWidth}px`
+  return { width: w, minWidth: w, maxWidth: w }
+})
+const resizerRef = ref<HTMLElement | null>(null)
+let resizing = false
+
+function onResizeStart(e: PointerEvent) {
+  if (e.button !== 0) return
+  resizing = true
+  // Capture so fast drags that leave the strip keep delivering moves here.
+  resizerRef.value?.setPointerCapture?.(e.pointerId)
+  e.preventDefault()
+}
+function onResizeMove(e: PointerEvent) {
+  if (!resizing) return
+  store.setPanelWidth(window.innerWidth - e.clientX)
+}
+function onResizeEnd(e: PointerEvent) {
+  if (!resizing) return
+  resizing = false
+  resizerRef.value?.releasePointerCapture?.(e.pointerId)
+  persistPanelWidth()
+}
+function resetWidth() {
+  store.setPanelWidth(DEFAULT_PANEL_WIDTH)
+  persistPanelWidth()
+}
+
+function persistPanelWidth() {
+  try {
+    let prefs: Record<string, unknown> = {}
+    const raw = localStorage.getItem('vve.ui')
+    if (raw) {
+      const parsed = JSON.parse(raw) as unknown
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        prefs = parsed as Record<string, unknown>
+      }
+    }
+    prefs.panelWidth = store.ui.panelWidth
+    localStorage.setItem('vve.ui', JSON.stringify(prefs))
+  } catch { /* private mode: session-only width */ }
+}
 
 const tabs = [
   { key: 'property', label: 'Props' },
@@ -84,6 +140,7 @@ watch(
 
 <style scoped>
 .right-panel {
+  position: relative;
   display: flex;
   flex-direction: column;
   width: 264px;
@@ -94,6 +151,20 @@ watch(
   border-left: 1px solid #161616;
   flex-shrink: 0;
   overflow: hidden;
+}
+
+.rp-resizer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+  cursor: col-resize;
+  z-index: 20;
+  touch-action: none;
+}
+.rp-resizer:hover {
+  background: rgba(74, 144, 217, 0.35);
 }
 
 .rp-tabs {

@@ -68,6 +68,7 @@ onMounted(() => {
     if (!raw) return
     const prefs = JSON.parse(raw) as {
       workspace?: string; density?: string; controlBar?: boolean; navigator?: boolean
+      panelWidth?: number
     }
     if (prefs.workspace === 'essentials' || prefs.workspace === 'typography' || prefs.workspace === 'print') {
       store.setWorkspace(prefs.workspace)
@@ -77,6 +78,7 @@ onMounted(() => {
     }
     if (typeof prefs.controlBar === 'boolean') store.setShowControlBar(prefs.controlBar)
     if (typeof prefs.navigator === 'boolean') store.setShowNavigator(prefs.navigator)
+    if (typeof prefs.panelWidth === 'number') store.setPanelWidth(prefs.panelWidth)
   } catch { /* private mode: defaults stand */ }
   // Warn before losing unsaved work on reload/close (browsers show chrome).
   window.addEventListener('beforeunload', (e) => {
