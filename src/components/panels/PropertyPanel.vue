@@ -162,6 +162,7 @@
             <div class="tf-cell">
               <span>W</span>
               <el-input-number v-model="posW" :precision="1" :min="0.1" size="small" controls-position="right" @change="onTransformChange" />
+              <el-button size="small" class="icon-btn wh-link" :type="whLink ? 'primary' : ''" :title="whLink ? 'Aspect ratio locked' : 'Lock aspect ratio'" @click="whLink = !whLink">&#9935;</el-button>
             </div>
             <div class="tf-cell">
               <span>Y</span>
@@ -833,6 +834,11 @@ const posX = ref(0)
 const posY = ref(0)
 const posW = ref(0)
 const posH = ref(0)
+// AI transform-panel aspect lock: when on, editing one dimension derives
+// the other from the ratio the selection had before this edit.
+const whLink = ref(false)
+let lastPosW = 0
+let lastPosH = 0
 // Relative rotation in degrees applied on change, then reset to zero.
 const rotateBy = ref(0)
 // Relative skew in degrees applied on change, then reset to zero.
@@ -1510,6 +1516,17 @@ function onTransformChange() {
   if (!e) return
   if (!Number.isFinite(posW.value) || !Number.isFinite(posH.value)) return
   if (posW.value <= 0 || posH.value <= 0) return
+  // Aspect lock: whichever dimension the user touched drives the other at
+  // the pre-edit ratio (lastPos values are synced on every panel resync).
+  if (whLink.value && lastPosW > 0 && lastPosH > 0) {
+    const wMoved = Math.abs(posW.value - lastPosW) > 1e-9
+    const hMoved = Math.abs(posH.value - lastPosH) > 1e-9
+    if (wMoved && !hMoved) {
+      posH.value = Math.max(0.1, Math.round(((posW.value * lastPosH) / lastPosW) * 10) / 10)
+    } else if (hMoved && !wMoved) {
+      posW.value = Math.max(0.1, Math.round(((posH.value * lastPosW) / lastPosH) * 10) / 10)
+    }
+  }
   // X/Y address the reference point; W/H scale about it so it stays fixed.
   // Multi-selections act on their united bounds (AI): every member keeps
   // its relative layout instead of being stretched to the same size.
@@ -1541,6 +1558,8 @@ function onTransformChange() {
   e.reflowTextsForItems(items)
   e.scope.view.update()
   e.pushHistory('Transform')
+  lastPosW = posW.value
+  lastPosH = posH.value
 }
 
 function onReferencePointChange(point: ReferencePoint) {
@@ -1779,6 +1798,8 @@ function syncTransformFromSelection() {
   posY.value = Math.round(anchor.y * 10) / 10
   posW.value = Math.round(b.width * 10) / 10
   posH.value = Math.round(b.height * 10) / 10
+  lastPosW = posW.value
+  lastPosH = posH.value
   rotateBy.value = 0
 }
 
