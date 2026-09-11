@@ -4366,6 +4366,83 @@ export class EditorEngine {
     this.scope.view.update()
   }
 
+  /**
+   * Lock every unlocked top-level user item outside the selection
+   * (Unlock All restores). Returns newly locked count; one history.
+   */
+  lockOthers(): number {
+    const selection = this.getSelection()
+    if (selection.length === 0) return 0
+    const keep = new Set<paper.Item>()
+    for (const item of selection) {
+      let at: paper.Item | null = item
+      while (at) {
+        keep.add(at)
+        at = at.parent
+      }
+    }
+    let locked = 0
+    for (const layer of this.project.layers) {
+      if (!(layer.data as any)?.isUserLayer || !layer.visible || layer.locked) continue
+      for (const child of layer.children) {
+        const c = child as paper.Item
+        if (keep.has(c) || (c as any).locked) continue
+        c.locked = true
+        locked++
+      }
+    }
+    if (locked > 0) {
+      this.pushHistory('Lock Others')
+      this.scope.view.update()
+    }
+    return locked
+  }
+
+  /**
+   * Reverse the stacking order of the unlocked selection (keeps every
+   * item in its own parent; cross-layer order untouched). One history.
+   */
+  reverseOrder(): number {
+    const items = this.getSelection().filter((item) => !item.locked && item.parent)
+    if (items.length < 2) return 0
+    const byParent = new Map<paper.Item, paper.Item[]>()
+    for (const item of items) {
+      const parent = item.parent as paper.Item
+      const list = byParent.get(parent) ?? []
+      list.push(item)
+      byParent.set(parent, list)
+    }
+    let moved = 0
+    for (const [parent, group] of byParent) {
+      if (group.length < 2) continue
+      const kids = ((parent as any).children as paper.Item[]).slice()
+      const slots = group
+        .map((g) => kids.indexOf(g))
+        .filter((s) => s >= 0)
+        .sort((a, b) => a - b)
+      if (slots.length < 2) continue
+      const reversed = group
+        .slice()
+        .sort((a, b) => kids.indexOf(a) - kids.indexOf(b))
+        .reverse()
+      for (const g of group) {
+        try {
+          g.remove()
+        } catch { /* already gone */ }
+      }
+      slots.forEach((slot, i) => {
+        ;(parent as any).insertChild(Math.min(slot, (parent as any).children.length), reversed[i])
+        moved++
+      })
+    }
+    if (moved > 0) {
+      this.pushHistory('Reverse Order')
+      this.scope.view.update()
+      return moved
+    }
+    return 0
+  }
+
   /** Show every user item in the document. */
   showAll(): void {
     let changed = false
@@ -5055,6 +5132,7 @@ export class EditorEngine {
     else if (preset === 'invert') parts.push('invert(1)')
     if (b !== 100) parts.push(`brightness(${Math.round((b / 100) * 100) / 100})`)
     if (parts.length === 0) return false
+    this.stashOriginalSource(source)
     let url: string | null = null
     try {
       const out = document.createElement('canvas')
@@ -5144,6 +5222,7 @@ export class EditorEngine {
         settle(false)
         continue
       }
+      this.stashOriginalSource(source)
       let url: string | null = null
       try {
         const out = document.createElement('canvas')
@@ -5196,13 +5275,89 @@ export class EditorEngine {
   }
 
   /**
+   * Remember a raster's current pixels once, so destructive bitmap ops
+   * (adjust / downsample / replace) stay reversible via Reset Image.
+   * Tainted canvases simply stash nothing.
+   */
+  private stashOriginalSource(raster: paper.Raster): void {
+    const data = (raster as any).data ?? {}
+    if (typeof data.originalSource === 'string' && data.originalSource.startsWith('data:')) return
+    try {
+      const url = (raster as any).canvas?.toDataURL?.('image/png') as string | undefined
+      if (typeof url === 'string' && url.startsWith('data:')) data.originalSource = url
+    } catch { /* tainted: nothing to stash */ }
+  }
+
+  /**
+   * Restore the stashed pre-edit pixels of the first selected raster
+   * (one level). Returns false with nothing to restore.
+   */
+  resetImage(): boolean {
+    const scope = this.scope
+    const find = (node: paper.Item): paper.Raster | null => {
+      if ((node as any).locked || !node.parent) return null
+      if (node instanceof scope.Raster) {
+        const url = (node as any).data?.originalSource
+        return typeof url === 'string' && url.startsWith('data:') ? node : null
+      }
+      const children = (node as any).children as paper.Item[] | undefined
+      if (children) {
+        for (const child of children) {
+          const hit = find(child)
+          if (hit) return hit
+        }
+      }
+      return null
+    }
+    let source: paper.Raster | null = null
+    for (const item of this.getSelection()) {
+      source = find(item)
+      if (source) break
+    }
+    if (!source) return false
+    const url = (source as any).data.originalSource as string
+    const bounds = (source as any).bounds as paper.Rectangle | undefined
+    if (!bounds || bounds.width < 1 || bounds.height < 1) return false
+    const parent = source.parent ?? this.getActiveLayer()
+    const at = parent.children.indexOf(source as any)
+    const opacity = (source as any).opacity
+    const next = new scope.Raster({ source: url }) as paper.Raster
+    parent.insertChild(Math.min(Math.max(at, 0), parent.children.length), next as any)
+    next.onLoad = () => {
+      const nb = (next as any).bounds as paper.Rectangle | undefined
+      if (nb && nb.width > 0 && nb.height > 0) {
+        next.scale(bounds.width / nb.width, bounds.height / nb.height)
+      }
+      next.position = bounds.center.clone()
+      next.opacity = opacity
+      next.data.id = this.genId()
+      next.data.isUserItem = true
+      try {
+        ;(source as paper.Raster).remove()
+      } catch { /* already gone */ }
+      this.clearSelection()
+      next.selected = true
+      this.syncSelectionToStore()
+      this.pushHistory('Reset Image')
+      this.scope.view.update()
+      this.showStatus('Image restored')
+    }
+    next.onError = () => {
+      try {
+        next.remove()
+      } catch { /* already gone */ }
+      this.showStatus('Image restore failed')
+    }
+    return true
+  }
+
+  /**
    * Swap the first selected raster's pixels for a new file (relink
    * parity): the replacement scales into the old bounds at the same
    * slot, opacity and selection carry over. Tainted/empty files fail
    * gracefully. Returns false when nothing was queued.
    */
-  replaceSelectedImage(dataUrl: string): boolean {
-    const scope = this.scope
+  replaceSelectedImage(dataUrl: string): boolean {    const scope = this.scope
     if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) return false
     const find = (node: paper.Item): paper.Raster | null => {
       if ((node as any).locked || !node.parent) return null
@@ -5224,6 +5379,7 @@ export class EditorEngine {
     if (!source) return false
     const bounds = (source as any).bounds as paper.Rectangle | undefined
     if (!bounds || bounds.width < 1 || bounds.height < 1) return false
+    this.stashOriginalSource(source)
     const parent = source.parent ?? this.getActiveLayer()
     const at = parent.children.indexOf(source as any)
     const opacity = (source as any).opacity

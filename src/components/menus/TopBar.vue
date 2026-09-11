@@ -16,6 +16,7 @@
               <el-dropdown-item command="exportBoardsSvg">Export Boards SVG</el-dropdown-item>
               <el-dropdown-item command="exportRaster">Export Raster...</el-dropdown-item>
               <el-dropdown-item command="exportBoardsPng">Export Boards PNG</el-dropdown-item>
+              <el-dropdown-item command="exportBoards">Export Boards...</el-dropdown-item>
               <el-dropdown-item command="exportPdf">Export PDF (Raster)</el-dropdown-item>
               <el-dropdown-item command="exportBoardsPdf">Export All Boards PDF (Raster)</el-dropdown-item>
               <el-dropdown-item command="exportVectorPdf">Export PDF (Vector)</el-dropdown-item>
@@ -61,6 +62,7 @@
               <el-dropdown-item command="bringForward" :disabled="!store.hasSelection">Bring Forward</el-dropdown-item>
               <el-dropdown-item command="sendBackward" :disabled="!store.hasSelection">Send Backward</el-dropdown-item>
               <el-dropdown-item command="sendToBack" :disabled="!store.hasSelection">Send to Back</el-dropdown-item>
+              <el-dropdown-item command="reverseOrder" :disabled="!store.hasSelection">Reverse Order</el-dropdown-item>
               <el-dropdown-item command="group" divided :disabled="!store.hasSelection">Group</el-dropdown-item>
               <el-dropdown-item command="ungroup" :disabled="!store.hasSelection">Ungroup</el-dropdown-item>
               <el-dropdown-item command="ungroupAll" :disabled="!store.hasSelection">Ungroup All</el-dropdown-item>
@@ -90,6 +92,7 @@
               <el-dropdown-item command="adjustImage" :disabled="!store.hasSelection">Adjust Image...</el-dropdown-item>
               <el-dropdown-item command="downsample" :disabled="!store.hasSelection">Downsample Images...</el-dropdown-item>
               <el-dropdown-item command="replaceImage" :disabled="!store.hasSelection">Replace Image...</el-dropdown-item>
+              <el-dropdown-item command="resetImage" :disabled="!store.hasSelection">Reset Image</el-dropdown-item>
               <el-dropdown-item command="closePath" :disabled="!store.hasSelection">Close Path</el-dropdown-item>
               <el-dropdown-item command="openPath" :disabled="!store.hasSelection">Open Path</el-dropdown-item>
               <el-dropdown-item command="envArcUpper" divided :disabled="!store.hasSelection">Envelope: Arc Upper</el-dropdown-item>
@@ -106,6 +109,7 @@
               <el-dropdown-item command="flowText" divided :disabled="!store.hasSelection">Flow Text Overflow</el-dropdown-item>
               <el-dropdown-item command="unlinkText" :disabled="!store.hasSelection">Unlink Text Frames</el-dropdown-item>
               <el-dropdown-item command="lock" divided :disabled="!store.hasSelection">Lock</el-dropdown-item>
+              <el-dropdown-item command="lockOthers" :disabled="!store.hasSelection">Lock Others</el-dropdown-item>
               <el-dropdown-item command="unlockAll">Unlock All</el-dropdown-item>
               <el-dropdown-item command="hide" divided :disabled="!store.hasSelection">Hide</el-dropdown-item>
               <el-dropdown-item command="showAll">Show All</el-dropdown-item>
@@ -702,8 +706,7 @@
       </div>
     </AppDialog>
 
-    <!-- Save As Dialog (custom project filename) -->
-    <AppDialog
+    <!-- Save As Dialog (custom project filename) -->    <AppDialog
       v-model="saveVisible"
       title="Save As"
       :width="360"
@@ -719,6 +722,55 @@
             <span class="setting-desc">Saved as .vec.json</span>
           </div>
           <el-input v-model="saveName" size="small" placeholder="project" @keyup.enter="onSaveConfirm" />
+        </div>
+      </div>
+    </AppDialog>
+
+    <!-- Boards Export Dialog (Export-for-Screens parity: pick boards + format) -->
+    <AppDialog
+      v-model="boardsVisible"
+      title="Export Boards"
+      :width="420"
+      confirm-text="Export"
+      cancel-text="Cancel"
+      @confirm="onBoardsExportConfirm"
+      @cancel="boardsVisible = false"
+    >
+      <div class="settings-body app-settings">
+        <div class="setting-section">
+          <div class="setting-row">
+            <div class="setting-label">
+              <span class="setting-name">Format</span>
+            </div>
+            <el-select v-model="boardsForm.format" size="small" style="width: 110px">
+              <el-option value="png" label="PNG" />
+              <el-option value="jpeg" label="JPEG" />
+              <el-option value="svg" label="SVG" />
+              <el-option value="pdf" label="PDF" />
+            </el-select>
+            <el-select v-if="boardsForm.format !== 'svg'" v-model="boardsForm.scale" size="small" style="width: 80px" title="Raster scale">
+              <el-option :value="1" label="1x" />
+              <el-option :value="2" label="2x" />
+              <el-option :value="3" label="3x" />
+            </el-select>
+          </div>
+          <div v-if="boardsForm.format === 'jpeg'" class="setting-row">
+            <div class="setting-label">
+              <span class="setting-name">Quality</span>
+            </div>
+            <el-select v-model="boardsForm.quality" size="small" style="width: 110px">
+              <el-option v-for="q in exportQualities" :key="q.value" :label="q.label" :value="q.value" />
+            </el-select>
+          </div>
+          <div class="setting-row">
+            <el-button size="small" @click="boardsCheckAll(true)">All</el-button>
+            <el-button size="small" @click="boardsCheckAll(false)">None</el-button>
+          </div>
+          <div v-for="b in store.artboards" :key="b.id" class="setting-row">
+            <el-checkbox :model-value="boardsForm.checked.includes(b.id)" @change="() => boardsToggle(b.id)">
+              {{ b.name }} ({{ Math.round(b.width) }}x{{ Math.round(b.height) }})
+            </el-checkbox>
+          </div>
         </div>
       </div>
     </AppDialog>
@@ -1063,6 +1115,121 @@ function onSaveConfirm() {
     store.setStatusMessage('Project save failed')
   }
   saveVisible.value = false
+}
+
+const boardsVisible = ref(false)
+const boardsForm = reactive({
+  format: 'png' as 'png' | 'jpeg' | 'svg' | 'pdf',
+  scale: 2,
+  quality: 0.92,
+  checked: [] as string[],
+})
+try {
+  const raw = localStorage.getItem('vve.boardsExport')
+  if (raw) {
+    const saved = JSON.parse(raw) as Partial<typeof boardsForm>
+    if (saved.format === 'png' || saved.format === 'jpeg' || saved.format === 'svg' || saved.format === 'pdf') {
+      boardsForm.format = saved.format
+    }
+    if (saved.scale === 1 || saved.scale === 2 || saved.scale === 3) boardsForm.scale = saved.scale
+    if (saved.quality === 0.92 || saved.quality === 0.75 || saved.quality === 0.55) {
+      boardsForm.quality = saved.quality
+    }
+  }
+} catch { /* private mode: defaults stand */ }
+
+function openBoardsExport() {
+  boardsForm.checked = store.artboards.filter((b) => b.width > 0 && b.height > 0).map((b) => b.id)
+  boardsVisible.value = true
+}
+function boardsToggle(id: string) {
+  boardsForm.checked = boardsForm.checked.includes(id)
+    ? boardsForm.checked.filter((x) => x !== id)
+    : [...boardsForm.checked, id]
+}
+function boardsCheckAll(on: boolean) {
+  boardsForm.checked = on
+    ? store.artboards.filter((b) => b.width > 0 && b.height > 0).map((b) => b.id)
+    : []
+}
+async function onBoardsExportConfirm() {
+  const e = engineRef?.value
+  if (!e) {
+    boardsVisible.value = false
+    return
+  }
+  const boards = store.artboards.filter((b) => boardsForm.checked.includes(b.id) && b.width > 0 && b.height > 0)
+  if (boards.length === 0) {
+    store.setStatusMessage('Tick at least one artboard')
+    return
+  }
+  try {
+    localStorage.setItem(
+      'vve.boardsExport',
+      JSON.stringify({ format: boardsForm.format, scale: boardsForm.scale, quality: boardsForm.quality })
+    )
+  } catch { /* private mode */ }
+  const previousActive = store.activeArtboardId
+  try {
+    if (boardsForm.format === 'pdf') {
+      const { jsPDF } = await import('jspdf')
+      let painted = 0
+      for (const board of boards) {
+        store.setActiveArtboard(board.id)
+        const dataUrl = e.exportRaster({ format: 'png', scale: boardsForm.scale, area: 'page' })
+        if (!dataUrl) continue
+        const doc = new jsPDF({
+          orientation: board.width >= board.height ? 'landscape' : 'portrait',
+          unit: 'pt',
+          format: [board.width, board.height],
+          compress: true,
+        })
+        doc.addImage(dataUrl, 'PNG', 0, 0, board.width, board.height)
+        doc.save(`${board.name || 'artboard'}.pdf`)
+        painted++
+      }
+      store.setStatusMessage(painted > 0 ? `Exported ${painted} board PDF${painted === 1 ? '' : 's'}` : 'Board export failed')
+    } else if (boardsForm.format === 'svg') {
+      let painted = 0
+      for (const board of boards) {
+        const svg = e.exportBoardVectorSVG(board, { bleed: 0, marks: false })
+        if (!svg) continue
+        const str = new XMLSerializer().serializeToString(svg)
+        downloadHref(URL.createObjectURL(new Blob([str], { type: 'image/svg+xml' })), `${board.name || 'artboard'}.svg`)
+        painted++
+      }
+      store.setStatusMessage(painted > 0 ? `Exported ${painted} board SVG${painted === 1 ? '' : 's'}` : 'Board export failed')
+    } else {
+      let painted = 0
+      let skipped = 0
+      for (const board of boards) {
+        store.setActiveArtboard(board.id)
+        const dataUrl = e.exportRaster({
+          format: boardsForm.format as 'png' | 'jpeg',
+          scale: boardsForm.scale,
+          area: 'page',
+          quality: boardsForm.quality,
+        })
+        if (!dataUrl) {
+          skipped++
+          continue
+        }
+        downloadHref(dataUrl, `${board.name || 'artboard'}.${boardsForm.format}`)
+        painted++
+      }
+      store.setStatusMessage(
+        painted === 0
+          ? 'Board export failed'
+          : skipped > 0
+            ? `Exported ${painted} of ${boards.length} boards (${skipped} too large)`
+            : `Exported ${painted} of ${boards.length} boards`
+      )
+    }
+  } finally {
+    store.setActiveArtboard(previousActive)
+    e.refreshArtboards()
+  }
+  boardsVisible.value = false
 }
 
 const imageVisible = ref(false)
@@ -1458,6 +1625,9 @@ function onFileCmd(cmd: string) {
       break
     case 'exportBoardsPng':
       onExportBoardsPng()
+      break
+    case 'exportBoards':
+      openBoardsExport()
       break
     case 'exportPdf':
       void onExportPdf()
@@ -1993,6 +2163,11 @@ function onObjectCmd(cmd: string) {
     case 'sendToBack':
       e.sendSelectionToBack()
       break
+    case 'reverseOrder': {
+      const n = e.reverseOrder()
+      store.setStatusMessage(n > 0 ? `Reversed ${n} object${n === 1 ? '' : 's'}` : 'Need 2+ objects sharing a parent')
+      break
+    }
     case 'group':
       e.groupSelection()
       break
@@ -2040,6 +2215,11 @@ function onObjectCmd(cmd: string) {
     case 'lock':
       e.setSelectedLocked(true)
       break
+    case 'lockOthers': {
+      const n = e.lockOthers()
+      store.setStatusMessage(n > 0 ? `Locked ${n} other object${n === 1 ? '' : 's'} (Unlock All restores)` : 'Nothing else to lock')
+      break
+    }
     case 'unlockAll':
       e.unlockAll()
       break
@@ -2277,6 +2457,11 @@ function onObjectCmd(cmd: string) {
       input.click()
       break
     }
+    case 'resetImage':
+      if (!e.resetImage()) {
+        store.setStatusMessage('No edited image selected')
+      }
+      break
   }
 }
 
