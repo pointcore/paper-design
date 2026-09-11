@@ -75,4 +75,20 @@ describe('handleGlobalKeydown', () => {
       handleGlobalKeydown(key({ key: 'ArrowLeft', target: null }), store, null)
     ).not.toThrow()
   })
+
+  it('steps zoom in/out on Ctrl+= and Ctrl+-', () => {
+    const engine = { zoomAt: vi.fn() } as any
+    handleGlobalKeydown(
+      key({ key: '=', code: 'Equal', ctrlKey: true, target: null }) as KeyboardEvent,
+      {} as any,
+      engine
+    )
+    expect(engine.zoomAt).toHaveBeenCalledWith(1.2)
+    handleGlobalKeydown(
+      key({ key: '-', code: 'Minus', ctrlKey: true, target: null }) as KeyboardEvent,
+      {} as any,
+      engine
+    )
+    expect(engine.zoomAt).toHaveBeenCalledWith(1 / 1.2)
+  })
 })

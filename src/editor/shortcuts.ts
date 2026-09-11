@@ -211,6 +211,14 @@ export function handleGlobalKeydown(
     } else if (key === '1') {
       engine?.zoomToActualSize()
       e.preventDefault()
+    } else if (key === '=' || key === '+') {
+      // AI-style step zoom (browser zoom is interceptable on these keys);
+      // anchors at the view center like the menu presets.
+      engine?.zoomAt(1.2)
+      e.preventDefault()
+    } else if (key === '-') {
+      engine?.zoomAt(1 / 1.2)
+      e.preventDefault()
     } else if (key === 's') {
       try {
         engine?.downloadProjectFile()
