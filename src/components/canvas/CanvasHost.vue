@@ -265,6 +265,7 @@ async function flushRecoverySave() {
   recoveryBusy = true
   try {
     await saveRecoverySnapshot(e.exportProjectFile())
+    store.setLastRecoveryAt(Date.now())
   } catch { /* recovery is best effort */ }
   recoveryBusy = false
 }

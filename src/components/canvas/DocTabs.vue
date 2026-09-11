@@ -12,7 +12,7 @@
       </button>
       <button class="doc-tab doc-add" title="New Artboard" @click="addBoard">+</button>
     </div>
-    <span class="doc-count" :class="{ dirty: store.hasUnsavedChanges }" :title="store.hasUnsavedChanges ? 'Unsaved changes (Ctrl+S)' : 'Saved'">{{ store.hasUnsavedChanges ? '• ' : '' }}{{ store.artboards.length }} boards</span>
+    <span class="doc-count" :class="{ dirty: store.hasUnsavedChanges }" :title="docTooltip">{{ store.hasUnsavedChanges ? '• ' : '' }}{{ store.artboards.length }} boards</span>
     <div v-if="ctxMenu" class="tab-ctx" :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }" @click.stop>
       <div class="tab-ctx-item" @click="ctxRename">Rename</div>
       <div class="tab-ctx-item" @click="ctxDuplicate">Duplicate</div>
@@ -22,7 +22,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, inject, watch, nextTick, onMounted, onUnmounted, type Ref } from 'vue'
+import { ref, computed, inject, watch, nextTick, onMounted, onUnmounted, type Ref } from 'vue'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
 
@@ -97,6 +97,14 @@ onUnmounted(() => {
   document.removeEventListener('click', onDocClick)
   document.removeEventListener('keydown', onCtxKeydown)
 })
+/** Dirty tooltip: mention the auto-mirror age so recovery is visible. */
+const docTooltip = computed(() => {
+  if (!store.hasUnsavedChanges) return 'Saved'
+  const ago = Math.max(0, Math.round((Date.now() - store.lastRecoveryAt) / 1000))
+  const mirrored = store.lastRecoveryAt > 0 ? ` · auto-mirrored ${ago}s ago` : ''
+  return `Unsaved changes${mirrored} (Ctrl+S)`
+})
+
 const tabsScrollRef = ref<HTMLElement | null>(null)
 function onTabsWheel(e: WheelEvent) {
   const el = tabsScrollRef.value
