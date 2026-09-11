@@ -142,7 +142,7 @@
 import { computed, ref, watch, inject, type Ref } from 'vue'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
-import type { AlignMode, ToolName } from '../../editor/types'
+import type { AlignMode, AlignTarget, ToolName } from '../../editor/types'
 
 const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
@@ -213,8 +213,8 @@ const shapeTools: Array<{ name: ToolName; text: string; tip: string }> = [
 ]
 
 const alignTarget = computed({
-  get: () => (store as any).alignTarget ?? 'selection',
-  set: (v: string) => (store as any).setAlignTarget ? (store as any).setAlignTarget(v) : undefined,
+  get: () => store.alignTarget ?? 'selection',
+  set: (v: AlignTarget) => store.setAlignTarget(v),
 })
 const canSetKey = computed(() => store.selectedItemIds.length > 0)
 const zoomLabel = computed(() => `${Math.round(store.view.zoom * 100)}%`)
@@ -224,20 +224,20 @@ const fontFamily = ref(store.charStyle.fontFamily)
 const fontSize = ref(store.charStyle.fontSize)
 const isBold = ref(String(store.charStyle.fontWeight) === 'bold')
 const isItalic = ref(store.charStyle.fontStyle === 'italic')
-const pathOffset = ref((store as any).textPathOffset ?? 0)
-const polygonSides = ref((store as any).polygonSides ?? 5)
-const polygonStar = ref(!!(store as any).polygonStar)
-const starRatio = ref((store as any).starRatio ?? 0.5)
-const spiralTurns = ref((store as any).spiralTurns ?? 3)
-const roundedRadius = ref((store as any).roundedRadius ?? 12)
-const gridRows = ref((store as any).gridRows ?? 4)
-const gridCols = ref((store as any).gridCols ?? 4)
+const pathOffset = ref(store.textPathOffset ?? 0)
+const polygonSides = ref(store.polygonSides ?? 5)
+const polygonStar = ref(!!store.polygonStar)
+const starRatio = ref(store.starRatio ?? 0.5)
+const spiralTurns = ref(store.spiralTurns ?? 3)
+const roundedRadius = ref(store.roundedRadius ?? 12)
+const gridRows = ref(store.gridRows ?? 4)
+const gridCols = ref(store.gridCols ?? 4)
 const strokeWidth = ref(store.style.strokeWidth)
 const opacityPct = ref(Math.round(store.style.opacity * 100))
-const brushSize = ref(Number((store as any).brushSize ?? 20))
-const brushAngle = ref(Number((store as any).brushAngle ?? 45))
-const pencilSmooth = ref(Number((store as any).pencilSmooth ?? 2.5))
-const wandTolerance = ref(Number((store as any).wandTolerance ?? 0))
+const brushSize = ref(Number(store.brushSize ?? 20))
+const brushAngle = ref(Number(store.brushAngle ?? 45))
+const pencilSmooth = ref(Number(store.pencilSmooth ?? 2.5))
+const wandTolerance = ref(Number(store.wandTolerance ?? 0))
 const gradientAngle = ref(Math.round(store.style.gradient?.angle ?? 0))
 const gradientType = ref<'linear' | 'radial'>(store.style.gradient?.type ?? 'linear')
 const calloutColor = ref(store.calloutStyle.color)
@@ -251,10 +251,10 @@ const scalePct = ref(100)
 watch(() => store.charStyle.fontFamily, (v) => { fontFamily.value = v })
 watch(() => store.charStyle.fontSize, (v) => { fontSize.value = v })
 watch(() => store.style.strokeWidth, (v) => { strokeWidth.value = v })
-watch(() => (store as any).brushSize, (v) => { brushSize.value = Number(v) || 20 })
-watch(() => (store as any).brushAngle, (v) => { brushAngle.value = Number(v) ?? 45 })
-watch(() => (store as any).pencilSmooth, (v) => { pencilSmooth.value = Number(v) || 2.5 })
-watch(() => (store as any).wandTolerance, (v) => { wandTolerance.value = Number(v) || 0 })
+watch(() => store.brushSize, (v) => { brushSize.value = Number(v) || 20 })
+watch(() => store.brushAngle, (v) => { brushAngle.value = Number(v) ?? 45 })
+watch(() => store.pencilSmooth, (v) => { pencilSmooth.value = Number(v) || 2.5 })
+watch(() => store.wandTolerance, (v) => { wandTolerance.value = Number(v) || 0 })
 watch(() => store.style.gradient?.angle, (v) => { gradientAngle.value = Math.round(v ?? 0) })
 watch(() => store.style.gradient?.type, (v) => { gradientType.value = v ?? 'linear' })
 
@@ -272,7 +272,7 @@ function engineCmd(method: string, history?: string) {
 function resolveTarget(): paper.Rectangle | undefined {
   const e = getEngine()
   if (!e) return undefined
-  const t = (store as any).alignTarget ?? 'selection'
+  const t = store.alignTarget ?? 'selection'
   if (t === 'board') return e.getActiveArtboardRect() ?? undefined
   if (t === 'key') return (e as any).getKeyObjectBounds?.() ?? undefined
   return undefined
@@ -286,10 +286,10 @@ function doAlign(mode: AlignMode) {
 function setKey() {
   const id = store.selectedItemIds[0]
   if (!id) return
-  ;(store as any).setKeyObject?.(id)
+  ;store.setKeyObject?.(id)
   store.setStatusMessage('Key object set (align target)')
 }
-function clearKey() { (store as any).setKeyObject?.('') }
+function clearKey() { store.setKeyObject?.('') }
 function fitContent() { getEngine()?.fitToContent() }
 function toggleSnap(k: 'point' | 'grid' | 'guides' | 'smartGuides') {
   store.updateSnap({ [k]: !(store.snap as any)[k] } as any)
@@ -323,18 +323,18 @@ function toggleItalic() {
 }
 function onPathOffset(v: number | undefined) {
   if (v === undefined) return
-  ;(store as any).setTextPathOffset?.(v)
+  ;store.setTextPathOffset?.(v)
 }
-function onPolygonSides(v: number | undefined) { if (v !== undefined) (store as any).setPolygonSides?.(v) }
+function onPolygonSides(v: number | undefined) { if (v !== undefined) store.setPolygonSides?.(v) }
 function toggleStar() {
   polygonStar.value = !polygonStar.value
-  ;(store as any).setPolygonStar?.(polygonStar.value)
+  ;store.setPolygonStar?.(polygonStar.value)
 }
-function onStarRatio(v: number | undefined) { if (v !== undefined) (store as any).setStarRatio?.(v) }
-function onSpiralTurns(v: number | undefined) { if (v !== undefined) (store as any).setSpiralTurns?.(v) }
-function onRoundedRadius(v: number | undefined) { if (v !== undefined) (store as any).setRoundedRadius?.(v) }
-function onGridRows(v: number | undefined) { if (v !== undefined) (store as any).setGridOptions?.(v, gridCols.value) }
-function onGridCols(v: number | undefined) { if (v !== undefined) (store as any).setGridOptions?.(gridRows.value, v) }
+function onStarRatio(v: number | undefined) { if (v !== undefined) store.setStarRatio?.(v) }
+function onSpiralTurns(v: number | undefined) { if (v !== undefined) store.setSpiralTurns?.(v) }
+function onRoundedRadius(v: number | undefined) { if (v !== undefined) store.setRoundedRadius?.(v) }
+function onGridRows(v: number | undefined) { if (v !== undefined) store.setGridOptions?.(v, gridCols.value) }
+function onGridCols(v: number | undefined) { if (v !== undefined) store.setGridOptions?.(gridRows.value, v) }
 function onStrokeWidth(v: number | undefined) {
   if (!v) return
   store.updateStyle({ strokeWidth: v })
@@ -350,8 +350,8 @@ function onOpacity(v: number | undefined) {
 }
 function onBrushSize(v: number | undefined) {
   if (v === undefined) return
-  ;(store as any).setBrushSize?.(v)
-  brushSize.value = Number((store as any).brushSize ?? 20)
+  ;store.setBrushSize?.(v)
+  brushSize.value = Number(store.brushSize ?? 20)
   const e = getEngine()
   const ctrl = e?.getController(store.tool) as { refreshCursor?: () => void } | null
   try {
@@ -360,18 +360,18 @@ function onBrushSize(v: number | undefined) {
 }
 function onBrushAngle(v: number | undefined) {
   if (v === undefined) return
-  ;(store as any).setBrushAngle?.(v)
-  brushAngle.value = Number((store as any).brushAngle ?? 45)
+  ;store.setBrushAngle?.(v)
+  brushAngle.value = Number(store.brushAngle ?? 45)
 }
 function onWandTolerance(v: number | undefined) {
   if (v === undefined) return
-  ;(store as any).setWandTolerance?.(v)
-  wandTolerance.value = Number((store as any).wandTolerance ?? 0)
+  ;store.setWandTolerance?.(v)
+  wandTolerance.value = Number(store.wandTolerance ?? 0)
 }
 function onPencilSmooth(v: number | undefined) {
   if (v === undefined) return
-  ;(store as any).setPencilSmooth?.(v)
-  pencilSmooth.value = Number((store as any).pencilSmooth ?? 2.5)
+  ;store.setPencilSmooth?.(v)
+  pencilSmooth.value = Number(store.pencilSmooth ?? 2.5)
 }
 function applyGradientEdit(label: string) {
   const e = getEngine()
