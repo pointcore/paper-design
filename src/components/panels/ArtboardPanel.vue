@@ -14,7 +14,8 @@
     <div class="panel-body">
       <div class="artboard-item" v-for="board in store.artboards" :key="board.id"
            :class="{ active: board.id === store.activeArtboardId }"
-           @click="activateBoard(board.id)">
+           @click="activateBoard(board.id)"
+           @contextmenu.prevent="openCtx(board, $event)">
         <span class="artboard-name" @dblclick="startRename(board)">
           <template v-if="renamingId === board.id">
             <el-input v-model="renameValue" size="small" @blur="finishRename" @keyup.enter="finishRename" @keyup.esc="cancelRename" />
@@ -22,6 +23,13 @@
           <template v-else>{{ board.name }}</template>
         </span>
         <span class="artboard-dims">{{ Math.round(board.width) }} x {{ Math.round(board.height) }}</span>
+      </div>
+
+      <div v-if="ctxMenu" class="board-ctx" :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }" @click.stop>
+        <div class="board-ctx-item" @click="ctxRename">Rename</div>
+        <div class="board-ctx-item" @click="ctxDuplicate">Duplicate</div>
+        <div class="board-ctx-item" @click="ctxFit">Fit to Artwork</div>
+        <div class="board-ctx-item" :class="{ disabled: store.artboards.length <= 1 }" @click="ctxDelete">Delete</div>
       </div>
 
       <div v-if="store.activeArtboard" class="artboard-position">
@@ -46,13 +54,76 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, inject, type Ref } from 'vue'
+import { ref, watch, inject, onMounted, onUnmounted, type Ref } from 'vue'
 import { Plus, Delete, CopyDocument, Expand, Grid } from '@element-plus/icons-vue'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
 
 const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
+
+onMounted(() => {
+  document.addEventListener('click', onDocClick)
+  document.addEventListener('keydown', onCtxKeydown)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', onDocClick)
+  document.removeEventListener('keydown', onCtxKeydown)
+})
+
+// Row context menu (per-board rename / duplicate / fit / delete).
+const ctxMenu = ref<{ x: number; y: number; id: string } | null>(null)
+function openCtx(board: { id: string }, e: MouseEvent) {
+  ctxMenu.value = {
+    x: Math.min(e.clientX, window.innerWidth - 180),
+    y: Math.min(e.clientY, window.innerHeight - 170),
+    id: board.id,
+  }
+}
+function closeCtx() {
+  ctxMenu.value = null
+}
+function ctxRename() {
+  const board = store.artboards.find((b) => b.id === ctxMenu.value?.id)
+  closeCtx()
+  if (board) startRename(board)
+}
+function ctxDuplicate() {
+  const e = getEngine()
+  const id = ctxMenu.value?.id
+  closeCtx()
+  if (!e || !id) return
+  if (!e.duplicateArtboard(id)) store.setStatusMessage('Could not duplicate that artboard')
+}
+function ctxFit() {
+  const e = getEngine()
+  const id = ctxMenu.value?.id
+  closeCtx()
+  if (!e || !id) return
+  if (!e.fitArtboardToArtwork(id)) store.setStatusMessage('No artwork on this artboard')
+}
+function ctxDelete() {
+  const id = ctxMenu.value?.id
+  closeCtx()
+  if (!id) return
+  if (store.artboards.length <= 1) {
+    store.setStatusMessage('At least one artboard must be kept')
+    return
+  }
+  store.removeArtboard(id)
+  const e = getEngine()
+  if (e) {
+    e.refreshArtboards()
+    e.pushHistory('Delete Artboard')
+  }
+}
+function onDocClick() {
+  closeCtx()
+}
+function onCtxKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') closeCtx()
+}
 
 const renamingId = ref('')
 const renameValue = ref('')
@@ -242,6 +313,26 @@ watch(() => store.activeArtboardId, syncPositionFromStore, { immediate: true })
 </script>
 
 <style scoped>
+.board-ctx {
+  position: fixed;
+  z-index: 1000;
+  background: #3c3c3c;
+  border: 1px solid #555;
+  border-radius: 4px;
+  padding: 4px;
+  min-width: 150px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+}
+.board-ctx-item {
+  padding: 6px 12px;
+  color: #ddd;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 2px;
+  white-space: nowrap;
+}
+.board-ctx-item:hover { background: #4a90d9; color: #fff; }
+.board-ctx-item.disabled { opacity: 0.4; pointer-events: none; }
 .artboard-panel {
   flex-shrink: 0;
   display: flex;
