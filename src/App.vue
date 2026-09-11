@@ -42,7 +42,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, provide, onMounted } from 'vue'
+import { computed, ref, provide, onMounted, onUnmounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useEditorStore } from './editor/store'
 import { rulerUnitFactor } from './editor/geometry'
@@ -63,6 +63,10 @@ provide('engine', engineRef)
 
 // Restore dock prefs saved by the Actions panel (best effort).
 onMounted(() => {
+  // Warn before losing unsaved work on reload/close (browsers show chrome).
+  // Registered even when no prefs exist yet: the early return below used to
+  // skip it, so first-time visitors lost the unsaved-changes warning.
+  window.addEventListener('beforeunload', onBeforeUnload)
   try {
     const raw = localStorage.getItem('vve.ui')
     if (!raw) return
@@ -80,10 +84,14 @@ onMounted(() => {
     if (typeof prefs.navigator === 'boolean') store.setShowNavigator(prefs.navigator)
     if (typeof prefs.panelWidth === 'number') store.setPanelWidth(prefs.panelWidth)
   } catch { /* private mode: defaults stand */ }
-  // Warn before losing unsaved work on reload/close (browsers show chrome).
-  window.addEventListener('beforeunload', (e) => {
-    if (store.hasUnsavedChanges) e.preventDefault()
-  })
+})
+
+function onBeforeUnload(e: BeforeUnloadEvent) {
+  if (store.hasUnsavedChanges) e.preventDefault()
+}
+
+onUnmounted(() => {
+  window.removeEventListener('beforeunload', onBeforeUnload)
 })
 
 const zoomPercent = computed(() => `${Math.round(store.view.zoom * 100)}%`)
@@ -118,8 +126,8 @@ function cycleUnit() {
   store.setRulerUnit(next)
 }
 function clearKey() {
-  ;(store as any).setKeyObject?.('')
-  ;(store as any).setAlignTarget?.('selection')
+  store.setKeyObject('')
+  store.setAlignTarget('selection')
 }
 function onZoomCmd(cmd: string | number) {
   const e = engineRef.value
