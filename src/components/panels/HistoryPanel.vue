@@ -3,6 +3,8 @@
     <div class="hs-subheader">
       <span class="hs-title">History</span>
       <div class="hs-actions">
+        <el-icon size="14" class="action-btn" :class="{ disabled: !store.canUndo }" title="Undo (Ctrl+Z)" @click="undo"><Back /></el-icon>
+        <el-icon size="14" class="action-btn" :class="{ disabled: !store.canRedo }" title="Redo (Ctrl+Shift+Z)" @click="redo"><Right /></el-icon>
         <el-icon size="14" class="action-btn" title="Clear history" @click="clearHistory"><Delete /></el-icon>
       </div>
     </div>
@@ -22,7 +24,7 @@
 
 <script setup lang="ts">
 import { ref, watch, inject, type Ref } from 'vue'
-import { Delete, Document } from '@element-plus/icons-vue'
+import { Back, Delete, Document, Right } from '@element-plus/icons-vue'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
 
@@ -35,6 +37,14 @@ function getEngine() { return engineRef?.value || null }
 
 function jumpTo(index: number) {
   getEngine()?.jumpToHistory(index)
+}
+
+function undo() {
+  if (store.canUndo) getEngine()?.undo()
+}
+
+function redo() {
+  if (store.canRedo) getEngine()?.redo()
 }
 
 function clearHistory() {
@@ -94,6 +104,11 @@ watch(() => store.historyIndex, () => {
 .action-btn:hover {
   color: #fff;
   background: #3d3d3d;
+}
+
+.action-btn.disabled {
+  opacity: 0.35;
+  pointer-events: none;
 }
 
 .panel-body {
