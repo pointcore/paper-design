@@ -37,6 +37,7 @@
       <div class="menu-item" :class="{ disabled: !hasSel }" @click="ctxCut">Cut</div>
       <div class="menu-item" @click="ctxPaste">Paste</div>
       <div class="menu-item" :class="{ disabled: !hasSel }" @click="ctxDuplicate">Duplicate</div>
+      <div class="menu-item" :class="{ disabled: !hasSel }" @click="ctxTransformAgain">Transform Again</div>
       <div class="menu-item" :class="{ disabled: !hasSel }" @click="ctxDelete">Delete</div>
       <div class="menu-divider"></div>
       <div class="menu-item" :class="{ disabled: !hasSel }" @click="ctxGroup">Group</div>
@@ -580,6 +581,11 @@ function ctxPaste() {
 
 function ctxDuplicate() {
   if (engine && store.hasSelection) engine.duplicateSelected()
+  hideMenu()
+}
+
+function ctxTransformAgain() {
+  if (engine && !engine.transformAgain()) store.setStatusMessage('No transform to repeat')
   hideMenu()
 }
 
