@@ -146,6 +146,7 @@ export const COMMAND_SHORTCUTS: Array<{ label: string; desc: string }> = [
   { label: 'X / Shift+X', desc: 'Flip Paint Target / Swap Fill + Stroke' },
   { label: '[ / ] on brush tools', desc: 'Brush Footprint (Shift = x5)' },
   { label: 'Arrow Keys', desc: 'Nudge (Shift x10, Ctrl tenth)' },
+  { label: 'Alt+Arrow', desc: 'Duplicate and Offset the Copy (AI)' },
   { label: 'Space (hold)', desc: 'Pan with the Hand Tool' },
   { label: 'Tab', desc: 'Presentation Mode' },
 ]
