@@ -130,6 +130,40 @@ describe('handleGlobalKeydown', () => {
     expect(store.setStatusMessage).toHaveBeenCalledWith('No transform to repeat')
   })
 
+  it('steps z-order on Ctrl+PgUp/PgDn and jumps on Shift variants (CDR parity)', () => {
+    const engine = {
+      bringForward: vi.fn(),
+      bringSelectionToFront: vi.fn(),
+      sendBackward: vi.fn(),
+      sendSelectionToBack: vi.fn(),
+    } as any
+    const store = { hasSelection: true } as any
+    handleGlobalKeydown(
+      key({ key: 'PageUp', code: 'PageUp', ctrlKey: true, target: null }) as KeyboardEvent,
+      store,
+      engine
+    )
+    expect(engine.bringForward).toHaveBeenCalledTimes(1)
+    handleGlobalKeydown(
+      key({ key: 'PageUp', code: 'PageUp', ctrlKey: true, shiftKey: true, target: null }) as KeyboardEvent,
+      store,
+      engine
+    )
+    expect(engine.bringSelectionToFront).toHaveBeenCalledTimes(1)
+    handleGlobalKeydown(
+      key({ key: 'PageDown', code: 'PageDown', ctrlKey: true, target: null }) as KeyboardEvent,
+      store,
+      engine
+    )
+    expect(engine.sendBackward).toHaveBeenCalledTimes(1)
+    handleGlobalKeydown(
+      key({ key: 'PageDown', code: 'PageDown', ctrlKey: true, shiftKey: true, target: null }) as KeyboardEvent,
+      store,
+      engine
+    )
+    expect(engine.sendSelectionToBack).toHaveBeenCalledTimes(1)
+  })
+
   it('micro-nudges by a tenth on Ctrl+Arrow (CDR parity)', () => {
     const engine = { getController: vi.fn(() => null), nudgeSelection: vi.fn(() => true) } as any
     const prevent = vi.fn()

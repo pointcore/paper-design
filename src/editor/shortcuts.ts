@@ -380,6 +380,16 @@ export function handleGlobalKeydown(
       if (e.shiftKey) engine?.sendSelectionToBack()
       else engine?.sendBackward()
       e.preventDefault()
+    } else if (e.key === 'PageUp' && !e.altKey && store.hasSelection) {
+      // CDR z-order keys alongside the AI brackets: Ctrl+PgUp forward one,
+      // Shift+Ctrl+PgUp all the way to the front.
+      if (e.shiftKey) engine?.bringSelectionToFront()
+      else engine?.bringForward()
+      e.preventDefault()
+    } else if (e.key === 'PageDown' && !e.altKey && store.hasSelection) {
+      if (e.shiftKey) engine?.sendSelectionToBack()
+      else engine?.sendBackward()
+      e.preventDefault()
     } else if (e.code === 'Semicolon' && !e.altKey) {
       // AI Ctrl+; : toggle guides (the grid lives on Ctrl+"). CanvasHost
       // watches the flag and refreshes the guide layer.
