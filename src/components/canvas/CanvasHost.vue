@@ -1,6 +1,6 @@
 <template>
-  <div class="canvas-host" ref="containerRef" :class="{ 'transparent-bg': store.view.transparentBackground }"
-       @dragover.prevent="onDragOver" @drop.prevent="onDropFiles">
+  <div class="canvas-host" ref="containerRef" :class="{ 'transparent-bg': store.view.transparentBackground, 'drop-hover': dropDepthRef > 0 }"
+       @dragenter.prevent="onDragEnter" @dragover.prevent="onDragOver" @dragleave="onDragLeave" @drop.prevent="onDropFiles">
     <!-- Horizontal ruler bar -->
     <div v-if="store.view.rulersVisible" class="ruler ruler-h" ref="rulerHRef"
          title="Drag out a guide · double-click adds one here"
@@ -691,6 +691,16 @@ function onDragOver(e: DragEvent) {
   if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
 }
 
+// dragenter/dragleave nest while crossing children — a depth counter keeps
+// the highlight stable until the pointer truly leaves.
+const dropDepthRef = ref(0)
+function onDragEnter() {
+  dropDepthRef.value++
+}
+function onDragLeave() {
+  dropDepthRef.value = Math.max(0, dropDepthRef.value - 1)
+}
+
 /** Drop position in document coords (images land there; SVG keeps file coords). */
 function dropPoint(e: DragEvent): paper.Point | undefined {
   if (!engine || !containerRef.value) return undefined
@@ -707,6 +717,7 @@ function dropPoint(e: DragEvent): paper.Point | undefined {
 }
 
 async function onDropFiles(e: DragEvent) {
+  dropDepthRef.value = 0
   if (!engine) return
   const files = [...(e.dataTransfer?.files ?? [])]
   if (files.length === 0) return
@@ -925,6 +936,16 @@ function removeGuideGhost() {
   position: relative;
   overflow: hidden;
   background: #1e1e1e;
+}
+
+.canvas-host.drop-hover::after {
+  content: '';
+  position: absolute;
+  inset: 8px;
+  border: 2px dashed #4a90d9;
+  border-radius: 6px;
+  pointer-events: none;
+  z-index: 30;
 }
 
 .canvas-host.transparent-bg {
