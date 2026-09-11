@@ -558,6 +558,13 @@ export const useEditorStore = defineStore('editor', {
       this.recentColors = next.slice(0, 12)
     },
 
+    /** Remove one color from the recent-colors strip (case-insensitive) */
+    removeRecentColor(color: string) {
+      const c = (color || '').trim().toLowerCase()
+      if (!c) return
+      this.recentColors = this.recentColors.filter((x) => x.toLowerCase() !== c)
+    },
+
     /** Replace the style preset list (load from storage) */
     setStylePresets(list: StylePreset[]) {
       this.stylePresets = Array.isArray(list) ? list.slice(0, 24) : []

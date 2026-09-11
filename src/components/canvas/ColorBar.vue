@@ -18,7 +18,7 @@
       <div class="chip chip-none" title="None" @click="clear()">×</div>
     </div>
     <div class="recent">
-      <div v-for="c in store.recentColors.slice(0, 8)" :key="'r' + c" class="chip chip-sm" :style="{ background: c }" :title="c" @click="apply(c, false)" />
+      <div v-for="c in store.recentColors.slice(0, 8)" :key="'r' + c" class="chip chip-sm" :style="{ background: c }" :title="c + ' (right-click to remove)'" @click="apply(c, false)" @contextmenu.prevent="store.removeRecentColor(c)" />
     </div>
     <input ref="colorInput" type="color" class="color-input" @change="onCustomPicked" />
   </div>
