@@ -54,6 +54,8 @@
               <el-dropdown-item command="deselect" :disabled="!store.hasSelection">Deselect</el-dropdown-item>
               <el-dropdown-item command="reselect" :disabled="store.lastSelection.length === 0">Reselect</el-dropdown-item>
               <el-dropdown-item command="invertSelection">Invert Selection</el-dropdown-item>
+              <el-dropdown-item command="selectBelow" :disabled="!store.hasSelection">Select Next Below</el-dropdown-item>
+              <el-dropdown-item command="selectAbove" :disabled="!store.hasSelection">Select Next Above</el-dropdown-item>
               <el-dropdown-item command="saveSelection" :disabled="!store.hasSelection">Save Selection...</el-dropdown-item>
               <el-dropdown-item command="findReplace" divided>Find &amp; Replace...</el-dropdown-item>
             </el-dropdown-menu>
@@ -2117,6 +2119,18 @@ function onEditCmd(cmd: string) {
     case 'deselect':
       e.clearSelection()
       break
+    case 'selectBelow':
+    case 'selectAbove': {
+      const sel = e.getController('select') as {
+        selectNextBelow?: () => boolean
+        selectNextAbove?: () => boolean
+      } | null
+      const ok = cmd === 'selectBelow'
+        ? sel?.selectNextBelow?.() ?? false
+        : sel?.selectNextAbove?.() ?? false
+      if (!ok) store.setStatusMessage('Nothing else is stacked at the selection')
+      break
+    }
     case 'cut':
       // Capture the OS copy before the cut deletes the selection.
       e.copyToSystemClipboard().catch(() => undefined)

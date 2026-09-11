@@ -2722,6 +2722,57 @@ export class SelectController {
     engine.scope.view.update()
   }
 
+  /**
+   * Object-menu parity (AI Select > Next Object Below/Above): from the
+   * first selected item, cycle the selection one step deeper (below) or
+   * shallower (above) through the unlocked user items stacked at its
+   * bounds center. Returns false when nothing is selected or stacked.
+   */
+  selectNextBelow(): boolean {
+    return this.selectNextInStack(1)
+  }
+
+  selectNextAbove(): boolean {
+    return this.selectNextInStack(-1)
+  }
+
+  private selectNextInStack(step: number): boolean {
+    const engine = this.engine
+    if (!engine) return false
+    const selected = engine.getSelection()
+    if (selected.length === 0) return false
+    const anchor = selected[0]
+    const b = (anchor as any).bounds as paper.Rectangle | undefined
+    if (!b || b.width <= 0 || b.height <= 0) return false
+    const center = new engine.scope.Point(b.x + b.width / 2, b.y + b.height / 2)
+    const hits = engine.project.hitTestAll(center, {
+      fill: true,
+      stroke: true,
+      segments: false,
+      tolerance: 3 / engine.scope.view.zoom,
+    })
+    const stack: paper.Item[] = []
+    for (const hit of hits) {
+      const item = hit.item
+      const data = (item.data as any) ?? {}
+      if (data.isChrome || data.isPreview || data.isGuide || data.isArtboard) continue
+      if ((item as any).locked) continue
+      stack.push(item)
+    }
+    const idx = stack.indexOf(anchor)
+    if (idx < 0 || stack.length < 2) return false
+    const next = stack[(idx + step + stack.length) % stack.length]
+    if (next === anchor) return false
+    this.clearAnchorSelection()
+    this.clearCurveSelection()
+    engine.clearSelection()
+    engine.selectItem(next, false)
+    engine.syncSelectionToStore()
+    this.refreshChrome()
+    engine.scope.view.update()
+    return true
+  }
+
   private hitTest(point: paper.Point): paper.HitResult | null {
     const engine = this.engine
     if (!engine) return null
