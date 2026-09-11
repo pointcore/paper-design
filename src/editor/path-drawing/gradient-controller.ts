@@ -155,6 +155,15 @@ export class GradientController {
     this.engine?.scope.view.update()
   }
 
+  /**
+   * Tool switch: the paper Tool is replaced so the gesture's mouse-up
+   * never arrives — cancel the in-flight gesture (same cleanup as
+   * Escape) instead of leaving its preview behind.
+   */
+  deactivate() {
+    if (this.dragging) this.cancelDrag()
+  }
+
   private cancelDrag() {
     const engine = this.engine
     this.dragging = false

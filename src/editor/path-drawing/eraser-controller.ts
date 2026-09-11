@@ -226,6 +226,15 @@ export class EraserController {
   }
 
   /** Drop the in-progress stroke without touching the artwork. */
+  /**
+   * Tool switch: the paper Tool is replaced so the gesture's mouse-up
+   * never arrives — cancel the in-flight gesture (same cleanup as
+   * Escape) instead of leaving its preview behind.
+   */
+  deactivate() {
+    if (this.isErasing) this.cancelStroke()
+  }
+
   private cancelStroke() {
     if (this.stroke) {
       this.stroke.remove()
