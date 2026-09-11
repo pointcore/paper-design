@@ -139,6 +139,8 @@
               <el-dropdown-item command="sameBlend" :disabled="!store.hasSelection">Select Same Blend Mode</el-dropdown-item>
               <el-dropdown-item command="selectStrays">Select Stray Points</el-dropdown-item>
               <el-dropdown-item command="selectTexts">Select Text Objects</el-dropdown-item>
+              <el-dropdown-item command="sameFontFamily" :disabled="!store.hasSelection">Select Same Font Family</el-dropdown-item>
+              <el-dropdown-item command="sameFontSize" :disabled="!store.hasSelection">Select Same Font Size</el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
@@ -2248,6 +2250,12 @@ function onEditCmd(cmd: string) {
     case 'selectAllBoard': {
       const n = e.selectAllOnActiveArtboard()
       if (n === 0) store.setStatusMessage('Nothing on the active artboard')
+      break
+    }
+    case 'sameFontFamily':
+    case 'sameFontSize': {
+      const n = e.selectSameTextFont(cmd === 'sameFontFamily' ? 'family' : 'size')
+      store.setStatusMessage(n === 0 ? 'Select a text object first' : `Selected ${n} matching text item${n === 1 ? '' : 's'}`)
       break
     }
     case 'selectBelow':

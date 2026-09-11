@@ -4908,6 +4908,40 @@ export class EditorEngine {
     return matches.length
   }
 
+  /**
+   * AI Select > Same > Font Family / Font Size: select every unlocked text
+   * item sharing the first selected text item's font family (or size).
+   * Returns the match count; 0 when the selection holds no text.
+   */
+  selectSameTextFont(by: 'family' | 'size'): number {
+    const scope = this.scope
+    const reference = this.getSelection().find(
+      (item) => item instanceof scope.PointText && !item.locked
+    ) as paper.PointText | undefined
+    if (!reference) return 0
+    const refValue = by === 'family'
+      ? String(reference.fontFamily || '')
+      : Math.round((Number(reference.fontSize) || 0) * 100) / 100
+    const matches: paper.PointText[] = []
+    for (const item of this.walkUserItems()) {
+      if (!(item instanceof scope.PointText) || (item as any).locked) continue
+      if (item === reference) continue
+      const value = by === 'family'
+        ? String(item.fontFamily || '')
+        : Math.round((Number(item.fontSize) || 0) * 100) / 100
+      if (value === refValue) matches.push(item)
+    }
+    if (matches.length === 0) return 0
+    this.clearSelection()
+    reference.selected = true
+    matches.forEach((item) => {
+      item.selected = true
+    })
+    this.syncSelectionToStore()
+    this.scope.view.update()
+    return matches.length
+  }
+
   /** Fill / stroke / width / opacity / blend key used by select-same. */
   private appearanceKey(item: paper.Item, attribute: 'fill' | 'stroke' | 'strokeWidth' | 'opacity' | 'blendMode'): string {
     if (attribute === 'strokeWidth') return `w:${Math.round((Number((item as any).strokeWidth) || 0) * 100) / 100}`
