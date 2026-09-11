@@ -68,6 +68,7 @@
               <el-dropdown-item command="offsetPath" :disabled="!store.hasSelection">Offset Path...</el-dropdown-item>
               <el-dropdown-item command="simplifyPath" :disabled="!store.hasSelection">Simplify Path</el-dropdown-item>
               <el-dropdown-item command="addAnchors" :disabled="!store.hasSelection">Add Anchor Points</el-dropdown-item>
+              <el-dropdown-item command="roughen" :disabled="!store.hasSelection">Roughen / Zig Zag...</el-dropdown-item>
               <el-dropdown-item command="reversePath" :disabled="!store.hasSelection">Reverse Path Direction</el-dropdown-item>
               <el-dropdown-item command="cleanUp">Clean Up...</el-dropdown-item>
               <el-dropdown-item command="arrowheads" :disabled="!store.hasSelection">Add Arrowheads...</el-dropdown-item>
@@ -379,8 +380,7 @@
       </div>
     </AppDialog>
 
-    <!-- Offset Path Dialog (AI Offset Path parity) -->
-    <AppDialog
+    <!-- Offset Path Dialog (AI Offset Path parity) -->    <AppDialog
       v-model="offsetVisible"
       title="Offset Path"
       :width="360"
@@ -406,6 +406,43 @@
             <el-option value="round" label="Round" />
             <el-option value="bevel" label="Bevel" />
           </el-select>
+        </div>
+      </div>
+    </AppDialog>
+
+    <!-- Roughen Dialog (AI Roughen parity, destructive) -->
+    <AppDialog
+      v-model="roughenVisible"
+      title="Roughen / Zig Zag"
+      :width="360"
+      confirm-text="Apply"
+      cancel-text="Close"
+      @confirm="onRoughenConfirm"
+      @cancel="roughenVisible = false"
+    >
+      <div class="settings-body app-settings">
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Effect</span>
+          </div>
+          <el-select v-model="roughenForm.kind" size="small" style="width: 130px">
+            <el-option value="roughen" label="Roughen" />
+            <el-option value="zigzag" label="Zig Zag" />
+          </el-select>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Size</span>
+            <span class="setting-desc">Jitter / ridge height in px</span>
+          </div>
+          <el-input-number v-model="roughenForm.size" :min="1" :max="500" size="small" style="width: 130px" />
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Detail</span>
+            <span class="setting-desc">Subdivisions per curve</span>
+          </div>
+          <el-input-number v-model="roughenForm.detail" :min="1" :max="10" size="small" style="width: 130px" />
         </div>
       </div>
     </AppDialog>
@@ -608,6 +645,25 @@ function onOffsetConfirm() {
     return
   }
   offsetVisible.value = false
+}
+
+const roughenVisible = ref(false)
+const roughenForm = reactive({
+  kind: 'roughen' as 'roughen' | 'zigzag',
+  size: 8,
+  detail: 3,
+})
+function onRoughenConfirm() {
+  const e = engineRef?.value
+  if (!e) {
+    roughenVisible.value = false
+    return
+  }
+  if (e.stylizeRoughen(roughenForm.kind, Number(roughenForm.size), Number(roughenForm.detail)) === 0) {
+    store.setStatusMessage('Roughen needs a path selection')
+    return
+  }
+  roughenVisible.value = false
 }
 
 const arrowVisible = ref(false)
@@ -1497,6 +1553,9 @@ function onObjectCmd(cmd: string) {
       if (e.addAnchorPoints() === 0) {
         store.setStatusMessage('Add Anchors needs a path selection')
       }
+      break
+    case 'roughen':
+      roughenVisible.value = true
       break
     case 'reversePath':
       if (e.reversePaths() === 0) {

@@ -81,7 +81,6 @@ function placeSymbol(id: string) {
     store.setStatusMessage('Cannot place that symbol')
   }
 }
-
 function deleteSymbol(id: string) {
   if (!getEngine()?.deleteSymbol(id)) {
     store.setStatusMessage('Cannot delete that symbol')
@@ -107,6 +106,7 @@ function swapInstances() {
     store.setStatusMessage('Select placed instances to swap')
   } else {
     store.setStatusMessage(`Swapped ${n} instance${n === 1 ? '' : 's'}`)
+    ;(store as any).setSpraySymbol?.(pickedId.value)
   }
 }
 

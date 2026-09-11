@@ -142,7 +142,7 @@ const getEngine = () => engineRef?.value ?? null
 
 const toolLabel = computed(() => {
   const names: Record<string, string> = {
-    select: 'Select', 'direct-select': 'Direct Select', lasso: 'Lasso', wand: 'Wand', pen: 'Pen', curvature: 'Curvature',
+    select: 'Select', 'direct-select': 'Direct Select', lasso: 'Lasso', wand: 'Wand', reshape: 'Reshape', spray: 'Spray', pen: 'Pen', curvature: 'Curvature',
     'add-anchor': 'Add Anchor', 'delete-anchor': 'Delete Anchor', 'convert-anchor': 'Convert Anchor',
     type: 'Point Text', 'area-type': 'Area Text', 'type-on-path': 'Type on Path', 'vertical-type': 'Vertical Text',
     rect: 'Rectangle', 'rounded-rect': 'Rounded Rect', ellipse: 'Ellipse', polygon: 'Polygon',
@@ -158,6 +158,8 @@ const toolHint = computed(() => {
   switch (store.tool) {
     case 'lasso': return 'Drag a loop · Shift adds · Alt removes'
     case 'wand': return 'Click a fill · Shift-click adds'
+    case 'reshape': return 'Drag to push anchors in a 120px radius'
+    case 'spray': return 'Drag to scatter the spray symbol'
     case 'gradient': return 'Drag to set the angle · Shift = 45° snap'
     case 'rotate': return 'Drag to rotate · Shift = 45° snap'
     case 'scale': return 'Drag to scale · Shift = 10% snap'

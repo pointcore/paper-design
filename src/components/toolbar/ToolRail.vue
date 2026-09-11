@@ -125,11 +125,13 @@ const groups: ToolGroup[] = [
     { name: 'blob-brush', tip: 'Blob Brush Tool (Shift+B)', icon: Lollipop },
     { name: 'brush', tip: 'Brush Tool (B)', icon: Brush },
     { name: 'eraser', tip: 'Eraser Tool (Shift+E)', icon: Delete },
+    { name: 'spray', tip: 'Symbol Sprayer (drag to scatter, needs a symbol)', glyph: '⁂' },
   ] },
   { key: 'edit', members: [
     { name: 'scissors', tip: 'Scissors Tool (C)', icon: Scissor },
     { name: 'shape-builder', tip: 'Shape Builder Tool (Shift+M)', icon: Share },
     { name: 'width', tip: 'Width Tool (Shift+W)', icon: Expand },
+    { name: 'reshape', tip: 'Reshape Tool (drag to push anchors)', glyph: '〰' },
     { name: 'gradient', tip: 'Gradient Tool (G, drag to set angle)', glyph: '🌈' },
     { name: 'eyedropper', tip: 'Eyedropper Tool (I, Alt = sample only)', icon: Stamp },
   ] },

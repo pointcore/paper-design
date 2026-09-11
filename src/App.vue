@@ -168,6 +168,8 @@ const currentToolName = computed(() => {
     brush: 'Brush',
     eraser: 'Eraser',
     gradient: 'Gradient',
+    reshape: 'Reshape',
+    spray: 'Spray',
     wand: 'Wand',
     eyedropper: 'Eyedropper',
     scissors: 'Scissors',
