@@ -44,6 +44,8 @@ export class AnchorController {
 
   // Convert-anchor drag state.
   private isDragging = false
+  /** Mouse-up closure, replayed by deactivate when a drag is orphaned. */
+  private mouseUpRef: (() => void) | null = null
   private dragAnchorPath: paper.Path | null = null
   private dragAnchorIndex = -1
   private pressPoint: paper.Point | null = null
@@ -123,7 +125,7 @@ export class AnchorController {
       scope.view.update()
     }
 
-    scope.tool.onMouseUp = () => {
+    const finishMouseUp = () => {
       // Whether the segment's chrome should be redrawn / kept visible.
       let showSegmentChrome = false
       let chromePath: paper.Path | null = null
@@ -174,6 +176,8 @@ export class AnchorController {
       }
       scope.view.update()
     }
+    this.mouseUpRef = finishMouseUp
+    scope.tool.onMouseUp = finishMouseUp
 
     scope.tool.onKeyDown = (event: paper.KeyEvent) => {
       // Never steal keystrokes typed into panel inputs or dialogs.
@@ -186,6 +190,15 @@ export class AnchorController {
     }
 
     scope.view.update()
+  }
+
+  /**
+   * Tool switch: the paper Tool is replaced so the drag's mouse-up never
+   * arrives — replay the recorded mouse-up so an anchor/handle move still
+   * records its history and the drag flags reset.
+   */
+  deactivate() {
+    if (this.isDragging) this.mouseUpRef?.()
   }
 
   private endDrag() {

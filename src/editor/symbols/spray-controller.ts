@@ -17,6 +17,8 @@ const SPRAY_SPACING = 24
 export class SprayController {
   engine: EditorEngine | null = null
   private spraying = false
+  /** Mouse-up closure, replayed by deactivate when a drag is orphaned. */
+  private finishRef: (() => void) | null = null
   private last: { x: number; y: number } | null = null
   private carry = 0
   private placed: paper.SymbolItem[] = []
@@ -40,6 +42,15 @@ export class SprayController {
     const entries = engine.listSymbols()
     if (wanted && entries.some((s) => s.id === wanted)) return wanted
     return entries.length > 0 ? entries[0].id : ''
+  }
+
+  /**
+   * Tool switch: finish an in-flight spray so the scattered instances get
+   * their selection, history entry and status readout (same closure as the
+   * real mouse-up).
+   */
+  deactivate() {
+    if (this.spraying) this.finishRef?.()
   }
 
   private setupTool() {
@@ -95,6 +106,7 @@ export class SprayController {
       scope.view.update()
     }
     scope.tool.onMouseUp = finish
+    this.finishRef = finish
 
     scope.tool.onMouseMove = (event: paper.ToolEvent) => {
       engine.store.setCursorPos(event.point.x, event.point.y)

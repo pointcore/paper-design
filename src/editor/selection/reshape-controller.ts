@@ -18,6 +18,8 @@ const RESHAPE_RADIUS = 120
 export class ReshapeController {
   engine: EditorEngine | null = null
   private dragging = false
+  /** Mouse-up closure, replayed by deactivate when a drag is orphaned. */
+  private finishRef: (() => void) | null = null
   private last: { x: number; y: number } | null = null
   private ring: paper.Path | null = null
   private moved = false
@@ -31,6 +33,15 @@ export class ReshapeController {
     this.cancelStroke()
     this.setupTool()
     applyToolCursor(this.engine.canvas, 'reshape')
+  }
+
+  /**
+   * Tool switch: the paper Tool is replaced so the drag's mouse-up never
+   * arrives — finish the gesture instead of leaving a moved-but-unrecorded
+   * selection (Escape-time finishing uses the same closure).
+   */
+  deactivate() {
+    if (this.dragging) this.finishRef?.()
   }
 
   private setupTool() {
@@ -73,6 +84,7 @@ export class ReshapeController {
       }
     }
     scope.tool.onMouseUp = finish
+    this.finishRef = finish
 
     scope.tool.onMouseMove = (event: paper.ToolEvent) => {
       engine.store.setCursorPos(event.point.x, event.point.y)
