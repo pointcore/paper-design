@@ -6,6 +6,7 @@ import { SelectController } from './selection/select-controller'
 import { LassoController } from './selection/lasso-controller'
 import { WandController } from './selection/wand-controller'
 import { ReshapeController } from './selection/reshape-controller'
+import { SmoothController } from './smooth/smooth-controller'
 import { SprayController } from './symbols/spray-controller'
 import { PenController } from './path-drawing/pen-controller'
 import { PencilController } from './path-drawing/pencil-controller'
@@ -40,6 +41,7 @@ export function registerAllControllers(engine: EditorEngine) {
 
   // Reshape brush (push nearby anchors with falloff)
   engine.registerController('reshape', new ReshapeController())
+  engine.registerController('smooth', new SmoothController())
 
   // Symbol sprayer (scatter instances along a drag)
   engine.registerController('spray', new SprayController())

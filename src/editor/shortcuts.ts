@@ -57,6 +57,7 @@ export const TOOL_SHORTCUTS: Record<ToolName, ShortcutDef | null> = {
   eraser:          { label: 'Shift+E', match: (e) => e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey && key(e) === 'e' },
   gradient:        { label: 'G',    match: (e) => key(e) === 'g' },
   reshape:         null,
+  smooth:          null,
   spray:           null,
   wand:            { label: 'Y',    match: (e) => key(e) === 'y' },
   scissors:        { label: 'C',    match: (e) => !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey && key(e) === 'c' },
