@@ -36,6 +36,7 @@
       <div class="menu-item" :class="{ disabled: !hasSel }" @click="ctxCopy">Copy</div>
       <div class="menu-item" :class="{ disabled: !hasSel }" @click="ctxCut">Cut</div>
       <div class="menu-item" @click="ctxPaste">Paste</div>
+      <div class="menu-item" :class="{ disabled: !hasSel }" @click="ctxDuplicate">Duplicate</div>
       <div class="menu-item" :class="{ disabled: !hasSel }" @click="ctxDelete">Delete</div>
       <div class="menu-divider"></div>
       <div class="menu-item" :class="{ disabled: !hasSel }" @click="ctxGroup">Group</div>
@@ -573,6 +574,11 @@ function ctxCut() {
 
 function ctxPaste() {
   engine?.pasteWithSystemFallback()?.catch(() => undefined)
+  hideMenu()
+}
+
+function ctxDuplicate() {
+  if (engine && store.hasSelection) engine.duplicateSelected()
   hideMenu()
 }
 
