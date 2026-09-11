@@ -8,7 +8,7 @@ import { createDefaultStyle } from './store'
 import { cursorForTool } from './cursors'
 import { gradientAngleFromVector, linearGradientEndpoints, normalizeAngleDeg } from './geometry'
 import { changeCaseText } from './text/text-case'
-import { colorDistanceRgb, isOutOfCmykGamut, parseCssColor, rgbToCmyk, shiftCssColor } from './color'
+import { colorDistanceRgb, invertCssColor, isOutOfCmykGamut, parseCssColor, rgbToCmyk, shiftCssColor } from './color'
 import { parseProjectFile } from './project-file'
 import type { EditorStore } from './store-types'
 
@@ -4266,6 +4266,20 @@ export class EditorEngine {
   }
 
   /**
+   * Ungroup recursively until no selected group remains (cycle-guarded).
+   * Each level records its own history entry, like repeated Ungroup.
+   * Returns levels released.
+   */
+  ungroupAllSelected(): number {
+    let levels = 0
+    for (let i = 0; i < 100; i++) {
+      if (!this.ungroupSelection()) break
+      levels++
+    }
+    return levels
+  }
+
+  /**
    * Select every visible unlocked top-level user item across all layers.
    */
   selectAllArtwork(): void {
@@ -5083,6 +5097,102 @@ export class EditorEngine {
       this.showStatus('Image adjust failed')
     }
     return true
+  }
+
+  /**
+   * Downsample every selected raster to a fraction of its pixels (file /
+   * history diet for photo-heavy documents): each raster re-encodes at
+   * `factor` and scales back into its old bounds at the same slot.
+   * Tainted sources fail gracefully per item. Histories record once when
+   * all loads settle. Returns rasters queued.
+   */
+  downsampleImages(factor: number): number {
+    const scope = this.scope
+    const f = Number.isFinite(factor) ? Math.min(0.75, Math.max(0.25, factor)) : 0.5
+    const targets: paper.Raster[] = []
+    const walk = (node: paper.Item) => {
+      if ((node as any).locked || !node.parent) return
+      if (node instanceof scope.Raster) {
+        targets.push(node)
+        return
+      }
+      const children = (node as any).children as paper.Item[] | undefined
+      if (children) for (const child of children) walk(child)
+    }
+    for (const item of this.getSelection()) walk(item)
+    if (targets.length === 0) return 0
+    let pending = targets.length
+    let done = 0
+    const finished: paper.Item[] = []
+    const settle = (ok: boolean) => {
+      if (ok) done++
+      pending--
+      if (pending === 0) {
+        if (done > 0) {
+          this.pushHistory('Downsample Images')
+          this.scope.view.update()
+          this.showStatus(`Downsampled ${done} image${done === 1 ? '' : 's'}`)
+        } else {
+          this.showStatus('Downsample failed')
+        }
+      }
+    }
+    for (const source of targets) {
+      const canvas = (source as any).canvas as HTMLCanvasElement | undefined
+      const bounds = (source as any).bounds as paper.Rectangle | undefined
+      if (!canvas || canvas.width < 2 || canvas.height < 2 || !bounds) {
+        settle(false)
+        continue
+      }
+      let url: string | null = null
+      try {
+        const out = document.createElement('canvas')
+        out.width = Math.max(1, Math.round(canvas.width * f))
+        out.height = Math.max(1, Math.round(canvas.height * f))
+        const ctx = out.getContext('2d')
+        if (!ctx) {
+          settle(false)
+          continue
+        }
+        ctx.drawImage(canvas, 0, 0, out.width, out.height)
+        url = out.toDataURL('image/png')
+      } catch {
+        settle(false)
+        continue
+      }
+      const parent = source.parent ?? this.getActiveLayer()
+      const at = parent.children.indexOf(source as any)
+      const opacity = (source as any).opacity
+      const next = new scope.Raster({ source: url }) as paper.Raster
+      parent.insertChild(Math.min(Math.max(at, 0), parent.children.length), next as any)
+      next.onLoad = () => {
+        const nb = (next as any).bounds as paper.Rectangle | undefined
+        if (nb && nb.width > 0 && nb.height > 0) {
+          next.scale(bounds.width / nb.width, bounds.height / nb.height)
+        }
+        next.position = bounds.center.clone()
+        next.opacity = opacity
+        next.data.id = this.genId()
+        next.data.isUserItem = true
+        try {
+          source.remove()
+        } catch { /* already gone */ }
+        finished.push(next as paper.Item)
+        this.clearSelection()
+        finished.forEach((item) => {
+          item.selected = true
+        })
+        this.syncSelectionToStore()
+        settle(true)
+      }
+      next.onError = () => {
+        try {
+          next.remove()
+        } catch { /* already gone */ }
+        settle(false)
+      }
+    }
+    return targets.length
   }
 
   /**
@@ -6673,6 +6783,78 @@ export class EditorEngine {
       this.scope.view.update()
     }
     return changed
+  }
+
+  /**
+   * Channel-invert solid fills and strokes on the unlocked selection
+   * (gradients skipped). Returns leaves repainted; one history entry.
+   */
+  invertPaints(): number {
+    const scope = this.scope
+    let changed = 0
+    const repaint = (leaf: paper.Item) => {
+      const anyLeaf = leaf as any
+      let touched = false
+      for (const key of ['fillColor', 'strokeColor'] as const) {
+        const paint = anyLeaf[key]
+        if (!paint || paint.gradient) continue
+        const css = this.colorToCSS(paint)
+        if (!css) continue
+        try {
+          anyLeaf[key] = new scope.Color(invertCssColor(css))
+          touched = true
+        } catch {
+          continue
+        }
+      }
+      if (touched) changed++
+    }
+    for (const item of this.getSelection()) {
+      if ((item as any).locked) continue
+      const leaf = this.firstLeaf(item)
+      if (!leaf) continue
+      if (leaf !== item && item instanceof scope.Group) {
+        const walk = (node: paper.Item) => {
+          if ((node as any).locked) return
+          if (node instanceof scope.Path || node instanceof scope.CompoundPath || node instanceof scope.PointText) {
+            repaint(node)
+          } else {
+            const kids = (node as any).children as paper.Item[] | undefined
+            if (kids) for (const k of kids) walk(k)
+          }
+        }
+        for (const child of ((item as any).children ?? []) as paper.Item[]) walk(child)
+      } else {
+        repaint(leaf)
+      }
+    }
+    if (changed > 0) {
+      this.reflowTextsForItems(this.getSelection())
+      this.pushHistory('Invert Colors')
+      this.scope.view.update()
+    }
+    return changed
+  }
+
+  /**
+   * Swap fill and stroke everywhere: store defaults plus every unlocked
+   * selected item (AI Shift+X parity, same per-item semantics the color
+   * bar always had). One history entry when art changes.
+   */
+  swapFillStroke(): void {
+    const f = this.store.style.fillColor
+    const s = this.store.style.strokeColor
+    this.store.updateStyle({ fillColor: s, strokeColor: f })
+    const items = this.getSelection().filter((item) => !item.locked && item.parent)
+    for (const item of items) {
+      const anyItem = item as any
+      const pf = anyItem.fillColor
+      anyItem.fillColor = anyItem.strokeColor ?? null
+      if (anyItem.strokeColor !== undefined) anyItem.strokeColor = pf ?? null
+    }
+    this.scope.view.update()
+    if (items.length > 0) this.pushHistory('Swap Fill Stroke')
+    else this.showStatus('Fill and stroke swapped')
   }
 
   /**

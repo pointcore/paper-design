@@ -181,6 +181,8 @@ export const useEditorStore = defineStore('editor', {
     pencilSmooth: 2.5,
     /** Magic-wand fill tolerance in RGB distance (0 = exact match) */
     wandTolerance: 0,
+    /** Fill/stroke paint target (AI X parity, shared by the color bar) */
+    paintTarget: 'fill' as 'fill' | 'stroke',
     /** Symbol the sprayer scatters ('' = first library entry) */
     spraySymbolId: '',
     spiralTurns: 3,
@@ -552,6 +554,12 @@ export const useEditorStore = defineStore('editor', {
     },
     setWandTolerance(n: number) {
       if (Number.isFinite(n)) this.wandTolerance = Math.min(100, Math.max(0, Math.round(n)))
+    },
+    setPaintTarget(t: 'fill' | 'stroke') {
+      this.paintTarget = t
+    },
+    togglePaintTarget() {
+      this.paintTarget = this.paintTarget === 'fill' ? 'stroke' : 'fill'
     },
     setSpraySymbol(id: string) {
       this.spraySymbolId = typeof id === 'string' ? id : ''

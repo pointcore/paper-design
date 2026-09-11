@@ -1,5 +1,5 @@
 <template>
-  <div class="color-bar" title="Click = apply to target · target toggles with F/X">
+  <div class="color-bar" title="Click = apply to target · X toggles target · Shift+X swaps">
     <div class="fillstroke">
       <div class="fs-chip fs-stroke" :style="{ borderColor: '#555', background: strokePreview }" title="Stroke (Alt-click palette applies here)">
         <span>S</span>
@@ -7,11 +7,11 @@
       <div class="fs-chip fs-fill" :style="{ background: fillPreview }" title="Fill (click palette applies here)">
         <span>F</span>
       </div>
-      <el-button size="small" class="swap-btn" title="Swap fill and stroke" @click="swap">⇄</el-button>
+      <el-button size="small" class="swap-btn" title="Swap fill and stroke (Shift+X)" @click="swap">⇄</el-button>
     </div>
     <div class="target-toggle">
-      <el-button size="small" :type="target === 'fill' ? 'primary' : ''" @click="target = 'fill'">Fill</el-button>
-      <el-button size="small" :type="target === 'stroke' ? 'primary' : ''" @click="target = 'stroke'">Stroke</el-button>
+      <el-button size="small" :type="target === 'fill' ? 'primary' : ''" @click="store.setPaintTarget('fill')">Fill</el-button>
+      <el-button size="small" :type="target === 'stroke' ? 'primary' : ''" @click="store.setPaintTarget('stroke')">Stroke</el-button>
     </div>
     <div class="palette">
       <div v-for="c in palette" :key="c" class="chip" :style="{ background: c }" :title="c + (target === 'fill' ? ' (fill)' : ' (stroke)')" @click="apply(c, false)" @contextmenu.prevent="apply(c, true)" />
@@ -24,7 +24,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, inject, type Ref, onMounted, onUnmounted } from 'vue'
+import { computed, inject, type Ref } from 'vue'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
 
@@ -32,7 +32,8 @@ const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
 const getEngine = () => engineRef?.value ?? null
 
-const target = ref<'fill' | 'stroke'>('fill')
+/** Shared paint target (X flips it, Shift+X swaps the paints). */
+const target = computed(() => store.paintTarget)
 const palette = [
   '#000000', '#ffffff', '#ff0000', '#ff8000', '#ffff00', '#80ff00',
   '#00ff00', '#00ffff', '#0080ff', '#0000ff', '#8000ff', '#ff00ff',
@@ -78,29 +79,14 @@ function clear() {
 }
 
 function swap() {
-  const f = store.style.fillColor
-  const s = store.style.strokeColor
-  store.updateStyle({ fillColor: s, strokeColor: f })
-  const engine = getEngine()
-  engine?.getSelection().forEach((item: any) => {
-    const pf = item.fillColor
-    item.fillColor = item.strokeColor ?? null
-    if (item.strokeColor !== undefined) item.strokeColor = pf ?? null
-  })
-  engine?.scope.view.update()
-  if (store.hasSelection) engine?.pushHistory('Swap Fill Stroke')
-}
-
-function onKey(e: KeyboardEvent) {
-  const el = e.target as HTMLElement | null
-  if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return
-  if (e.ctrlKey || e.metaKey || e.altKey) return
-  if (e.key.toLowerCase() === 'x') {
-    target.value = target.value === 'fill' ? 'stroke' : 'fill'
+  const e = getEngine()
+  if (e) {
+    e.swapFillStroke()
+    return
   }
+  const f = store.style.fillColor
+  store.updateStyle({ fillColor: store.style.strokeColor, strokeColor: f })
 }
-onMounted(() => window.addEventListener('keydown', onKey))
-onUnmounted(() => window.removeEventListener('keydown', onKey))
 </script>
 
 <style scoped>

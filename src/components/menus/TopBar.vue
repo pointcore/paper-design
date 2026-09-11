@@ -63,6 +63,7 @@
               <el-dropdown-item command="sendToBack" :disabled="!store.hasSelection">Send to Back</el-dropdown-item>
               <el-dropdown-item command="group" divided :disabled="!store.hasSelection">Group</el-dropdown-item>
               <el-dropdown-item command="ungroup" :disabled="!store.hasSelection">Ungroup</el-dropdown-item>
+              <el-dropdown-item command="ungroupAll" :disabled="!store.hasSelection">Ungroup All</el-dropdown-item>
               <el-dropdown-item command="newSublayer">New Sublayer</el-dropdown-item>
               <el-dropdown-item command="collect" :disabled="!store.hasSelection">Collect in New Layer</el-dropdown-item>
               <el-dropdown-item command="releaseLayers" :disabled="!store.hasSelection">Release to Layers</el-dropdown-item>
@@ -87,6 +88,7 @@
               <el-dropdown-item command="rasterize" :disabled="!store.hasSelection">Rasterize Selection (2x)</el-dropdown-item>
               <el-dropdown-item command="extractImage" :disabled="!store.hasSelection">Extract Image...</el-dropdown-item>
               <el-dropdown-item command="adjustImage" :disabled="!store.hasSelection">Adjust Image...</el-dropdown-item>
+              <el-dropdown-item command="downsample" :disabled="!store.hasSelection">Downsample Images...</el-dropdown-item>
               <el-dropdown-item command="replaceImage" :disabled="!store.hasSelection">Replace Image...</el-dropdown-item>
               <el-dropdown-item command="closePath" :disabled="!store.hasSelection">Close Path</el-dropdown-item>
               <el-dropdown-item command="openPath" :disabled="!store.hasSelection">Open Path</el-dropdown-item>
@@ -655,6 +657,9 @@
           </div>
           <el-input-number v-model="recolorForm.light" :min="-100" :max="100" size="small" style="width: 130px" />
         </div>
+        <div class="setting-row">
+          <el-button size="small" :disabled="!store.hasSelection" @click="onInvertNow">Invert Selection Paints</el-button>
+        </div>
       </div>
     </AppDialog>
 
@@ -718,8 +723,7 @@
       </div>
     </AppDialog>
 
-    <!-- Adjust Image Dialog (bitmap-effects lite, destructive) -->
-    <AppDialog
+    <!-- Adjust Image Dialog (bitmap-effects lite, destructive) -->    <AppDialog
       v-model="imageVisible"
       title="Adjust Image"
       :width="360"
@@ -746,6 +750,31 @@
             <span class="setting-desc">Percent, applies with the preset</span>
           </div>
           <el-input-number v-model="imageForm.brightness" :min="50" :max="150" size="small" style="width: 130px" />
+        </div>
+      </div>
+    </AppDialog>
+
+    <!-- Downsample Dialog (file/history diet for photo-heavy docs) -->
+    <AppDialog
+      v-model="downsampleVisible"
+      title="Downsample Images"
+      :width="360"
+      confirm-text="Apply"
+      cancel-text="Close"
+      @confirm="onDownsampleConfirm"
+      @cancel="downsampleVisible = false"
+    >
+      <div class="settings-body app-settings">
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Scale</span>
+            <span class="setting-desc">Pixel fraction (visual size kept)</span>
+          </div>
+          <el-select v-model="downsampleForm.factor" size="small" style="width: 130px">
+            <el-option :value="0.75" label="75%" />
+            <el-option :value="0.5" label="50%" />
+            <el-option :value="0.25" label="25%" />
+          </el-select>
         </div>
       </div>
     </AppDialog>
@@ -1012,6 +1041,14 @@ function onRecolorConfirm() {
   recolorVisible.value = false
 }
 
+function onInvertNow() {
+  const e = engineRef?.value
+  if (!e) return
+  if (e.invertPaints() === 0) {
+    store.setStatusMessage('Invert needs painted artwork selected')
+  }
+}
+
 const saveVisible = ref(false)
 const saveName = ref('project')
 function onSaveConfirm() {
@@ -1044,6 +1081,21 @@ function onImageConfirm() {
     return
   }
   imageVisible.value = false
+}
+
+const downsampleVisible = ref(false)
+const downsampleForm = reactive({ factor: 0.5 })
+function onDownsampleConfirm() {
+  const e = engineRef?.value
+  if (!e) {
+    downsampleVisible.value = false
+    return
+  }
+  if (e.downsampleImages(Number(downsampleForm.factor) || 0.5) === 0) {
+    store.setStatusMessage('Downsample needs a selected image')
+    return
+  }
+  downsampleVisible.value = false
 }
 
 const findVisible = ref(false)
@@ -1947,6 +1999,11 @@ function onObjectCmd(cmd: string) {
     case 'ungroup':
       e.ungroupSelection()
       break
+    case 'ungroupAll': {
+      const levels = e.ungroupAllSelected()
+      store.setStatusMessage(levels > 0 ? `Ungrouped ${levels} level${levels === 1 ? '' : 's'}` : 'Select a group to ungroup')
+      break
+    }
     case 'newSublayer':
       if (!e.createSublayer()) {
         store.setStatusMessage('Cannot create sublayer here')
@@ -2122,6 +2179,9 @@ function onObjectCmd(cmd: string) {
     }
     case 'adjustImage':
       imageVisible.value = true
+      break
+    case 'downsample':
+      downsampleVisible.value = true
       break
     case 'adjustColors':
       recolorVisible.value = true
@@ -2436,7 +2496,7 @@ function onNudgeStepChange(val: number | undefined) {
 }
 
 function onHelp() {
-  store.setStatusMessage('Shortcuts: V Select | A Direct | Q Lasso | Y Wand | P Pen | N Pencil | Shift+E Eraser | Shift+B Blob | B Brush | G Gradient | C Scissors | Shift+M Builder | Shift+W Width | Shift+R Rotate | Shift+S Scale | Shift+O Mirror | Shift+F FreeTf | +/- & Shift+C Anchors | [ ] Brush Size | Tab Present | Space Pan | Ctrl+0 Fit | Arrows Nudge | Ctrl+A Select | Ctrl+Shift+A Reselect | Ctrl+D Duplicate | Ctrl+G Group | Ctrl+2 Lock | Ctrl+3 Hide | Ctrl+C/X/V Clipb | Ctrl+Shift+C PNG | Ctrl+F/B Paste | Ctrl+[ Order | Ctrl+S Save | Ctrl+Shift+I Invert | Esc Cancel')
+  store.setStatusMessage('Shortcuts: V Select | A Direct | Q Lasso | Y Wand | P Pen | N Pencil | Shift+E Eraser | Shift+B Blob | B Brush | G Gradient | C Scissors | Shift+M Builder | Shift+W Width | Shift+R Rotate | Shift+S Scale | Shift+O Mirror | Shift+F FreeTf | +/- & Shift+C Anchors | [ ] Brush Size | X Target · Shift+X Swap | Tab Present | Space Pan | Ctrl+0 Fit | Arrows Nudge | Ctrl+A Select | Ctrl+Shift+A Reselect | Ctrl+D Duplicate | Ctrl+G Group | Ctrl+2 Lock | Ctrl+3 Hide | Ctrl+C/X/V Clipb | Ctrl+Shift+C PNG | Ctrl+F/B Paste | Ctrl+[ Order | Ctrl+S Save | Ctrl+Shift+I Invert | Esc Cancel')
 }
 </script>
 

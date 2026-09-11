@@ -185,3 +185,18 @@ export function hslToRgb(h: number, s: number, l: number): { r: number; g: numbe
 export function colorDistanceRgb(a: Rgba, b: Rgba): number {
   return Math.hypot(a.r - b.r, a.g - b.g, a.b - b.b)
 }
+
+/**
+ * Invert a CSS paint channel-wise (unparseable input passes through,
+ * alpha is preserved).
+ */
+export function invertCssColor(css: string): string {
+  const rgba = parseCssColor(css)
+  if (!rgba) return css
+  const hex = (n: number): string => Math.min(255, Math.max(0, n)).toString(16).padStart(2, '0')
+  const r = 255 - rgba.r
+  const g = 255 - rgba.g
+  const b = 255 - rgba.b
+  if (rgba.a >= 1) return `#${hex(r)}${hex(g)}${hex(b)}`
+  return `rgba(${r}, ${g}, ${b}, ${Math.round(rgba.a * 100) / 100})`
+}

@@ -339,6 +339,18 @@ export function handleGlobalKeydown(
 
   if (e.repeat) return
 
+  // Fill/stroke target (AI X / Shift+X parity): plain X flips the paint
+  // target, Shift+X swaps the paints everywhere.
+  if (key(e) === 'x') {
+    if (e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
+      engine?.swapFillStroke()
+    } else if (!e.shiftKey && !e.altKey) {
+      store.togglePaintTarget()
+    }
+    e.preventDefault()
+    return
+  }
+
   // Presentation mode: Tab hides every panel and bar (AI Tab parity).
   if (e.key === 'Tab') {
     store.setZenMode(!store.ui.zenMode)

@@ -8,6 +8,7 @@ import {
   colorDistanceRgb,
   cssToCmykString,
   hslToRgb,
+  invertCssColor,
   isOutOfCmykGamut,
   parseCssColor,
   rgbToCmyk,
@@ -122,5 +123,18 @@ describe('colorDistanceRgb', () => {
     expect(colorDistanceRgb(red, red)).toBe(0)
     expect(colorDistanceRgb(red, green)).toBeCloseTo(Math.hypot(255, 255), 9)
     expect(colorDistanceRgb(red, parseCssColor('#fe0000')!)).toBeCloseTo(1, 9)
+  })
+})
+
+describe('invertCssColor', () => {
+  it('inverts channels', () => {
+    expect(invertCssColor('#ff0000')).toBe('#00ffff')
+    expect(invertCssColor('#000000')).toBe('#ffffff')
+    expect(invertCssColor('#ffffff')).toBe('#000000')
+  })
+
+  it('preserves alpha and passes garbage through', () => {
+    expect(invertCssColor('rgba(255, 0, 0, 0.5)')).toBe('rgba(0, 255, 255, 0.5)')
+    expect(invertCssColor('nope')).toBe('nope')
   })
 })
