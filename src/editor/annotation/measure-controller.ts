@@ -10,7 +10,7 @@ import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
 import { applyToolCursor } from '../cursors'
 import { SnapService } from '../snap/snap-service'
-import { rulerUnitFactor } from '../geometry'
+import { rulerUnitFactor, snap45 } from '../geometry'
 
 export class MeasureController {
   engine: EditorEngine | null = null
@@ -55,7 +55,13 @@ export class MeasureController {
 
     scope.tool.onMouseDrag = (event: paper.ToolEvent) => {
       if (!this.isMeasuring || !this.startPoint) return
-      const snapped = this.snapService.snapPoint(event.point)
+      let snapped = this.snapService.snapPoint(event.point)
+      if (event.modifiers.shift) {
+        // Shift constrains the leg to 45° increments about the start.
+        const rel = snapped.subtract(new scope.Point(this.startPoint.x, this.startPoint.y))
+        const fixed = snap45(rel as paper.Point, scope)
+        snapped = new scope.Point(this.startPoint.x, this.startPoint.y).add(fixed as paper.Point)
+      }
       this.updatePreview(snapped)
       this.reportReading(snapped)
     }

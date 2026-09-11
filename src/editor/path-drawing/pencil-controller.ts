@@ -99,6 +99,12 @@ export class PencilController {
     this.stroke = null
     if (!engine || !stroke) return
     if (stroke.segments.length >= 2 && stroke.length > 0.5) {
+      // Auto-close when the tail lands back on the head (AI pencil parity).
+      const segs = stroke.segments
+      if (segs.length >= 3) {
+        const gap = segs[0].point.getDistance(segs[segs.length - 1].point)
+        if (gap < 8 / engine.scope.view.zoom) stroke.closed = true
+      }
       const smooth = Number((engine.store as any).pencilSmooth)
       stroke.simplify((Number.isFinite(smooth) ? smooth : 2.5) / engine.scope.view.zoom)
       const layer = engine.getActiveLayer()

@@ -15,6 +15,7 @@
               <el-dropdown-item command="exportSelection" :disabled="!store.hasSelection">Export Selection SVG</el-dropdown-item>
               <el-dropdown-item command="exportBoardsSvg">Export Boards SVG</el-dropdown-item>
               <el-dropdown-item command="exportRaster">Export Raster...</el-dropdown-item>
+              <el-dropdown-item command="exportBoardsPng">Export Boards PNG</el-dropdown-item>
               <el-dropdown-item command="exportPdf">Export PDF (Raster)</el-dropdown-item>
               <el-dropdown-item command="exportBoardsPdf">Export All Boards PDF (Raster)</el-dropdown-item>
               <el-dropdown-item command="exportVectorPdf">Export PDF (Vector)</el-dropdown-item>
@@ -1218,6 +1219,9 @@ function onFileCmd(cmd: string) {
       }
       exportVisible.value = true
       break
+    case 'exportBoardsPng':
+      onExportBoardsPng()
+      break
     case 'exportPdf':
       void onExportPdf()
       break
@@ -1451,8 +1455,46 @@ async function onExportPdf() {
  * Export every artboard as one PDF page each (2x rasters embedded
  * full-bleed). The active board is restored afterwards.
  */
-async function onExportBoardsPdf() {
+/**
+ * Export every artboard as a 2x PNG file each (download-per-board, like
+ * Boards SVG). The active board is restored afterwards.
+ */
+function onExportBoardsPng() {
   const e = engineRef?.value
+  if (!e) return
+  const boards = store.artboards.filter((b) => b.width > 0 && b.height > 0)
+  if (boards.length === 0) {
+    store.setStatusMessage('Nothing to export')
+    return
+  }
+  const previousActive = store.activeArtboardId
+  try {
+    let painted = 0
+    let skipped = 0
+    for (const board of boards) {
+      store.setActiveArtboard(board.id)
+      const dataUrl = e.exportRaster({ format: 'png', scale: 2, area: 'page' })
+      if (!dataUrl) {
+        skipped++
+        continue
+      }
+      downloadHref(dataUrl, `${board.name || 'artboard'}.png`)
+      painted++
+    }
+    store.setStatusMessage(
+      painted === 0
+        ? 'Board export failed'
+        : skipped > 0
+          ? `Exported ${painted} of ${boards.length} boards (${skipped} too large)`
+          : `Exported ${painted} of ${boards.length} boards`
+    )
+  } finally {
+    store.setActiveArtboard(previousActive)
+    e.refreshArtboards()
+  }
+}
+
+async function onExportBoardsPdf() {  const e = engineRef?.value
   if (!e) return
   const boards = store.artboards.filter((b) => b.width > 0 && b.height > 0)
   if (boards.length === 0) {
