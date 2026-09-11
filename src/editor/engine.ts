@@ -4780,10 +4780,32 @@ export class EditorEngine {
     layer.addChild(instance)
     instance.data.id = this.genId()
     instance.data.isUserItem = true
+    this.store.setSpraySymbol(id)
     this.selectItem(instance)
     this.pushHistory('Place Symbol')
     this.scope.view.update()
     return true
+  }
+
+  /**
+   * Scatter one symbol instance for the sprayer (no history; the stroke
+   * records once on release). Scale/rotation jitter around 1 / 0.
+   * Returns the instance, or null for an unknown definition.
+   */
+  spraySymbol(id: string, point: paper.Point, scale: number, rotation: number): paper.SymbolItem | null {
+    const keeper = this.getKeepers().find((k) => (k.data as any)?.symbolId === id)
+    if (!keeper) return null
+    const definition = (keeper as any)._definition ?? (keeper as any).definition
+    if (!definition) return null
+    const instance = definition.place(point.clone()) as paper.SymbolItem
+    try {
+      if (Number.isFinite(scale) && scale > 0) instance.scaling = new this.scope.Point(scale, scale)
+      if (Number.isFinite(rotation) && rotation !== 0) instance.rotation = rotation
+    } catch { /* jitter is best-effort; the dab still lands */ }
+    this.getActiveLayer().addChild(instance)
+    instance.data.id = this.genId()
+    instance.data.isUserItem = true
+    return instance
   }
 
   /** Delete a symbol definition (placed instances keep working). */
@@ -5359,6 +5381,70 @@ export class EditorEngine {
     this.pushHistory('Offset Path')
     this.scope.view.update()
     return made.length
+  }
+
+  /**
+   * Roughen / zigzag selected paths (AI Roughen parity, destructive).
+   * Curves subdivide `detail` times, then anchors jitter by `size`
+   * (roughen, endpoints of open paths stay put) or ridge perpendicular
+   * alternating ±size with cornered handles (zigzag). Returns anchors
+   * touched; one history entry.
+   */
+  stylizeRoughen(kind: 'roughen' | 'zigzag', size: number, detail: number): number {
+    if (!Number.isFinite(size) || size <= 0) return 0
+    const rounds = Math.min(10, Math.max(1, Math.round(Number(detail) || 3)))
+    const scope = this.scope
+    const paths: paper.Path[] = []
+    for (const item of this.getSelection()) {
+      if ((item as any).locked || !item.parent) continue
+      if (item instanceof scope.CompoundPath) {
+        for (const child of ((item as any).children ?? []) as paper.Item[]) {
+          if (child instanceof scope.Path) paths.push(child)
+        }
+      } else if (item instanceof scope.Path) {
+        paths.push(item)
+      }
+    }
+    if (paths.length === 0) return 0
+    const s = Math.min(500, size)
+    let touched = 0
+    for (const path of paths) {
+      for (let r = 0; r < rounds; r++) {
+        const curves = path.curves.slice()
+        let split = false
+        for (const curve of curves) {
+          try {
+            if (typeof (curve as any).divideAtTime === 'function' && (curve as any).divideAtTime(0.5)) split = true
+          } catch { /* keep going */ }
+        }
+        if (!split) break
+      }
+      const n = path.segments.length
+      for (let i = 0; i < n; i++) {
+        const seg = path.segments[i]
+        const isEnd = !path.closed && (i === 0 || i === n - 1)
+        if (isEnd) continue
+        if (kind === 'roughen') {
+          seg.point = seg.point.add(new scope.Point((Math.random() * 2 - 1) * s, (Math.random() * 2 - 1) * s))
+        } else {
+          const prev = path.segments[(i - 1 + n) % n].point
+          const next = path.segments[(i + 1) % n].point
+          const tangent = next.subtract(prev)
+          if (tangent.length < 1e-9) continue
+          const normal = new scope.Point(-tangent.y, tangent.x).normalize()
+          seg.point = seg.point.add(normal.multiply((i % 2 === 0 ? 1 : -1) * s))
+          ;(seg as any).handleIn = new scope.Point(0, 0)
+          ;(seg as any).handleOut = new scope.Point(0, 0)
+        }
+        touched++
+      }
+      this.refreshItemGradient(path as paper.Item)
+    }
+    if (touched > 0) {
+      this.pushHistory(kind === 'roughen' ? 'Roughen' : 'Zig Zag')
+      this.scope.view.update()
+    }
+    return touched
   }
 
   /**

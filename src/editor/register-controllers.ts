@@ -5,6 +5,8 @@ import { EditorEngine } from './engine'
 import { SelectController } from './selection/select-controller'
 import { LassoController } from './selection/lasso-controller'
 import { WandController } from './selection/wand-controller'
+import { ReshapeController } from './selection/reshape-controller'
+import { SprayController } from './symbols/spray-controller'
 import { PenController } from './path-drawing/pen-controller'
 import { PencilController } from './path-drawing/pencil-controller'
 import { EraserController } from './path-drawing/eraser-controller'
@@ -35,6 +37,12 @@ export function registerAllControllers(engine: EditorEngine) {
 
   // Magic wand (click to select the same fill)
   engine.registerController('wand', new WandController())
+
+  // Reshape brush (push nearby anchors with falloff)
+  engine.registerController('reshape', new ReshapeController())
+
+  // Symbol sprayer (scatter instances along a drag)
+  engine.registerController('spray', new SprayController())
 
   // Pen tool
   engine.registerController('pen', new PenController())

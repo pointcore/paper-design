@@ -173,6 +173,8 @@ export const useEditorStore = defineStore('editor', {
     brushSize: 20,
     /** Magic-wand fill tolerance in RGB distance (0 = exact match) */
     wandTolerance: 0,
+    /** Symbol the sprayer scatters ('' = first library entry) */
+    spraySymbolId: '',
     spiralTurns: 3,
     roundedRadius: 12,
     gridRows: 4,
@@ -526,6 +528,9 @@ export const useEditorStore = defineStore('editor', {
     },
     setWandTolerance(n: number) {
       if (Number.isFinite(n)) this.wandTolerance = Math.min(100, Math.max(0, Math.round(n)))
+    },
+    setSpraySymbol(id: string) {
+      this.spraySymbolId = typeof id === 'string' ? id : ''
     },
     setSpiralTurns(n: number) {
       if (Number.isFinite(n)) this.spiralTurns = Math.min(12, Math.max(1, Math.round(n)))

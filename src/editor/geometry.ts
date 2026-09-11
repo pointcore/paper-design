@@ -56,6 +56,18 @@ export function linearGradientEndpoints(
 }
 
 /**
+ * Reshape-brush falloff (AI Reshape tool): full strength at the cursor,
+ * easing to zero at the radius edge so strokes blend into the artwork.
+ * Returns 0 outside the radius or for non-finite input.
+ */
+export function reshapeFalloff(distance: number, radius: number): number {
+  if (!Number.isFinite(distance) || !Number.isFinite(radius)) return 0
+  if (radius <= 0 || distance < 0 || distance >= radius) return 0
+  const t = 1 - distance / radius
+  return t * t * (3 - 2 * t)
+}
+
+/**
  * Document units (CSS px at 96dpi) → ruler unit factor for display
  * readouts. Geometry itself never converts; rulers, status bar and the
  * measure tool share this so their numbers agree.

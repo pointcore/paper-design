@@ -31,6 +31,8 @@ export type ToolName =
   | 'brush'           // Brush B
   | 'eraser'          // Eraser Shift+E
   | 'gradient'        // Gradient G
+  | 'reshape'         // Reshape brush
+  | 'spray'           // Symbol sprayer
   | 'wand'            // Magic wand Y
   | 'scissors'        // Scissors C
   | 'width'             // Width tool Shift+W

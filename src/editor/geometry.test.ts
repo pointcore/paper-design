@@ -2,7 +2,7 @@
  * Unit tests for shared geometry helpers — run with `vitest run`.
  */
 import { describe, expect, it } from 'vitest'
-import { gradientAngleFromVector, linearGradientEndpoints, normalizeAngleDeg, remainingRuns, rulerUnitFactor, snap45 } from './geometry'
+import { gradientAngleFromVector, linearGradientEndpoints, normalizeAngleDeg, remainingRuns, reshapeFalloff, rulerUnitFactor, snap45 } from './geometry'
 
 /** Minimal PaperScope stand-in (snap45 only news up points). */
 const scope = {
@@ -106,6 +106,30 @@ describe('gradient angle helpers', () => {
     expect(e.x1).toBeCloseTo(-e.x2, 9)
     expect(e.y1).toBeCloseTo(-e.y2, 9)
     expect(gradientAngleFromVector(e.x2 - e.x1, e.y2 - e.y1)).toBeCloseTo(45, 9)
+  })
+})
+
+describe('reshapeFalloff', () => {
+  it('is full at the cursor and zero at the edge', () => {
+    expect(reshapeFalloff(0, 120)).toBe(1)
+    expect(reshapeFalloff(120, 120)).toBe(0)
+    expect(reshapeFalloff(200, 120)).toBe(0)
+  })
+
+  it('eases monotonically between', () => {
+    const a = reshapeFalloff(30, 120)
+    const b = reshapeFalloff(60, 120)
+    const c = reshapeFalloff(90, 120)
+    expect(a).toBeGreaterThan(b)
+    expect(b).toBeGreaterThan(c)
+    expect(a).toBeLessThanOrEqual(1)
+    expect(c).toBeGreaterThanOrEqual(0)
+  })
+
+  it('rejects bad input', () => {
+    expect(reshapeFalloff(-1, 120)).toBe(0)
+    expect(reshapeFalloff(10, 0)).toBe(0)
+    expect(reshapeFalloff(Number.NaN, 120)).toBe(0)
   })
 })
 
