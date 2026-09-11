@@ -110,6 +110,43 @@ const SHORTCUT_ORDER: ToolName[] = [
   'zoom',
 ]
 
+/**
+ * Command (non-tool) shortcuts, listed in the Actions panel cheatsheet.
+ * Kept here so the cheat sheet and the handlers share one home; the test
+ * guards the list against duplicate labels drifting apart.
+ */
+export const COMMAND_SHORTCUTS: Array<{ label: string; desc: string }> = [
+  { label: 'Ctrl+C / X / V', desc: 'Copy / Cut / Paste' },
+  { label: 'Ctrl+Shift+C', desc: 'Copy as PNG' },
+  { label: 'Ctrl+F / Ctrl+B', desc: 'Paste in Front / Back' },
+  { label: 'Ctrl+D', desc: 'Duplicate in Place' },
+  { label: 'Ctrl+Shift+D', desc: 'Transform Again' },
+  { label: 'Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y', desc: 'Undo / Redo' },
+  { label: 'Ctrl+S / Ctrl+Shift+S', desc: 'Save / Save As' },
+  { label: 'Ctrl+0 / Ctrl+1', desc: 'Fit to Window / Actual Size' },
+  { label: 'Ctrl+= / Ctrl+-', desc: 'Zoom In / Out' },
+  { label: 'Ctrl+A', desc: 'Select All' },
+  { label: 'Ctrl+Shift+A / Ctrl+6', desc: 'Deselect / Reselect' },
+  { label: 'Ctrl+Shift+I', desc: 'Invert Selection' },
+  { label: 'Ctrl+G / Ctrl+Shift+G', desc: 'Group / Ungroup' },
+  { label: 'Ctrl+J', desc: 'Join Paths' },
+  { label: 'Ctrl+2 / Alt+2', desc: 'Lock / Unlock All' },
+  { label: 'Ctrl+3 / Alt+3', desc: 'Hide / Show All' },
+  { label: '] / [ (+Shift)', desc: 'Forward / Backward (Shift: Front / Back)' },
+  { label: 'Ctrl+PgUp / Ctrl+PgDn', desc: 'CDR Forward / Backward (Shift: Front / Back)' },
+  { label: 'Ctrl+L / Ctrl+K', desc: 'Combine / Break Apart (CDR)' },
+  { label: 'Shift+F2', desc: 'Zoom to Selection' },
+  { label: 'F4 / Shift+F4', desc: 'Fit All / Fit Page (CDR)' },
+  { label: 'Ctrl+R', desc: 'Toggle Rulers' },
+  { label: 'Ctrl+; / Ctrl+"', desc: 'Toggle Guides / Grid' },
+  { label: 'Ctrl+Shift+B', desc: 'Toggle Bounding Box' },
+  { label: 'X / Shift+X', desc: 'Flip Paint Target / Swap Fill + Stroke' },
+  { label: '[ / ] on brush tools', desc: 'Brush Footprint (Shift = x5)' },
+  { label: 'Arrow Keys', desc: 'Nudge (Shift x10, Ctrl tenth)' },
+  { label: 'Space (hold)', desc: 'Pan with the Hand Tool' },
+  { label: 'Tab', desc: 'Presentation Mode' },
+]
+
 /** Normalize a key to lowercase so letter matches ignore the Shift/caps state. */
 function key(e: KeyboardEvent): string {
   return e.key.toLowerCase()

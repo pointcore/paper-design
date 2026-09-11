@@ -49,6 +49,16 @@
         </div>
       </div>
     </div>
+
+    <div class="panel-section">
+      <div class="sec-title">Command Keys</div>
+      <div class="sc-list">
+        <div v-for="c in commandShortcuts" :key="c.label" class="sc-row">
+          <span class="sc-tool">{{ c.desc }}</span>
+          <span class="sc-key">{{ c.label }}</span>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -57,7 +67,7 @@ import { computed, ref, watch, inject, type Ref } from 'vue'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
 import type { RasterExportArea, RasterExportFormat, WorkspacePreset } from '../../editor/types'
-import { TOOL_SHORTCUTS } from '../../editor/shortcuts'
+import { COMMAND_SHORTCUTS, TOOL_SHORTCUTS } from '../../editor/shortcuts'
 
 const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
@@ -147,6 +157,8 @@ function exportOne(scale: number) {
 function exportAll() {
   for (const s of [1, 2, 3]) exportOne(s)
 }
+
+const commandShortcuts = COMMAND_SHORTCUTS
 
 const shortcuts = computed(() =>
   (Object.entries(TOOL_SHORTCUTS) as Array<[string, { label: string } | null]>)

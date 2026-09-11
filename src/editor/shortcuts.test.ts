@@ -130,6 +130,23 @@ describe('handleGlobalKeydown', () => {
     expect(store.setStatusMessage).toHaveBeenCalledWith('No transform to repeat')
   })
 
+  it('never switches tools on Ctrl-modified letters (command layer owns chords)', () => {
+    const engine = { setTool: vi.fn() } as any
+    const store = { setTool: vi.fn(), tool: 'select' as any, updateView: vi.fn() } as any
+    handleGlobalKeydown(
+      key({ key: 't', code: 'KeyT', ctrlKey: true, target: null }) as KeyboardEvent,
+      store,
+      engine
+    )
+    handleGlobalKeydown(
+      key({ key: 'r', code: 'KeyR', ctrlKey: true, shiftKey: true, target: null }) as KeyboardEvent,
+      store,
+      engine
+    )
+    expect(store.setTool).not.toHaveBeenCalled()
+    expect(engine.setTool).not.toHaveBeenCalled()
+  })
+
   it('steps z-order on Ctrl+PgUp/PgDn and jumps on Shift variants (CDR parity)', () => {
     const engine = {
       bringForward: vi.fn(),
