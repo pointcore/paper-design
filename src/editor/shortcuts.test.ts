@@ -130,6 +130,23 @@ describe('handleGlobalKeydown', () => {
     expect(store.setStatusMessage).toHaveBeenCalledWith('No transform to repeat')
   })
 
+  it('deselects on Ctrl+Shift+A and reselecs on Ctrl+6 (AI parity)', () => {
+    const engine = { clearSelection: vi.fn(), reselect: vi.fn(() => 1) } as any
+    handleGlobalKeydown(
+      key({ key: 'A', code: 'KeyA', ctrlKey: true, shiftKey: true, target: null }) as KeyboardEvent,
+      {} as any,
+      engine
+    )
+    expect(engine.clearSelection).toHaveBeenCalledTimes(1)
+    expect(engine.reselect).not.toHaveBeenCalled()
+    handleGlobalKeydown(
+      key({ key: '6', code: 'Digit6', ctrlKey: true, target: null }) as KeyboardEvent,
+      {} as any,
+      engine
+    )
+    expect(engine.reselect).toHaveBeenCalledTimes(1)
+  })
+
   it('opens Save As on Ctrl+Shift+S and downloads on Ctrl+S', () => {
     const store = { setSaveDialogOpen: vi.fn() } as any
     const engine = { downloadProjectFile: vi.fn() } as any

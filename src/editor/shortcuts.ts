@@ -257,9 +257,14 @@ export function handleGlobalKeydown(
       // Browsers may reserve this for devtools; the menu always works.
       engine?.invertSelection()
       e.preventDefault()
-    } else if (key === 'a' && e.shiftKey) {
+    } else if (key === '6') {
+      // AI Ctrl+6: reselect the stashed selection.
       const n = engine?.reselect() ?? 0
       if (engine && n === 0) store.setStatusMessage('Nothing to reselect')
+      e.preventDefault()
+    } else if (key === 'a' && e.shiftKey) {
+      // AI Ctrl+Shift+A: deselect everything (reselect moved to Ctrl+6).
+      engine?.clearSelection()
       e.preventDefault()
     } else if (key === 'a') {
       // Direct-select with a path selection takes every anchor (AI Ctrl+A);

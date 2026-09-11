@@ -51,8 +51,9 @@
               <el-dropdown-item command="transformAgain" :disabled="!store.hasSelection">Transform Again</el-dropdown-item>
               <el-dropdown-item command="delete" divided :disabled="!store.hasSelection">Delete</el-dropdown-item>
               <el-dropdown-item command="selectAll" divided>Select All</el-dropdown-item>
-              <el-dropdown-item command="invertSelection">Invert Selection</el-dropdown-item>
+              <el-dropdown-item command="deselect" :disabled="!store.hasSelection">Deselect</el-dropdown-item>
               <el-dropdown-item command="reselect" :disabled="store.lastSelection.length === 0">Reselect</el-dropdown-item>
+              <el-dropdown-item command="invertSelection">Invert Selection</el-dropdown-item>
               <el-dropdown-item command="saveSelection" :disabled="!store.hasSelection">Save Selection...</el-dropdown-item>
               <el-dropdown-item command="findReplace" divided>Find &amp; Replace...</el-dropdown-item>
             </el-dropdown-menu>
@@ -2112,6 +2113,9 @@ function onEditCmd(cmd: string) {
       break
     case 'redo':
       e.redo()
+      break
+    case 'deselect':
+      e.clearSelection()
       break
     case 'cut':
       // Capture the OS copy before the cut deletes the selection.
