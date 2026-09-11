@@ -4564,6 +4564,34 @@ export class EditorEngine {
     this.scope.view.update()
   }
 
+  /**
+   * CDR "select all in page" parity: select every visible unlocked
+   * top-level item whose bounds intersect the active artboard sheet.
+   * Returns the selected count; 0 when there is no usable board.
+   */
+  selectAllOnActiveArtboard(): number {
+    const board = this.store.activeArtboard
+    if (!board || board.width <= 0 || board.height <= 0) return 0
+    const sheet = new this.scope.Rectangle(board.x, board.y, board.width, board.height)
+    this.project.deselectAll()
+    let count = 0
+    for (const layer of this.project.layers) {
+      if (!(layer.data as any)?.isUserLayer || !layer.visible || layer.locked) continue
+      for (const child of layer.children) {
+        const item = child as paper.Item
+        if (!item.visible || (item as any).locked) continue
+        const b = item.bounds
+        if (!b) continue
+        if (!b.intersects(sheet)) continue
+        item.selected = true
+        count++
+      }
+    }
+    this.syncSelectionToStore()
+    this.scope.view.update()
+    return count
+  }
+
   /** Swap each selected item with the sibling beside it in `direction`. */
   private shiftSelectedOrder(direction: 1 | -1): void {
     const moving = new Set(this.getSelection())
