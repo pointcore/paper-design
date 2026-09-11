@@ -3395,6 +3395,74 @@ export class EditorEngine {
   }
 
   /**
+   * AI Path > Split Into Grid: replace the single unlocked selected item
+   * with rows x cols rectangular cells tiling its axis-aligned bounds
+   * (optional gutters), styled like the source. Cells become the new
+   * selection; one history entry. Returns the cell count, 0 when nothing
+   * usable is selected or the bounds do not fit the gutters.
+   */
+  splitSelectionGrid(rows: number, cols: number, gutterX: number, gutterY: number): number {
+    const r = Math.round(Number(rows))
+    const c = Math.round(Number(cols))
+    const gx = Number(gutterX)
+    const gy = Number(gutterY)
+    if (!Number.isFinite(r) || !Number.isFinite(c) || r < 1 || c < 1) return 0
+    if (!Number.isFinite(gx) || !Number.isFinite(gy) || gx < 0 || gy < 0) return 0
+    if (r * c > 1000) return 0
+    const selected = this.getSelection().filter((item) => !item.locked && item.parent)
+    if (selected.length !== 1) return 0
+    const source = selected[0]
+    const b = source.bounds
+    const cellW = (b.width - (c - 1) * gx) / c
+    const cellH = (b.height - (r - 1) * gy) / r
+    if (!(cellW > 0) || !(cellH > 0)) return 0
+
+    const parent = source.parent ?? this.getActiveLayer()
+    const at = parent.children.indexOf(source as any)
+    const src = source as any
+    const cells: paper.Item[] = []
+    for (let row = 0; row < r; row++) {
+      for (let col = 0; col < c; col++) {
+        const x = b.x + col * (cellW + gx)
+        const y = b.y + row * (cellH + gy)
+        const cell = new this.scope.Path.Rectangle({
+          from: [x, y, x + cellW, y + cellH],
+          insert: false,
+        }) as paper.Path
+        cell.data.id = this.genId()
+        cell.data.isUserItem = true
+        // Cells inherit the source appearance (paint, dash, blend, opacity).
+        ;(cell as any).fillColor = src.fillColor ?? null
+        ;(cell as any).strokeColor = src.strokeColor ?? null
+        if (src.strokeColor !== null && src.strokeColor !== undefined) {
+          cell.strokeWidth = src.strokeWidth ?? 1
+          cell.strokeCap = src.strokeCap
+          cell.strokeJoin = src.strokeJoin
+          cell.miterLimit = src.miterLimit
+          cell.dashArray = src.dashArray
+          cell.dashOffset = src.dashOffset
+        }
+        ;(cell as any).fillRule = src.fillRule
+        ;(cell as any).blendMode = src.blendMode
+        ;(cell as any).opacity = src.opacity
+        this.refreshItemGradient(cell)
+        parent.insertChild(Math.min(at + 1 + cells.length, parent.children.length), cell)
+        cells.push(cell)
+      }
+    }
+    source.remove()
+    this.clearSelection()
+    cells.forEach((cell) => {
+      cell.selected = true
+    })
+    this.syncSelectionToStore()
+    this.reflowTextsForItems(cells)
+    this.pushHistory('Split Into Grid')
+    this.scope.view.update()
+    return cells.length
+  }
+
+  /**
    * Radial repeat (clock faces, badges, rosettes): `count` rotated copies
    * at `angleDeg` steps about the reference pivot. Copies become the new
    * selection; one history entry. Returns copies made.

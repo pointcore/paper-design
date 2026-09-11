@@ -88,6 +88,7 @@
               <el-dropdown-item command="offsetPath" :disabled="!store.hasSelection">Offset Path...</el-dropdown-item>
               <el-dropdown-item command="stepRepeat" :disabled="!store.hasSelection">Step and Repeat...</el-dropdown-item>
               <el-dropdown-item command="radialRepeat" :disabled="!store.hasSelection">Radial Repeat...</el-dropdown-item>
+              <el-dropdown-item command="splitGrid" :disabled="!store.hasSelection">Split Into Grid...</el-dropdown-item>
               <el-dropdown-item command="simplifyPath" :disabled="!store.hasSelection">Simplify Path</el-dropdown-item>
               <el-dropdown-item command="addAnchors" :disabled="!store.hasSelection">Add Anchor Points</el-dropdown-item>
               <el-dropdown-item command="roughen" :disabled="!store.hasSelection">Roughen / Zig Zag...</el-dropdown-item>
@@ -504,6 +505,35 @@
           </div>
           <el-input-number v-model="repeatForm.dx" size="small" style="width: 100px" />
           <el-input-number v-model="repeatForm.dy" size="small" style="width: 100px" />
+        </div>
+      </div>
+    </AppDialog>
+
+    <!-- Split Into Grid Dialog (tiles the object bounds with cells) -->
+    <AppDialog
+      v-model="gridSplitVisible"
+      title="Split Into Grid"
+      :width="360"
+      confirm-text="Apply"
+      cancel-text="Close"
+      @confirm="onGridSplitConfirm"
+      @cancel="gridSplitVisible = false"
+    >
+      <div class="settings-body app-settings">
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Rows / Columns</span>
+          </div>
+          <el-input-number v-model="gridSplitForm.rows" :min="1" :max="50" size="small" style="width: 100px" />
+          <el-input-number v-model="gridSplitForm.cols" :min="1" :max="50" size="small" style="width: 100px" />
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Gutter X / Y</span>
+            <span class="setting-desc">Gap between cells in px</span>
+          </div>
+          <el-input-number v-model="gridSplitForm.gutterX" :min="0" size="small" style="width: 100px" />
+          <el-input-number v-model="gridSplitForm.gutterY" :min="0" size="small" style="width: 100px" />
         </div>
       </div>
     </AppDialog>
@@ -1036,6 +1066,20 @@ function onRepeatConfirm() {
 
 const radialVisible = ref(false)
 const radialForm = reactive({ count: 5, angle: 60 })
+const gridSplitVisible = ref(false)
+const gridSplitForm = reactive({ rows: 3, cols: 3, gutterX: 0, gutterY: 0 })
+function onGridSplitConfirm() {
+  const e = engineRef?.value
+  if (!e) {
+    gridSplitVisible.value = false
+    return
+  }
+  if (e.splitSelectionGrid(Number(gridSplitForm.rows), Number(gridSplitForm.cols), Number(gridSplitForm.gutterX), Number(gridSplitForm.gutterY)) === 0) {
+    store.setStatusMessage('Select one unlocked object; rows x cols must fit inside its bounds')
+    return
+  }
+  gridSplitVisible.value = false
+}
 const eachVisible = ref(false)
 const eachForm = reactive({ dx: 0, dy: 0, rotate: 0, scale: 100, copies: 0, random: false })
 function onEachConfirm() {
@@ -2405,6 +2449,9 @@ function onObjectCmd(cmd: string) {
       break
     case 'radialRepeat':
       radialVisible.value = true
+      break
+    case 'splitGrid':
+      gridSplitVisible.value = true
       break
     case 'addAnchors':
       if (e.addAnchorPoints() === 0) {
