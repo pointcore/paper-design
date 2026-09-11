@@ -20,6 +20,7 @@
           </div>
           <div class="status-right">
             <span class="status-item">{{ artboardLabel }}</span>
+            <span class="status-item status-click" :title="'Proof mode (click to toggle RGB/CMYK)'" @click="toggleProof">{{ proofLabel }}</span>
             <span class="status-item">{{ currentToolName }}</span>
             <span v-if="store.statusMessage" class="status-item status-msg">{{ store.statusMessage }}</span>
             <el-dropdown trigger="click" @command="onZoomCmd">
@@ -95,6 +96,11 @@ const artboardLabel = computed(() => {
   const idx = boards.findIndex((b) => b.id === store.activeArtboardId)
   return `Board ${(idx < 0 ? 0 : idx) + 1}/${boards.length}`
 })
+const proofLabel = computed(() => store.view.proofMode === 'cmyk' ? 'CMYK' : 'RGB')
+function toggleProof() {
+  const next = store.view.proofMode === 'cmyk' ? 'rgb' : 'cmyk'
+  store.updateView({ proofMode: next })
+}
 
 function toggleSnap() {
   store.updateSnap({ enable: !store.snap.enable })

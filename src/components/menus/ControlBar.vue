@@ -86,6 +86,13 @@
       <span class="cb-hint">Drag on canvas to set the angle</span>
     </template>
 
+    <!-- Wand tool: fill tolerance -->
+    <template v-else-if="store.tool === 'wand'">
+      <span class="cb-label">Tolerance</span>
+      <el-input-number v-model="wandTolerance" :min="0" :max="100" size="small" style="width: 80px" title="Fill color tolerance (0 = exact)" @change="onWandTolerance" />
+      <span class="cb-hint">Click a fill · Shift-click adds</span>
+    </template>
+
     <!-- Callout tool: leader + label style -->
     <template v-else-if="store.tool === 'callout'">
       <span class="cb-label">Line</span>
@@ -218,6 +225,7 @@ const gridCols = ref((store as any).gridCols ?? 4)
 const strokeWidth = ref(store.style.strokeWidth)
 const opacityPct = ref(Math.round(store.style.opacity * 100))
 const brushSize = ref(Number((store as any).brushSize ?? 20))
+const wandTolerance = ref(Number((store as any).wandTolerance ?? 0))
 const gradientAngle = ref(Math.round(store.style.gradient?.angle ?? 0))
 const gradientType = ref<'linear' | 'radial'>(store.style.gradient?.type ?? 'linear')
 const calloutColor = ref(store.calloutStyle.color)
@@ -232,6 +240,7 @@ watch(() => store.charStyle.fontFamily, (v) => { fontFamily.value = v })
 watch(() => store.charStyle.fontSize, (v) => { fontSize.value = v })
 watch(() => store.style.strokeWidth, (v) => { strokeWidth.value = v })
 watch(() => (store as any).brushSize, (v) => { brushSize.value = Number(v) || 20 })
+watch(() => (store as any).wandTolerance, (v) => { wandTolerance.value = Number(v) || 0 })
 watch(() => store.style.gradient?.angle, (v) => { gradientAngle.value = Math.round(v ?? 0) })
 watch(() => store.style.gradient?.type, (v) => { gradientType.value = v ?? 'linear' })
 
@@ -334,6 +343,11 @@ function onBrushSize(v: number | undefined) {
   try {
     ctrl?.refreshCursor?.()
   } catch { /* cursor repaint must never break panel edits */ }
+}
+function onWandTolerance(v: number | undefined) {
+  if (v === undefined) return
+  ;(store as any).setWandTolerance?.(v)
+  wandTolerance.value = Number((store as any).wandTolerance ?? 0)
 }
 function applyGradientEdit(label: string) {
   const e = getEngine()

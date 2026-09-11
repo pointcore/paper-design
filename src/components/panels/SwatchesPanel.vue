@@ -17,14 +17,28 @@
         <div v-for="c in store.recentColors" :key="c" class="sw" :style="{ background: c }" :title="c" @click="apply(c, $event)" />
       </div>
     </div>
+    <div class="panel-section">
+      <div class="sec-title">Styles <span class="sec-hint">single-appearance presets</span></div>
+      <div class="row">
+        <el-input v-model="styleName" size="small" placeholder="Preset name" @keyup.enter="saveStyle" />
+        <el-button size="small" @click="saveStyle">Save</el-button>
+      </div>
+      <div v-if="store.stylePresets.length === 0" class="hint">Save the current appearance, then click a preset to apply it.</div>
+      <div v-for="p in store.stylePresets" :key="p.id" class="style-row" :title="`Apply ${p.name}`" @click="applyStyle(p.id)">
+        <span class="style-chip" :style="{ background: styleChip(p.style) }"></span>
+        <span class="style-name">{{ p.name }}</span>
+        <el-button size="small" type="danger" plain @click.stop="removeStyle(p.id)">×</el-button>
+      </div>
+    </div>
     <div class="hint">Fill/stroke apply live to the selection and to subsequently drawn shapes.</div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, inject, type Ref } from 'vue'
+import { computed, onMounted, ref, watch, inject, type Ref } from 'vue'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
+import type { StyleState } from '../../editor/types'
 
 const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
@@ -87,6 +101,72 @@ function clearFill() {
   engine?.scope.view.update()
   if (store.hasSelection) engine?.pushHistory('Clear Fill')
 }
+
+const styleName = ref('')
+
+function styleChip(style: StyleState): string {
+  if (style.gradient) return 'linear-gradient(135deg,#000,#fff)'
+  return style.fillColor ?? 'repeating-conic-gradient(#c9c9c9 0% 25%, #fff 0% 50%) 0 0 / 8px 8px'
+}
+
+function saveStyle() {
+  store.addStylePreset(styleName.value, store.style)
+  styleName.value = ''
+  persistStyles()
+  store.setStatusMessage('Style preset saved')
+}
+
+function applyStyle(id: string) {
+  const preset = store.stylePresets.find((p) => p.id === id)
+  if (!preset) return
+  const snapshot = JSON.parse(JSON.stringify(preset.style)) as StyleState
+  store.updateStyle({ ...snapshot })
+  const engine = getEngine()
+  if (!engine) return
+  engine.getSelection().forEach((item: any) => {
+    engine.applyStyleToItem(item, engine.store.style)
+  })
+  engine.scope.view.update()
+  if (store.hasSelection) {
+    engine.pushHistory('Apply Style')
+  } else {
+    store.setStatusMessage(`Style default "${preset.name}"`)
+  }
+}
+
+function removeStyle(id: string) {
+  store.removeStylePreset(id)
+  persistStyles()
+}
+
+function persistStyles() {
+  try {
+    localStorage.setItem('vve.styles', JSON.stringify(store.stylePresets))
+  } catch { /* private mode */ }
+}
+
+onMounted(() => {
+  try {
+    const raw = localStorage.getItem('vve.styles')
+    if (!raw) return
+    const list = JSON.parse(raw) as Array<{ id?: unknown; name?: unknown; style?: unknown }>
+    if (!Array.isArray(list)) return
+    const clean = list
+      .filter((p) => p && typeof p === 'object' && typeof (p.style as any) === 'object' && (p.style as any) !== null)
+      .slice(0, 24)
+      .map((p, i) => ({
+        id: typeof p.id === 'string' && p.id ? p.id : `style-restored-${i}`,
+        name: typeof p.name === 'string' && p.name ? (p.name as string).slice(0, 40) : `Style ${i + 1}`,
+        style: (p.style as StyleState),
+      }))
+    store.setStylePresets(clean)
+  } catch { /* corrupt storage: defaults stand */ }
+})
+
+watch(
+  () => store.stylePresets.length,
+  () => persistStyles()
+)
 </script>
 
 <style scoped>
@@ -100,4 +180,18 @@ function clearFill() {
 .sw:hover { outline: 1px solid #fff; }
 .sw-none { display: flex; align-items: center; justify-content: center; background: #fff; color: #c00; font-weight: 700; }
 .hint { font-size: 11px; color: #8a8a8a; line-height: 1.5; }
+.row { display: flex; gap: 4px; }
+.row :deep(.el-input) { flex: 1; min-width: 0; }
+.style-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 6px; border-radius: 3px; cursor: pointer;
+}
+.style-row:hover { background: #333; }
+.style-chip {
+  width: 22px; height: 22px; border-radius: 3px; border: 1px solid #000; flex-shrink: 0;
+}
+.style-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-panel :deep(.el-button--small) { background: #333; border: 1px solid #4a4a4a; color: #d5d5d5; border-radius: 3px; height: 24px; font-size: 11px; }
+.ai-panel :deep(.el-input__wrapper) { background: #111; border: 1px solid #3d3d3d; box-shadow: none !important; border-radius: 3px; }
+.ai-panel :deep(.el-input__inner) { color: #e6e6e6; font-size: 12px; }
 </style>
