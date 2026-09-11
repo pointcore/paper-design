@@ -143,36 +143,6 @@ const instanceClass = `app-dialog-${uid}`;
 
 let detach: (() => void) | null = null;
 
-// Escape closes the topmost open dialog. Stacked per-instance close
-// callbacks: only the last-opened dialog consumes the chord, so stacked
-// dialogs peel off one at a time.
-const escapeStack: Array<{ id: number; close: () => void }> = [];
-let escapeSeq = 0;
-let escapeListenerAttached = false;
-function onWindowEscape(e: KeyboardEvent) {
-  const top = escapeStack[escapeStack.length - 1];
-  if (!top) return;
-  e.preventDefault();
-  e.stopPropagation();
-  top.close();
-}
-function pushEscapeHandler(close: () => void): number {
-  escapeStack.push({ id: ++escapeSeq, close });
-  if (!escapeListenerAttached) {
-    window.addEventListener("keydown", onWindowEscape, true);
-    escapeListenerAttached = true;
-  }
-  return escapeSeq;
-}
-function popEscapeHandler(id: number) {
-  const idx = escapeStack.findIndex((entry) => entry.id === id);
-  if (idx >= 0) escapeStack.splice(idx, 1);
-  if (escapeStack.length === 0 && escapeListenerAttached) {
-    window.removeEventListener("keydown", onWindowEscape, true);
-    escapeListenerAttached = false;
-  }
-}
-
 function resolveTrigger(): HTMLElement | null {
   const t = props.trigger;
   if (!t) return null;
@@ -272,11 +242,8 @@ function attachListeners() {
   };
 }
 
-let escapeId = -1;
-
 function onOpen() {
   emit("open");
-  escapeId = pushEscapeHandler(() => innerVisible.value = false);
   nextTick(() => {
     computePosition();
     attachListeners();
@@ -298,10 +265,6 @@ function onOpened() {
 }
 
 function onClose() {
-  if (escapeId > 0) {
-    popEscapeHandler(escapeId);
-    escapeId = -1;
-  }
   detach?.();
   emit("close");
 }
@@ -318,10 +281,7 @@ function onCancel() {
   emit("cancel");
 }
 
-onBeforeUnmount(() => {
-  if (escapeId > 0) popEscapeHandler(escapeId);
-  detach?.();
-});
+onBeforeUnmount(() => detach?.());
 </script>
 
 <style>
