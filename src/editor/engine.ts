@@ -6223,6 +6223,9 @@ export class EditorEngine {
    * else the active layer.
    */
   private pasteTargetLayer(layerId: string): paper.Layer {
+    // AI Layers-panel option: off means every paste lands on the active
+    // layer regardless of where the copy was taken from.
+    if (!this.store.pasteRemembersLayers) return this.getActiveLayer()
     const found = this.project.layers.find(
       (l) => (l.data as any)?.isUserLayer && (l.data as any)?.layerId === layerId
     ) as paper.Layer | undefined

@@ -21,6 +21,9 @@
             <el-dropdown-item command="release" :disabled="!canRelease">Release to Layers</el-dropdown-item>
             <el-dropdown-item command="group" divided :disabled="!canGroup">Group</el-dropdown-item>
             <el-dropdown-item command="ungroup" :disabled="!canUngroup">Ungroup</el-dropdown-item>
+            <el-dropdown-item command="pasteRemembers" :icon="store.pasteRemembersLayers ? Check : undefined">
+              Paste Remembers Layers
+            </el-dropdown-item>
             <el-dropdown-item command="expand-all" divided>Expand All</el-dropdown-item>
             <el-dropdown-item command="collapse-all">Collapse All</el-dropdown-item>
           </el-dropdown-menu>
@@ -144,7 +147,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, inject, onMounted, onUnmounted, type Ref } from 'vue'
-import { Plus, CopyDocument, Delete, Files, Search, Filter, MoreFilled, FolderAdd, Collection, FolderOpened, View, Hide, Lock, Unlock } from '@element-plus/icons-vue'
+import { Plus, CopyDocument, Delete, Files, Search, Filter, MoreFilled, FolderAdd, Collection, FolderOpened, View, Hide, Lock, Unlock, Check } from '@element-plus/icons-vue'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
 import type { LayerItemNode } from '../../editor/types'
@@ -705,6 +708,11 @@ interface CtxState { x: number; y: number; layerId: string; itemId: string }
 const ctxMenu = ref<CtxState | null>(null)
 
 function onPanelMenu(cmd: string) {
+  if (cmd === 'pasteRemembers') {
+    store.setPasteRemembersLayers(!store.pasteRemembersLayers)
+    store.setStatusMessage(store.pasteRemembersLayers ? 'Paste remembers layers' : 'Paste lands on the active layer')
+    return
+  }
   runPanelCommand(cmd)
 }
 

@@ -207,6 +207,8 @@ export const useEditorStore = defineStore('editor', {
     statusMessage: '',
     /** Document display name (Save As / recent open; shown in the title bar) */
     documentName: '',
+    /** AI "Paste Remembers Layers": paste back onto the copied-from layer */
+    pasteRemembersLayers: true,
     /** Page settings (default size for new documents and artboards) */
     pageSize: { width: 1920, height: 1080 },
     /** Print bleed in document units (vector PDF page grows by this; 0 = trim only) */
@@ -360,6 +362,11 @@ export const useEditorStore = defineStore('editor', {
      */
     setDocumentName(name: string) {
       this.documentName = (name || '').trim()
+    },
+
+    /** Toggle AI's Paste Remembers Layers behavior */
+    setPasteRemembersLayers(val: boolean) {
+      this.pasteRemembersLayers = !!val
     },
 
     setStatusMessage(msg: string) {
