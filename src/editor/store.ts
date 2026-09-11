@@ -214,6 +214,8 @@ export const useEditorStore = defineStore('editor', {
       panelWidth: 264,
       rightTab: 'property' as RightPanelTab,
       settingsOpen: false,
+      /** Save As filename dialog (Ctrl+Shift+S opens it) */
+      saveDialogOpen: false,
       showNavigator: true,
       zenMode: false,
       showControlBar: true,
@@ -445,6 +447,12 @@ export const useEditorStore = defineStore('editor', {
     /** Open/close the canvas settings dialog */
     setSettingsOpen(val: boolean) {
       this.ui.settingsOpen = val
+    },
+
+    /** Open/close the Save As dialog (owned by the TopBar, store-shared so
+     * the Ctrl+Shift+S shortcut can reach it) */
+    setSaveDialogOpen(val: boolean) {
+      this.ui.saveDialogOpen = val
     },
 
     /** Set page size */

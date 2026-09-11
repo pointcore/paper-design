@@ -1131,7 +1131,11 @@ function onInvertNow() {
   }
 }
 
-const saveVisible = ref(false)
+// Store-backed so the Ctrl+Shift+S shortcut can open the same dialog.
+const saveVisible = computed<boolean>({
+  get: () => store.ui.saveDialogOpen,
+  set: (v) => store.setSaveDialogOpen(v),
+})
 const saveName = ref('project')
 function onSaveConfirm() {
   const e = engineRef?.value

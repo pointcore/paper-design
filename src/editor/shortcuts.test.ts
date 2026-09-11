@@ -130,6 +130,26 @@ describe('handleGlobalKeydown', () => {
     expect(store.setStatusMessage).toHaveBeenCalledWith('No transform to repeat')
   })
 
+  it('opens Save As on Ctrl+Shift+S and downloads on Ctrl+S', () => {
+    const store = { setSaveDialogOpen: vi.fn() } as any
+    const engine = { downloadProjectFile: vi.fn() } as any
+    handleGlobalKeydown(
+      key({ key: 'S', code: 'KeyS', ctrlKey: true, shiftKey: true, target: null }) as KeyboardEvent,
+      store,
+      engine
+    )
+    expect(store.setSaveDialogOpen).toHaveBeenCalledWith(true)
+    expect(engine.downloadProjectFile).not.toHaveBeenCalled()
+    const plain = { setSaveDialogOpen: vi.fn() } as any
+    handleGlobalKeydown(
+      key({ key: 's', code: 'KeyS', ctrlKey: true, target: null }) as KeyboardEvent,
+      plain,
+      engine
+    )
+    expect(engine.downloadProjectFile).toHaveBeenCalledTimes(1)
+    expect(plain.setSaveDialogOpen).not.toHaveBeenCalled()
+  })
+
   it('toggles the bounding box on Ctrl+Shift+B', () => {
     const select = { dropFrame: vi.fn(), refreshSelectionChrome: vi.fn() } as any
     const engine = { getController: vi.fn(() => select) } as any

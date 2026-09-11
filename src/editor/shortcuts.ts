@@ -241,6 +241,11 @@ export function handleGlobalKeydown(
       // browsers allow this reload shortcut to be intercepted).
       store.updateView({ rulersVisible: !store.view.rulersVisible })
       e.preventDefault()
+    } else if (key === 's' && e.shiftKey) {
+      // Desktop parity: Ctrl+S downloads, Ctrl+Shift+S opens Save As
+      // (the filename dialog is store-shared with the TopBar).
+      store.setSaveDialogOpen(true)
+      e.preventDefault()
     } else if (key === 's') {
       try {
         engine?.downloadProjectFile()
