@@ -24,10 +24,10 @@
             <span class="status-item">{{ currentToolName }}</span>
             <span v-if="store.statusMessage" class="status-item status-msg">{{ store.statusMessage }}</span>
             <el-dropdown trigger="click" @command="onZoomCmd">
-              <span class="status-item zoom-display" title="Zoom presets">{{ zoomPercent }}</span>
+              <span class="status-item zoom-display" title="Zoom presets · scroll to step" @wheel.prevent="onZoomWheel">{{ zoomPercent }}</span>
               <template #dropdown>
                 <el-dropdown-menu>
-                  <el-dropdown-item v-for="z in [25, 50, 100, 200, 400]" :key="z" :command="z">{{ z }}%</el-dropdown-item>
+                  <el-dropdown-item v-for="z in [10, 25, 50, 100, 200, 400, 800]" :key="z" :command="z">{{ z }}%</el-dropdown-item>
                   <el-dropdown-item command="fit" divided>Fit to Window</el-dropdown-item>
                 </el-dropdown-menu>
               </template>
@@ -141,6 +141,13 @@ function clearKey() {
   store.setKeyObject('')
   store.setAlignTarget('selection')
 }
+/** Wheel over the zoom readout steps in/out around the view center. */
+function onZoomWheel(e: WheelEvent) {
+  const e2 = engineRef.value
+  if (!e2) return
+  e2.zoomAt(e.deltaY < 0 ? 1.2 : 1 / 1.2)
+}
+
 function onZoomCmd(cmd: string | number) {
   const e = engineRef.value
   if (!e) return
