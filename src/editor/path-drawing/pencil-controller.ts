@@ -99,7 +99,8 @@ export class PencilController {
     this.stroke = null
     if (!engine || !stroke) return
     if (stroke.segments.length >= 2 && stroke.length > 0.5) {
-      stroke.simplify(2.5 / engine.scope.view.zoom)
+      const smooth = Number((engine.store as any).pencilSmooth)
+      stroke.simplify((Number.isFinite(smooth) ? smooth : 2.5) / engine.scope.view.zoom)
       const layer = engine.getActiveLayer()
       layer.addChild(stroke)
       stroke.data.id = engine.genId()
