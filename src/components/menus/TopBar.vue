@@ -1,7 +1,7 @@
 <template>
   <div class="top-bar">
     <div class="menus">
-      <div class="app-title">Vector Editor</div>
+      <div class="app-title">Vector Editor{{ store.documentName ? ' — ' + store.documentName : '' }}</div>
       <div class="menu-group">
         <el-dropdown trigger="click" @command="onFileCmd" @visible-change="onFileMenuVisible">
           <span class="menu-label">File</span>
@@ -1717,6 +1717,10 @@ onMounted(() => {
   void refreshRecentFiles()
 })
 
+watch(() => store.documentName, (name) => {
+  document.title = name ? `Vue Vector Editor — ${name}` : 'Vue Vector Editor'
+})
+
 async function onFileCmd(cmd: string) {
   blurMenuFocus()
   const e = engineRef?.value
@@ -1736,6 +1740,8 @@ async function onFileCmd(cmd: string) {
         return
       }
       e.importProjectFile(text)
+      const meta = recentFiles.value.find((r) => r.id === cmd.slice(7))
+      store.setDocumentName(meta?.name ?? '')
       store.setStatusMessage('Project opened')
     } catch (err) {
       store.setStatusMessage(err instanceof Error ? err.message : 'Project open failed')
@@ -1745,6 +1751,7 @@ async function onFileCmd(cmd: string) {
   switch (cmd) {
     case 'new': {
       if (!confirmDiscard()) break
+      store.setDocumentName('')
       // New documents inherit the active artboard size (what Canvas
       // Settings shows), not the stale pageSize default from an old file.
       const board = store.activeArtboard

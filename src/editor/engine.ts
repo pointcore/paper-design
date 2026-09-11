@@ -2220,6 +2220,7 @@ export class EditorEngine {
     setTimeout(() => URL.revokeObjectURL(url), 4000)
     this.markSaved()
     this.showStatus('Project saved')
+    if (filename) this.store.setDocumentName(stem)
     // Mirror into the File > Recent list (best effort, non-blocking).
     void recordRecentProject(stem, fileText)
   }

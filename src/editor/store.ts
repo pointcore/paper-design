@@ -205,6 +205,8 @@ export const useEditorStore = defineStore('editor', {
     cursorPos: { x: 0, y: 0 },
     /** Status bar message */
     statusMessage: '',
+    /** Document display name (Save As / recent open; shown in the title bar) */
+    documentName: '',
     /** Page settings (default size for new documents and artboards) */
     pageSize: { width: 1920, height: 1080 },
     /** Print bleed in document units (vector PDF page grows by this; 0 = trim only) */
@@ -356,6 +358,10 @@ export const useEditorStore = defineStore('editor', {
      * (desktop editors do the same) so a stale "saved" note can't outlive
      * the state it described. Each new message restarts the timer.
      */
+    setDocumentName(name: string) {
+      this.documentName = (name || '').trim()
+    },
+
     setStatusMessage(msg: string) {
       this.statusMessage = msg
       if (statusTimer !== undefined) clearTimeout(statusTimer)
