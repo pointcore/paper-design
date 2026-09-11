@@ -30,21 +30,27 @@
                  @dblclick="cycleGroup(g)">
               <el-icon v-if="currentOf(g).icon" :size="16"><component :is="currentOf(g).icon" /></el-icon>
               <span v-else class="glyph">{{ currentOf(g).glyph }}</span>
-              <span v-if="g.members.length > 1" class="flyout-mark" @click.stop="toggleFlyout(g.key)">▸</span>
+              <span v-if="g.members.length > 1" class="flyout-mark" @click.stop="toggleFlyout(g.key, $event)">▸</span>
             </div>
-          </div>
-        </div>
-        <div v-if="openFlyout === g.key" class="flyout">
-          <div v-for="m in g.members" :key="m.name" class="flyout-item"
-               :class="{ active: store.tool === m.name }"
-               :title="m.tip" @click="pickFromGroup(g.key, m.name)">
-            <el-icon v-if="m.icon" :size="14"><component :is="m.icon" /></el-icon>
-            <span v-else class="glyph">{{ m.glyph }}</span>
-            <span class="flyout-label">{{ shortLabel(m.name) }}</span>
           </div>
         </div>
       </div>
     </template>
+
+    <!-- The rail is a scroll container, so an absolutely-positioned flyout gets
+         clipped by its overflow (overflow-y:auto forces overflow-x to auto too).
+         Teleport it to <body> and position it with fixed coords from the anchor. -->
+    <Teleport to="body">
+      <div v-if="openGroup" ref="flyoutRef" class="flyout" :style="flyoutStyle" @click.stop>
+        <div v-for="m in openGroup.members" :key="m.name" class="flyout-item"
+             :class="{ active: store.tool === m.name }"
+             :title="m.tip" @click="pickFromGroup(openFlyout, m.name)">
+          <el-icon v-if="m.icon" :size="14"><component :is="m.icon" /></el-icon>
+          <span v-else class="glyph">{{ m.glyph }}</span>
+          <span class="flyout-label">{{ shortLabel(m.name) }}</span>
+        </div>
+      </div>
+    </Teleport>
 
     <div class="tool-spacer"></div>
 
@@ -62,7 +68,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, inject, type Ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, inject, nextTick, type Ref, onMounted, onUnmounted } from 'vue'
 import {
   Pointer, Aim, EditPen, Edit, MagicStick,
   Position, Setting, Brush, BrushFilled, Star, Operation, ChatLineRound,
@@ -161,6 +167,12 @@ const filteredTools = computed(() => {
 // Per-group memory of the last used member (AI keeps the flyout selection).
 const groupCurrent = ref<Record<string, ToolName>>({})
 const openFlyout = ref('')
+const openGroup = computed(() => groups.find((g) => g.key === openFlyout.value) ?? null)
+
+// Fixed-position coords for the teleported flyout, derived from the rail button.
+const flyoutRef = ref<HTMLElement | null>(null)
+const flyoutPos = ref({ left: 0, top: 0 })
+const flyoutStyle = computed(() => ({ left: `${flyoutPos.value.left}px`, top: `${flyoutPos.value.top}px` }))
 
 function groupOf(tool: ToolName): ToolGroup | undefined {
   return groups.find((g) => g.members.some((m) => m.name === tool))
@@ -191,8 +203,27 @@ function pickFromGroup(key: string, name: ToolName) {
   selectTool(name)
 }
 
-function toggleFlyout(key: string) {
-  openFlyout.value = openFlyout.value === key ? '' : key
+function toggleFlyout(key: string, evt?: MouseEvent) {
+  if (openFlyout.value === key) {
+    openFlyout.value = ''
+    return
+  }
+  openFlyout.value = key
+  const anchor = (evt?.currentTarget as HTMLElement | null)?.closest('.group-main') as HTMLElement | null
+  if (!anchor) return
+  const r = anchor.getBoundingClientRect()
+  flyoutPos.value = { left: r.right + 4, top: r.top }
+  nextTick(() => {
+    const el = flyoutRef.value
+    if (!el) return
+    const w = el.offsetWidth
+    const h = el.offsetHeight
+    let left = flyoutPos.value.left
+    let top = flyoutPos.value.top
+    if (left + w > window.innerWidth - 8) left = Math.max(8, r.left - w - 4)
+    if (top + h > window.innerHeight - 8) top = Math.max(8, window.innerHeight - h - 8)
+    flyoutPos.value = { left, top }
+  })
 }
 
 function cycleGroup(g: ToolGroup) {
@@ -237,12 +268,24 @@ function restoreGroupMemory() {
 }
 
 function onDocClick() { openFlyout.value = '' }
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') openFlyout.value = ''
+}
+// The flyout is fixed-positioned, so any scroll/resize would leave it
+// detached from its anchor — close it instead of chasing the anchor.
+function onViewportChange() { openFlyout.value = '' }
 onMounted(() => {
   restoreGroupMemory()
   document.addEventListener('click', onDocClick)
+  document.addEventListener('keydown', onKeydown)
+  document.addEventListener('scroll', onViewportChange, true)
+  window.addEventListener('resize', onViewportChange)
 })
 onUnmounted(() => {
   document.removeEventListener('click', onDocClick)
+  document.removeEventListener('keydown', onKeydown)
+  document.removeEventListener('scroll', onViewportChange, true)
+  window.removeEventListener('resize', onViewportChange)
 })
 </script>
 
@@ -284,11 +327,10 @@ onUnmounted(() => {
 .tool-spacer { flex: 1; }
 .group-block { width: 100%; position: relative; display: flex; flex-direction: column; align-items: center; }
 .flyout {
-  position: absolute; left: 46px; top: 0; z-index: 50; min-width: 150px;
+  position: fixed; z-index: 3000; min-width: 150px;
   background: #1e1e1e; border: 1px solid #3d3d3d; border-radius: 4px; padding: 4px;
   box-shadow: 0 4px 16px rgba(0,0,0,0.5);
 }
-.density-double .flyout { left: 74px; }
 .flyout-item {
   display: flex; align-items: center; gap: 8px; padding: 6px 8px; font-size: 12px;
   color: #d5d5d5; border-radius: 3px; cursor: pointer; white-space: nowrap; text-transform: capitalize;
