@@ -25,6 +25,13 @@ import type {
 
 // --- Defaults ---
 
+/** How long a status bar message stays visible before auto-clearing. */
+const STATUS_MESSAGE_TTL_MS = 5000
+
+/** Pending auto-clear timer for the status bar message (module-scoped:
+ * Pinia actions live on the store instance, but the timer must not). */
+let statusTimer: ReturnType<typeof setTimeout> | undefined
+
 /** Default style */
 export function createDefaultStyle(): StyleState {
   return {
@@ -344,9 +351,18 @@ export const useEditorStore = defineStore('editor', {
       this.cursorPos = { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 }
     },
 
-    /** Set status bar message */
+    /**
+     * Set status bar message. Transient: auto-clears after a few seconds
+     * (desktop editors do the same) so a stale "saved" note can't outlive
+     * the state it described. Each new message restarts the timer.
+     */
     setStatusMessage(msg: string) {
       this.statusMessage = msg
+      if (statusTimer !== undefined) clearTimeout(statusTimer)
+      statusTimer = setTimeout(() => {
+        statusTimer = undefined
+        this.statusMessage = ''
+      }, STATUS_MESSAGE_TTL_MS)
     },
 
     /** Update view settings */
