@@ -657,6 +657,7 @@ export class EditorEngine {
           locked: layer.locked,
           opacity: layer.opacity,
           isUserLayer: true,
+          color: (layer.data as any).layerColor || undefined,
           // Keep the panel fold state across syncs (undo/import/duplicates
           // rebuild the list from the project and would expand everything).
           expand: prevExpand.get(id) ?? true,
@@ -664,6 +665,29 @@ export class EditorEngine {
       }
     }
     this.store.syncLayers(layers)
+  }
+
+  /**
+   * Custom accent color for a user layer, used by the panel strip and the
+   * selection chrome (AI Layer Options). Null clears back to the palette.
+   */
+  setLayerColor(layerId: string, color: string | null): void {
+    const layer = this.project.layers.find(
+      (l) => (l.data as any)?.layerId === layerId && (l.data as any)?.isUserLayer
+    )
+    if (!layer) return
+    const clean = typeof color === 'string' && /^#[0-9a-fA-F]{6}$/.test(color) ? color : null
+    if (clean) (layer.data as any).layerColor = clean
+    else delete (layer.data as any).layerColor
+    this.syncLayersToStore()
+    const select = this.controllers.get('select') as {
+      refreshSelectionChrome?: () => void
+    } | null
+    try {
+      select?.refreshSelectionChrome?.()
+    } catch { /* chrome repaint is best effort */ }
+    this.pushHistory('Layer Color')
+    this.scope.view.update()
   }
 
   getActiveLayer(): paper.Layer {

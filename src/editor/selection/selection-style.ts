@@ -17,8 +17,11 @@ export const FALLBACK_SELECTION_COLOR = '#4a90d9'
 /** Accent color for a user-layer id by its position in the store stack. */
 export function layerColorById(engine: EditorEngine, layerId: string | undefined): string {
   if (!layerId) return FALLBACK_SELECTION_COLOR
-  const idx = engine.store.layers.findIndex((l) => l.id === layerId)
-  if (idx < 0) return FALLBACK_SELECTION_COLOR
+  const meta = engine.store.layers.find((l) => l.id === layerId)
+  if (!meta) return FALLBACK_SELECTION_COLOR
+  // A user-picked color (Layer Options parity) overrides the palette.
+  if (meta.color) return meta.color
+  const idx = engine.store.layers.indexOf(meta)
   return LAYER_COLORS[((idx % LAYER_COLORS.length) + LAYER_COLORS.length) % LAYER_COLORS.length]
 }
 

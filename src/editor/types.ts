@@ -162,6 +162,8 @@ export interface LayerMeta {
   opacity: number
   isUserLayer: boolean
   expand: boolean
+  /** Custom accent color (undefined = palette by stack position) */
+  color?: string
 }
 
 /** Object-tree entry: one selectable user item within a layer. */

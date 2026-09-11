@@ -48,7 +48,13 @@
             <el-icon v-if="layer.locked" size="12"><Lock /></el-icon>
             <el-icon v-else size="12"><Unlock /></el-icon>
           </span>
-          <span class="layer-color" :style="{ background: layerColor(layer.id) }"></span>
+          <span
+            class="layer-color"
+            :style="{ background: layer.color || layerColor(layer.id) }"
+            :title="layer.color ? 'Layer color (click = pick, right-click = auto)' : 'Layer color (click = pick)'"
+            @click.stop="pickLayerColor(layer.id)"
+            @contextmenu.prevent.stop="resetLayerColor(layer.id)"
+          ></span>
           <span class="layer-indent"></span>
           <span class="layer-toggle" :class="{ open: layer.expand }" @click.stop="toggleExpand(layer)"></span>
           <span class="layer-icon">◫</span>
@@ -132,6 +138,7 @@
         <div v-else class="ly-ctx-item" :class="{ disabled: item.disabled }" @click="onCtxAction(item)">{{ item.label }}</div>
       </template>
     </div>
+    <input ref="layerColorInput" type="color" class="layer-color-input" @change="onLayerColorPicked" />
   </div>
 </template>
 
@@ -236,6 +243,26 @@ function thumbOf(id: string): string {
 }
 
 /** Stable accent color per layer, mimicking AI's layer color strip. */
+// Custom layer colors: one hidden native picker serves every strip.
+const layerColorInput = ref<HTMLInputElement | null>(null)
+let layerColorTarget = ''
+function pickLayerColor(id: string) {
+  layerColorTarget = id
+  const input = layerColorInput.value
+  if (!input) return
+  const meta = store.layers.find((l) => l.id === id)
+  input.value = /^#[0-9a-fA-F]{6}$/.test(meta?.color ?? '') ? (meta!.color as string) : layerColor(id)
+  input.click()
+}
+function onLayerColorPicked() {
+  const input = layerColorInput.value
+  if (!input) return
+  getEngine()?.setLayerColor(layerColorTarget, input.value)
+}
+function resetLayerColor(id: string) {
+  getEngine()?.setLayerColor(id, null)
+}
+
 function layerColor(id: string): string {
   const idx = store.layers.findIndex((l) => l.id === id)
   return LAYER_COLORS[((idx % LAYER_COLORS.length) + LAYER_COLORS.length) % LAYER_COLORS.length]
@@ -1033,6 +1060,13 @@ watch(() => store.layers.map((l) => `${l.id}:${l.opacity}`).join(','), syncOpaci
   transform: rotate(90deg);
 }
 
+.layer-color-input {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
 .layer-color {
   width: 3px;
   align-self: stretch;
