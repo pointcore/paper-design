@@ -56,6 +56,7 @@
           <template #dropdown>
             <el-dropdown-menu>
               <el-dropdown-item command="transform" :disabled="!store.hasSelection">Transform</el-dropdown-item>
+              <el-dropdown-item command="transformEach" :disabled="!store.hasSelection">Transform Each...</el-dropdown-item>
               <el-dropdown-item command="bringToFront" :disabled="!store.hasSelection">Bring to Front</el-dropdown-item>
               <el-dropdown-item command="bringForward" :disabled="!store.hasSelection">Bring Forward</el-dropdown-item>
               <el-dropdown-item command="sendBackward" :disabled="!store.hasSelection">Send Backward</el-dropdown-item>
@@ -439,6 +440,17 @@
         </div>
         <div class="setting-row">
           <div class="setting-label">
+            <span class="setting-name">Cap</span>
+            <span class="setting-desc">Open-path ends (Auto = default)</span>
+          </div>
+          <el-select v-model="offsetForm.cap" size="small" style="width: 130px">
+            <el-option value="" label="Auto" />
+            <el-option value="round" label="Round" />
+            <el-option value="butt" label="Butt" />
+          </el-select>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
             <span class="setting-name">Steps</span>
             <span class="setting-desc">Concentric copies (contour)</span>
           </div>
@@ -475,8 +487,7 @@
       </div>
     </AppDialog>
 
-    <!-- Radial Repeat Dialog (clock faces, badges, rosettes) -->
-    <AppDialog
+    <!-- Radial Repeat Dialog (clock faces, badges, rosettes) -->    <AppDialog
       v-model="radialVisible"
       title="Radial Repeat"
       :width="360"
@@ -498,6 +509,55 @@
             <span class="setting-desc">Degrees about the reference point</span>
           </div>
           <el-input-number v-model="radialForm.angle" :min="-360" :max="360" size="small" style="width: 130px" />
+        </div>
+      </div>
+    </AppDialog>
+
+    <!-- Transform Each Dialog (beloved batch transform) -->
+    <AppDialog
+      v-model="eachVisible"
+      title="Transform Each"
+      :width="360"
+      confirm-text="Apply"
+      cancel-text="Close"
+      @confirm="onEachConfirm"
+      @cancel="eachVisible = false"
+    >
+      <div class="settings-body app-settings">
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Move X / Y</span>
+          </div>
+          <el-input-number v-model="eachForm.dx" size="small" style="width: 100px" />
+          <el-input-number v-model="eachForm.dy" size="small" style="width: 100px" />
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Rotate</span>
+            <span class="setting-desc">Degrees about each center</span>
+          </div>
+          <el-input-number v-model="eachForm.rotate" size="small" style="width: 130px" />
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Scale</span>
+            <span class="setting-desc">Percent about each center</span>
+          </div>
+          <el-input-number v-model="eachForm.scale" :min="1" :max="1600" size="small" style="width: 130px" />
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Copies</span>
+            <span class="setting-desc">0 = in place, else cumulative copies</span>
+          </div>
+          <el-input-number v-model="eachForm.copies" :min="0" :max="50" size="small" style="width: 130px" />
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Random</span>
+            <span class="setting-desc">Jitter per-item rotation/scale</span>
+          </div>
+          <el-checkbox v-model="eachForm.random" />
         </div>
       </div>
     </AppDialog>
@@ -827,6 +887,7 @@ const offsetForm = reactive({
   distance: 10,
   join: 'miter' as 'miter' | 'round' | 'bevel',
   steps: 1,
+  cap: '' as '' | 'round' | 'butt',
 })
 function onOffsetConfirm() {
   const e = engineRef?.value
@@ -839,7 +900,7 @@ function onOffsetConfirm() {
     store.setStatusMessage('Offset needs a non-zero distance')
     return
   }
-  if (e.offsetPaths(d, offsetForm.join, Number(offsetForm.steps) || 1) === 0) {
+  if (e.offsetPaths(d, offsetForm.join, Number(offsetForm.steps) || 1, offsetForm.cap || undefined) === 0) {
     store.setStatusMessage('Offset needs a path selection')
     return
   }
@@ -863,7 +924,29 @@ function onRepeatConfirm() {
 
 const radialVisible = ref(false)
 const radialForm = reactive({ count: 5, angle: 60 })
-function onRadialConfirm() {
+const eachVisible = ref(false)
+const eachForm = reactive({ dx: 0, dy: 0, rotate: 0, scale: 100, copies: 0, random: false })
+function onEachConfirm() {
+  const e = engineRef?.value
+  if (!e) {
+    eachVisible.value = false
+    return
+  }
+  if (
+    e.transformEach({
+      dx: Number(eachForm.dx) || 0,
+      dy: Number(eachForm.dy) || 0,
+      rotate: Number(eachForm.rotate) || 0,
+      scale: Number(eachForm.scale) || 100,
+      copies: Number(eachForm.copies) || 0,
+      random: eachForm.random,
+    }) === 0
+  ) {
+    store.setStatusMessage('Transform Each needs artwork and a non-zero change')
+    return
+  }
+  eachVisible.value = false
+}function onRadialConfirm() {
   const e = engineRef?.value
   if (!e) {
     radialVisible.value = false
@@ -1849,6 +1932,9 @@ function onObjectCmd(cmd: string) {
     case 'transform':
       store.setReferencePoint('center')
       break
+    case 'transformEach':
+      eachVisible.value = true
+      break
     case 'bringToFront':
       e.bringSelectionToFront()
       break
@@ -2155,13 +2241,7 @@ function onViewCmd(cmd: string) {
       e.zoomAt(1 / 1.2, e.canvas.width / 2, e.canvas.height / 2)
       break
     case 'zoom100':
-      e.zoom = 1
-      e.scope.view.zoom = 1
-      e.syncViewBookkeeping()
-      store.updateView({ zoom: 1 })
-      e.scope.view.update()
-      e.refreshGrid()
-      e.emitViewChange()
+      e.zoomToActualSize()
       break
     case 'rulers':
       toggleRulers()

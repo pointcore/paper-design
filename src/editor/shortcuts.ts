@@ -208,6 +208,9 @@ export function handleGlobalKeydown(
     } else if (key === '0') {
       engine?.fitToContent()
       e.preventDefault()
+    } else if (key === '1') {
+      engine?.zoomToActualSize()
+      e.preventDefault()
     } else if (key === 's') {
       try {
         engine?.downloadProjectFile()

@@ -409,6 +409,7 @@
               <span class="prop-label-sm">Frame</span>
               <el-input-number v-model="frameW" :min="5" :max="5000" :precision="1" size="small" controls-position="right" @change="onFrameSizeChange" />
               <el-input-number v-model="frameH" :min="5" :max="5000" :precision="1" size="small" controls-position="right" @change="onFrameSizeChange" />
+              <el-button size="small" class="icon-btn" title="Fit frame height to the text" @click="onFrameAutofit">⤢</el-button>
             </div>
             <div v-if="overflowHint" class="ai-desc">{{ overflowHint }}</div>
             <div v-if="hasOverflow" class="prop-row">
@@ -1213,6 +1214,34 @@ function onFlowOverflow() {
     return
   }
   store.setStatusMessage('Overflow flowed to a new linked frame')
+  syncAreaFromSelection()
+}
+
+function onFrameAutofit() {
+  const tc = textController() as {
+    selectedAreaItem?: () => any
+    areaInfo?: (item: any) => { frame: { x: number; y: number; width: number; height: number }; raw: string } | null
+    areaOverflow?: (item: any) => { lines: number; fits: number; overflowChars: number }
+    resizeAreaItem?: (item: any, w: number, h: number) => boolean
+    effectiveLeading?: () => number
+  } | null
+  const e = getEngine()
+  if (!tc || !e) return
+  const item = tc.selectedAreaItem?.() as paper.PointText | null
+  if (!item || !tc.areaInfo || !tc.areaOverflow || !tc.resizeAreaItem || !tc.effectiveLeading) return
+  const info = tc.areaInfo(item)
+  if (!info) return
+  const over = tc.areaOverflow(item)
+  const height = Math.max(5, over.lines * tc.effectiveLeading())
+  if (!tc.resizeAreaItem(item, info.frame.width, height)) {
+    store.setStatusMessage('Frame already fits')
+    return
+  }
+  e.clearSelection()
+  item.selected = true
+  e.syncSelectionToStore()
+  e.pushHistory('Fit Frame to Text')
+  e.scope.view.update()
   syncAreaFromSelection()
 }
 

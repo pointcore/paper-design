@@ -1326,6 +1326,17 @@ export class EditorEngine {
     this.fitBounds(this.getActiveArtboardRect())
   }
 
+  /** Reset the view zoom to 100% (View menu, Ctrl+1). */
+  zoomToActualSize(): void {
+    this.zoom = 1
+    this.scope.view.zoom = 1
+    this.syncViewBookkeeping()
+    this.store.updateView({ zoom: 1 })
+    this.scope.view.update()
+    this.refreshGrid()
+    this.emitViewChange()
+  }
+
   /** Zoom the view to frame bounds with padding (ignores empty bounds). */
   private fitBounds(bounds: paper.Rectangle | null): void {
     if (!bounds || bounds.width <= 0 || bounds.height <= 0) return
@@ -3080,6 +3091,81 @@ export class EditorEngine {
     }
     walk(clone)
     return clone
+  }
+
+  /**
+   * Transform Each (beloved batch dialog): move/rotate/scale every
+   * unlocked selected item about its own bounds center. With copies > 0
+   * the originals stay and each copy accumulates the transform (copy c
+   * gets c steps); random jitters per-item rotation/scale. One history.
+   * Returns items transformed (copies included).
+   */
+  transformEach(opts: {
+    dx?: number
+    dy?: number
+    rotate?: number
+    scale?: number
+    copies?: number
+    random?: boolean
+  }): number {
+    const dx = Number.isFinite(opts.dx) ? Number(opts.dx) : 0
+    const dy = Number.isFinite(opts.dy) ? Number(opts.dy) : 0
+    const rotate = Number.isFinite(opts.rotate) ? Number(opts.rotate) : 0
+    const scalePct = Number.isFinite(opts.scale) ? Number(opts.scale) : 100
+    const copies = Math.min(50, Math.max(0, Math.round(Number(opts.copies) || 0)))
+    const random = !!opts.random
+    if (dx === 0 && dy === 0 && rotate === 0 && scalePct === 100 && copies === 0) return 0
+    const sources = this.getSelection().filter((item) => !item.locked && item.parent)
+    if (sources.length === 0) return 0
+    const jitter = () => (random ? 0.5 + Math.random() : 1)
+    const applyStep = (item: paper.Item, step: number) => {
+      const b = (item as any).bounds as paper.Rectangle | undefined
+      if (!b || !(b.width > 0) || !(b.height > 0)) return false
+      const center = b.center.clone()
+      if (dx !== 0 || dy !== 0) {
+        item.position = (item.position as paper.Point).add(
+          new this.scope.Point(dx * step, dy * step)
+        )
+      }
+      const r = rotate * step * jitter()
+      if (Math.abs(r) > 1e-9) item.rotate(r, center)
+      const f = Math.pow(scalePct / 100, step)
+      const fj = random ? 1 + (f - 1) * jitter() : f
+      if (Math.abs(fj - 1) > 1e-9) item.scale(fj, fj, center)
+      this.refreshItemGradient(item)
+      return true
+    }
+    let done = 0
+    if (copies > 0) {
+      const made: paper.Item[] = []
+      for (const item of sources) {
+        const parent = item.parent ?? this.getActiveLayer()
+        const at = parent.children.indexOf(item as any)
+        for (let c = 1; c <= copies; c++) {
+          const clone = this.freshClone(item)
+          parent.insertChild(Math.min(at + c, parent.children.length), clone as any)
+          if (applyStep(clone, c)) made.push(clone)
+          else clone.remove()
+        }
+      }
+      if (made.length === 0) return 0
+      this.clearSelection()
+      made.forEach((item) => {
+        item.selected = true
+      })
+      this.syncSelectionToStore()
+      this.reflowTextsForItems(made)
+      done = made.length
+    } else {
+      for (const item of sources) {
+        if (applyStep(item, 1)) done++
+      }
+      if (done === 0) return 0
+      this.reflowTextsForItems(sources)
+    }
+    this.pushHistory('Transform Each')
+    this.scope.view.update()
+    return done
   }
 
   /**
@@ -5807,10 +5893,16 @@ export class EditorEngine {
    * Offset every selected unlocked path by a distance (AI Offset Path
    * parity, powered by paperjs-offset like Outline Stroke). Positive
    * expands, negative insets. `steps` repeats at multiples (CDR contour
-   * parity). Results keep the source appearance, sit beside their sources
+   * parity); `cap` shapes open-path ends (omitted = library default).
+   * Results keep the source appearance, sit beside their sources
    * and become the new selection. Returns offsets made; one history entry.
    */
-  offsetPaths(distance: number, join: 'miter' | 'round' | 'bevel' = 'miter', steps = 1): number {
+  offsetPaths(
+    distance: number,
+    join: 'miter' | 'round' | 'bevel' = 'miter',
+    steps = 1,
+    cap?: 'round' | 'butt'
+  ): number {
     if (!Number.isFinite(distance) || Math.abs(distance) < 1e-9) return 0
     const dist = Math.min(2000, Math.max(-2000, distance))
     const reps = Math.min(20, Math.max(1, Math.round(Number(steps) || 1)))
@@ -5829,7 +5921,12 @@ export class EditorEngine {
       for (let i = 1; i <= reps; i++) {
         let result: paper.Path | paper.CompoundPath | null = null
         try {
-          result = PaperOffset.offset(target as any, dist * i, { join, limit: 10, insert: false }) as any
+          result = PaperOffset.offset(target as any, dist * i, {
+            join,
+            limit: 10,
+            insert: false,
+            ...(cap ? { cap } : {}),
+          }) as any
         } catch {
           result = null
         }
