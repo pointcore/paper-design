@@ -640,8 +640,8 @@ function ctxSetKey() {
   if (!id) {
     store.setStatusMessage('Select an object first')
   } else {
-    ;(store as any).setKeyObject?.(id)
-    ;(store as any).setAlignTarget?.('key')
+    store.setKeyObject(id)
+    store.setAlignTarget('key')
     store.setStatusMessage('Key object set (align target)')
   }
   hideMenu()

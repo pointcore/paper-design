@@ -326,8 +326,8 @@ export function handleGlobalKeydown(
   if ((e.code === 'BracketLeft' || e.code === 'BracketRight') && !e.altKey) {
     if (store.tool === 'blob-brush' || store.tool === 'brush' || store.tool === 'eraser') {
       const delta = (e.code === 'BracketRight' ? 2 : -2) * (e.shiftKey ? 5 : 1)
-      const next = Math.min(200, Math.max(1, Math.round(Number((store as any).brushSize ?? 20) + delta)))
-      ;(store as any).setBrushSize?.(next)
+      const next = Math.min(200, Math.max(1, Math.round(Number(store.brushSize ?? 20) + delta)))
+      store.setBrushSize(next)
       const ctrl = engine?.getController(store.tool) as { refreshCursor?: () => void } | null
       try {
         ctrl?.refreshCursor?.()
