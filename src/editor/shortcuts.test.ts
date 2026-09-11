@@ -219,6 +219,37 @@ describe('handleGlobalKeydown', () => {
     expect(engine.sendSelectionToBack).toHaveBeenCalledTimes(1)
   })
 
+  it('steps font size on Ctrl+Shift+Period/Comma', () => {
+    const makeText = (size: number) => ({ fontSize: size, locked: false });
+    const text = makeText(12);
+    const engine = {
+      getSelection: vi.fn(() => [text, { fontSize: 10, locked: true }]),
+      scope: { PointText: function Text() {}, view: { update: vi.fn() } },
+      reflowTextsForItems: vi.fn(),
+      pushCoalescedHistory: vi.fn(),
+    } as any;
+    // Make the instanceof check pass for the first item only.
+    Object.setPrototypeOf(text, engine.scope.PointText.prototype);
+    const store = { charStyle: { fontSize: 12 }, updateCharStyle: vi.fn() } as any;
+    handleGlobalKeydown(
+      key({ key: '>', code: 'Period', ctrlKey: true, shiftKey: true, target: null }) as KeyboardEvent,
+      store,
+      engine
+    );
+    expect(text.fontSize).toBe(14);
+    expect(engine.pushCoalescedHistory).toHaveBeenCalledWith('Change Font Size');
+    expect(store.updateCharStyle).not.toHaveBeenCalled();
+    // No text selection: the default style steps instead.
+    const empty = { getSelection: vi.fn(() => []), scope: engine.scope, pushCoalescedHistory: vi.fn() } as any;
+    const plain = { charStyle: { fontSize: 12 }, updateCharStyle: vi.fn() } as any;
+    handleGlobalKeydown(
+      key({ key: '<', code: 'Comma', ctrlKey: true, shiftKey: true, target: null }) as KeyboardEvent,
+      plain,
+      empty
+    );
+    expect(plain.updateCharStyle).toHaveBeenCalledWith({ fontSize: 10 });
+  })
+
   it('duplicates and offsets on Alt+Arrow (AI parity)', () => {
     const engine = { getController: vi.fn(() => null), duplicateSelected: vi.fn(() => true), nudgeSelection: vi.fn(() => true) } as any
     handleGlobalKeydown(

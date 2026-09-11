@@ -140,6 +140,7 @@ export const COMMAND_SHORTCUTS: Array<{ label: string; desc: string }> = [
   { label: 'F4 / Shift+F4', desc: 'Fit All / Fit Page (CDR)' },
   { label: 'Ctrl+R', desc: 'Toggle Rulers' },
   { label: 'Ctrl+U', desc: 'Toggle Smart Guides' },
+  { label: 'Ctrl+Shift+> / <', desc: 'Text Font Size Step (AI)' },
   { label: 'Ctrl+; / Ctrl+Alt+;', desc: 'Toggle Guides / Lock Guides' },
   { label: 'Ctrl+"', desc: 'Toggle Grid' },
   { label: 'Ctrl+Shift+B', desc: 'Toggle Bounding Box' },
@@ -431,6 +432,27 @@ export function handleGlobalKeydown(
       if (e.shiftKey) engine?.sendSelectionToBack()
       else engine?.sendBackward()
       e.preventDefault()
+    } else if (e.shiftKey && !e.altKey && (e.code === 'Period' || e.code === 'Comma')) {
+      // AI Ctrl+Shift+> / <: step the font size (physical Period/Comma keys,
+      // layout-independent). Selected text items resize by 2pt; with no text
+      // selection the default character style steps instead.
+      const dir = e.code === 'Period' ? 2 : -2;
+      const textItems = (engine?.getSelection() ?? []).filter(
+        (item) => item instanceof engine!.scope.PointText && !(item as any).locked
+      ) as paper.PointText[];
+      if (textItems.length > 0) {
+        for (const item of textItems) {
+          const next = Math.min(400, Math.max(1, Math.round((Number(item.fontSize) || 12) + dir)));
+          item.fontSize = next;
+        }
+        engine?.reflowTextsForItems(textItems);
+        engine?.scope.view.update();
+        engine?.pushCoalescedHistory('Change Font Size');
+      } else {
+        const cur = Number(store.charStyle.fontSize) || 12;
+        store.updateCharStyle({ fontSize: Math.min(400, Math.max(1, cur + dir)) });
+      }
+      e.preventDefault();
     } else if (key === 'u' && !e.shiftKey && !e.altKey) {
       // AI Ctrl+U: toggle smart guides (view-source is interceptable).
       store.updateSnap({ smartGuides: !store.snap.smartGuides })
