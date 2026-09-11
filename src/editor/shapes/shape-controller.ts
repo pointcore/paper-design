@@ -373,6 +373,17 @@ export class ShapeController {
     return bounds.width > 0.5 && bounds.height > 0.5
   }
 
+  /**
+   * Tool switch: the paper Tool is replaced so the drag's mouse-up never
+   * arrives — drop the live preview instead of leaving it on the canvas
+   * (re-entering the tool used to be the only cleanup).
+   */
+  deactivate() {
+    if (!this.isDrawing) return
+    this.cancelShape()
+    this.engine?.store.setDragging(false)
+  }
+
   private cancelShape() {
     this.removePreview()
     this.isDrawing = false
