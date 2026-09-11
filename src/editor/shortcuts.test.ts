@@ -130,6 +130,16 @@ describe('handleGlobalKeydown', () => {
     expect(store.setStatusMessage).toHaveBeenCalledWith('No transform to repeat')
   })
 
+  it('toggles smart guides on Ctrl+U', () => {
+    const store = { snap: { smartGuides: false }, updateSnap: vi.fn() } as any
+    handleGlobalKeydown(
+      key({ key: 'u', code: 'KeyU', ctrlKey: true, target: null }) as KeyboardEvent,
+      store,
+      null
+    )
+    expect(store.updateSnap).toHaveBeenCalledWith({ smartGuides: true })
+  })
+
   it('locks/unlocks guides on Ctrl+Alt+Semicolon', () => {
     const store = { view: { guidesLocked: true }, updateView: vi.fn() } as any
     handleGlobalKeydown(
