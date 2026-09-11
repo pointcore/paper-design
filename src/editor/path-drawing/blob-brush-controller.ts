@@ -10,9 +10,9 @@
 import { PaperOffset } from 'paperjs-offset'
 import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
-import { applyToolCursor } from '../cursors'
+import { ringCursor, setCanvasCursor } from '../cursors'
 
-/** Blob diameter in screen pixels (stays constant across zoom). */
+/** Fallback blob diameter in screen pixels (store.brushSize wins). */
 const BLOB_SCREEN_SIZE = 20
 
 export class BlobBrushController {
@@ -24,11 +24,23 @@ export class BlobBrushController {
     this.engine = engine
   }
 
+  /** Screen-px footprint (store-driven, [ ] resizable). */
+  brushScreenSize(): number {
+    const n = Number((this.engine?.store as any)?.brushSize)
+    return Number.isFinite(n) && n > 0 ? Math.min(200, Math.max(1, Math.round(n))) : BLOB_SCREEN_SIZE
+  }
+
+  /** Repaint the precision ring after a size change. */
+  refreshCursor() {
+    if (!this.engine) return
+    setCanvasCursor(this.engine.canvas, ringCursor(this.brushScreenSize()))
+  }
+
   activate() {
     if (!this.engine) return
     this.cancelStroke()
     this.setupTool()
-    applyToolCursor(this.engine.canvas, 'blob-brush')
+    this.refreshCursor()
   }
 
   private getNativeEvent(event: paper.ToolEvent): MouseEvent | null {
@@ -38,7 +50,7 @@ export class BlobBrushController {
   /** Blob diameter in document units at the current zoom. */
   private diameter(): number {
     const engine = this.engine
-    return BLOB_SCREEN_SIZE / (engine?.scope.view.zoom || 1)
+    return this.brushScreenSize() / (engine?.scope.view.zoom || 1)
   }
 
   private setupTool() {

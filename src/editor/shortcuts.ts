@@ -305,6 +305,24 @@ export function handleGlobalKeydown(
   }
   if (e.repeat) return
 
+  // Brush footprint [ ] (AI): shrink/grow blob, brush and eraser.
+  // Repeats allowed so holding the bracket keeps resizing.
+  if ((e.code === 'BracketLeft' || e.code === 'BracketRight') && !e.altKey) {
+    if (store.tool === 'blob-brush' || store.tool === 'brush' || store.tool === 'eraser') {
+      const delta = (e.code === 'BracketRight' ? 2 : -2) * (e.shiftKey ? 5 : 1)
+      const next = Math.min(200, Math.max(1, Math.round(Number((store as any).brushSize ?? 20) + delta)))
+      ;(store as any).setBrushSize?.(next)
+      const ctrl = engine?.getController(store.tool) as { refreshCursor?: () => void } | null
+      try {
+        ctrl?.refreshCursor?.()
+      } catch { /* cursor repaint must never break shortcuts */ }
+      e.preventDefault()
+      return
+    }
+  }
+
+  if (e.repeat) return
+
   // Hold Space to pan with the hand tool from any other tool.
   if (e.key === ' ' && !spacePanPreviousTool && store.tool !== 'view-hand') {
     spacePanPreviousTool = store.tool

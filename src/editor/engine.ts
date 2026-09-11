@@ -2919,6 +2919,54 @@ export class EditorEngine {
   }
 
   /**
+   * Duplicate the unlocked selection in place, then rotate the copies
+   * (AI Rotate-dialog Copy parity). Clones get fresh ids, thread links
+   * are stripped so copies stand alone, and the copies become the new
+   * selection. Returns false when there is nothing to copy.
+   */
+  rotateCopy(angleDeg: number, pivot?: paper.Point): boolean {
+    if (!Number.isFinite(angleDeg) || Math.abs(angleDeg) < 1e-9) return false
+    const sources = this.getSelection().filter((item) => !item.locked && item.parent)
+    if (sources.length === 0) return false
+    const center = pivot ?? this.getSelectionBounds()?.center
+    if (!center) return false
+    const clones: paper.Item[] = []
+    for (const item of sources) {
+      const clone = (item as any).clone({ insert: false }) as paper.Item
+      const walk = (node: paper.Item) => {
+        const data = (node as any).data ?? ((node as any).data = {})
+        if (data.id || data.isUserItem) {
+          data.id = this.genId()
+          data.isUserItem = true
+        }
+        delete data.isPreview
+        delete data.threadNext
+        delete data.threadPrev
+        ;(node as any).selected = false
+        const children = (node as any).children as paper.Item[] | undefined
+        if (children) for (const child of children) walk(child)
+      }
+      walk(clone)
+      const parent = item.parent ?? this.getActiveLayer()
+      parent.insertChild(parent.children.indexOf(item as any) + 1, clone as any)
+      clones.push(clone)
+    }
+    for (const clone of clones) {
+      clone.rotate(angleDeg, center)
+      this.refreshItemGradient(clone)
+    }
+    this.clearSelection()
+    clones.forEach((item) => {
+      item.selected = true
+    })
+    this.syncSelectionToStore()
+    this.reflowTextsForItems(clones)
+    this.pushHistory('Rotate Copy')
+    this.scope.view.update()
+    return true
+  }
+
+  /**
    * Skew every unlocked selected item by degrees around a pivot (default:
    * united selection bounds center). Callers record history.
    */
@@ -3508,6 +3556,46 @@ export class EditorEngine {
     if (!bounds || bounds.width < 1 || bounds.height < 1) return null
     const s = Number.isFinite(scale) ? Math.min(4, Math.max(0.5, scale)) : 1
     return { width: Math.ceil(bounds.width * s), height: Math.ceil(bounds.height * s) }
+  }
+
+  /**
+   * Bake the unlocked selection into a 2x PNG placed at the same spot
+   * (AI Object > Rasterize parity). Originals are removed only after the
+   * raster loads; a load failure keeps them and reports false.
+   */
+  rasterizeSelection(): boolean {
+    const items = this.getSelection().filter((item) => !item.locked && item.parent)
+    if (items.length === 0) return false
+    const bounds = this.getSelectionBounds()
+    if (!bounds || bounds.width < 1 || bounds.height < 1) return false
+    const url = this.exportRaster({ format: 'png', scale: 2, area: 'selection' })
+    if (!url) return false
+    const parent = items[0].parent ?? this.getActiveLayer()
+    const raster = new this.scope.Raster({ source: url }) as paper.Raster
+    parent.addChild(raster)
+    raster.onLoad = () => {
+      raster.position = bounds.center.clone()
+      raster.data.id = this.genId()
+      raster.data.isUserItem = true
+      for (const item of items) {
+        try {
+          item.remove()
+        } catch { /* already gone */ }
+      }
+      this.clearSelection()
+      raster.selected = true
+      this.syncSelectionToStore()
+      this.pushHistory('Rasterize')
+      this.scope.view.update()
+      this.showStatus('Selection rasterized (2x PNG)')
+    }
+    raster.onError = () => {
+      try {
+        raster.remove()
+      } catch { /* already gone */ }
+      this.showStatus('Rasterize failed')
+    }
+    return true
   }
 
   /**

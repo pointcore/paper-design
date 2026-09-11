@@ -11,9 +11,9 @@
  */
 import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
-import { applyToolCursor } from '../cursors'
+import { ringCursor, setCanvasCursor } from '../cursors'
 
-/** Nib width in screen pixels (stays constant across zoom). */
+/** Fallback nib width in screen pixels (store.brushSize wins). */
 const NIB_SCREEN_SIZE = 20
 /** Nib direction in degrees (flat nib resting angle). */
 const NIB_ANGLE = 45
@@ -30,11 +30,23 @@ export class BrushController {
     this.engine = engine
   }
 
+  /** Screen-px nib width (store-driven, [ ] resizable). */
+  brushScreenSize(): number {
+    const n = Number((this.engine?.store as any)?.brushSize)
+    return Number.isFinite(n) && n > 0 ? Math.min(200, Math.max(1, Math.round(n))) : NIB_SCREEN_SIZE
+  }
+
+  /** Repaint the precision ring after a size change. */
+  refreshCursor() {
+    if (!this.engine) return
+    setCanvasCursor(this.engine.canvas, ringCursor(this.brushScreenSize()))
+  }
+
   activate() {
     if (!this.engine) return
     this.cancelStroke()
     this.setupTool()
-    applyToolCursor(this.engine.canvas, 'brush')
+    this.refreshCursor()
   }
 
   private getNativeEvent(event: paper.ToolEvent): PointerEvent | null {
@@ -44,7 +56,7 @@ export class BrushController {
   /** Nib width in document units at the current zoom. */
   private nibWidth(): number {
     const engine = this.engine
-    return NIB_SCREEN_SIZE / (engine?.scope.view.zoom || 1)
+    return this.brushScreenSize() / (engine?.scope.view.zoom || 1)
   }
 
   /** Effective pressure: mice report 0 / 0.5 and paint at full width. */

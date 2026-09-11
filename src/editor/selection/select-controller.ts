@@ -1601,6 +1601,44 @@ export class SelectController {
   }
 
   /**
+   * Average sub-selected anchors (AI Object > Path > Average): collapse to
+   * the mean X, mean Y, or both. Handles follow their anchors. Needs 2+
+   * anchors; null with no sub-selection (caller reports, no fallthrough).
+   */
+  averageSubselection(axis: 'horizontal' | 'vertical' | 'both'): boolean | null {
+    const engine = this.engine
+    if (!engine || this.mode !== 'direct-select') return null
+    const anchors = this.subselectionAnchors()
+    if (anchors.length === 0) return null
+    if (anchors.length < 2) return false
+    let mx = 0
+    let my = 0
+    for (const { seg } of anchors) {
+      mx += seg.point.x
+      my += seg.point.y
+    }
+    mx /= anchors.length
+    my /= anchors.length
+    let moved = false
+    const paths = new Set<paper.Path>()
+    for (const { seg, path } of anchors) {
+      const x = axis === 'vertical' ? seg.point.x : mx
+      const y = axis === 'horizontal' ? seg.point.y : my
+      if (Math.abs(x - seg.point.x) < 1e-9 && Math.abs(y - seg.point.y) < 1e-9) continue
+      seg.point = new engine.scope.Point(x, y)
+      paths.add(path)
+      moved = true
+    }
+    if (!moved) return false
+    paths.forEach((path) => engine.refreshItemGradient(path))
+    engine.reflowTextsForItems([...paths])
+    engine.scope.view.update()
+    engine.pushHistory('Average Anchors')
+    this.refreshChrome()
+    return true
+  }
+
+  /**
    * Finish an anchor marquee: every anchor inside the rubber band joins the
    * sub-selection. Shift extends the existing sub-selection, otherwise the
    * rubber band defines the whole sub-selection.

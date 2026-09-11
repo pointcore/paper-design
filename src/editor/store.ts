@@ -164,6 +164,8 @@ export const useEditorStore = defineStore('editor', {
     polygonSides: 5,
     polygonStar: false,
     starRatio: 0.5,
+    /** Brush/blob/eraser footprint in screen px ([ ] resize, ControlBar edits) */
+    brushSize: 20,
     spiralTurns: 3,
     roundedRadius: 12,
     gridRows: 4,
@@ -474,6 +476,9 @@ export const useEditorStore = defineStore('editor', {
     },
     setStarRatio(n: number) {
       if (Number.isFinite(n)) this.starRatio = Math.min(0.9, Math.max(0.1, n))
+    },
+    setBrushSize(n: number) {
+      if (Number.isFinite(n)) this.brushSize = Math.min(200, Math.max(1, Math.round(n)))
     },
     setSpiralTurns(n: number) {
       if (Number.isFinite(n)) this.spiralTurns = Math.min(12, Math.max(1, Math.round(n)))

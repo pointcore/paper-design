@@ -10,9 +10,9 @@
 import { PaperOffset } from 'paperjs-offset'
 import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
-import { applyToolCursor } from '../cursors'
+import { ringCursor, setCanvasCursor } from '../cursors'
 
-/** Eraser diameter in screen pixels (stays constant across zoom). */
+/** Fallback eraser diameter in screen pixels (store.brushSize wins). */
 const ERASER_SCREEN_SIZE = 20
 
 export class EraserController {
@@ -24,11 +24,23 @@ export class EraserController {
     this.engine = engine
   }
 
+  /** Screen-px footprint (store-driven, [ ] resizable). */
+  brushScreenSize(): number {
+    const n = Number((this.engine?.store as any)?.brushSize)
+    return Number.isFinite(n) && n > 0 ? Math.min(200, Math.max(1, Math.round(n))) : ERASER_SCREEN_SIZE
+  }
+
+  /** Repaint the precision ring after a size change. */
+  refreshCursor() {
+    if (!this.engine) return
+    setCanvasCursor(this.engine.canvas, ringCursor(this.brushScreenSize(), 'cell'))
+  }
+
   activate() {
     if (!this.engine) return
     this.cancelStroke()
     this.setupTool()
-    applyToolCursor(this.engine.canvas, 'eraser')
+    this.refreshCursor()
   }
 
   private getNativeEvent(event: paper.ToolEvent): MouseEvent | null {
@@ -38,7 +50,7 @@ export class EraserController {
   /** Eraser diameter in document units at the current zoom. */
   private diameter(): number {
     const engine = this.engine
-    return ERASER_SCREEN_SIZE / (engine?.scope.view.zoom || 1)
+    return this.brushScreenSize() / (engine?.scope.view.zoom || 1)
   }
 
   private setupTool() {
