@@ -134,6 +134,7 @@ export const COMMAND_SHORTCUTS: Array<{ label: string; desc: string }> = [
   { label: 'Ctrl+3 / Alt+3', desc: 'Hide / Show All' },
   { label: '] / [ (+Shift)', desc: 'Forward / Backward (Shift: Front / Back)' },
   { label: 'Ctrl+PgUp / Ctrl+PgDn', desc: 'CDR Forward / Backward (Shift: Front / Back)' },
+  { label: 'PgUp / PgDn', desc: 'Previous / Next Artboard (CDR)' },
   { label: 'Ctrl+L / Ctrl+K', desc: 'Combine / Break Apart (CDR)' },
   { label: 'Shift+F2', desc: 'Zoom to Selection' },
   { label: 'F4 / Shift+F4', desc: 'Fit All / Fit Page (CDR)' },
