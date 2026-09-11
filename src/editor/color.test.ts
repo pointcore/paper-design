@@ -6,9 +6,12 @@ import { describe, expect, it } from 'vitest'
 import {
   cmykToRgb,
   cssToCmykString,
+  hslToRgb,
   isOutOfCmykGamut,
   parseCssColor,
   rgbToCmyk,
+  rgbToHsl,
+  shiftCssColor,
 } from './color'
 
 describe('parseCssColor', () => {
@@ -83,5 +86,30 @@ describe('isOutOfCmykGamut', () => {
     }
     expect(isOutOfCmykGamut('nope')).toBe(false)
     expect(isOutOfCmykGamut(null)).toBe(false)
+  })
+})
+
+describe('rgbToHsl / hslToRgb', () => {
+  it('round-trips primary colors', () => {
+    expect(rgbToHsl(255, 0, 0)).toMatchObject({ h: 0, s: 1, l: 0.5 })
+    expect(rgbToHsl(0, 0, 0)).toMatchObject({ s: 0, l: 0 })
+    expect(hslToRgb(120, 1, 0.5)).toEqual({ r: 0, g: 255, b: 0 })
+    expect(hslToRgb(0, 0, 1)).toEqual({ r: 255, g: 255, b: 255 })
+  })
+})
+
+describe('shiftCssColor', () => {
+  it('rotates hues (red +120° = green)', () => {
+    expect(shiftCssColor('#ff0000', 120, 0, 0)).toBe('#00ff00')
+    expect(shiftCssColor('#ff0000', 0, 0, 0)).toBe('#ff0000')
+  })
+
+  it('desaturates to gray and preserves alpha', () => {
+    expect(shiftCssColor('#ff0000', 0, -100, 0)).toBe('#808080')
+    expect(shiftCssColor('rgba(255, 0, 0, 0.5)', 0, 0, 0)).toBe('rgba(255, 0, 0, 0.5)')
+  })
+
+  it('passes unparseable input through', () => {
+    expect(shiftCssColor('nope', 30, 0, 0)).toBe('nope')
   })
 })

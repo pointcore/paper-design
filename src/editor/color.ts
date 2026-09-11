@@ -107,3 +107,74 @@ export function isOutOfCmykGamut(css: string | null | undefined): boolean {
   const floor = Math.min(rgba.r, rgba.g, rgba.b)
   return peak === 255 && floor === 0
 }
+
+/** HSL channels (h 0-360, s/l 0-1). */
+export interface Hsl {
+  h: number
+  s: number
+  l: number
+}
+
+/** 8-bit RGB to HSL. */
+export function rgbToHsl(r: number, g: number, b: number): Hsl {
+  const rn = r / 255
+  const gn = g / 255
+  const bn = b / 255
+  const peak = Math.max(rn, gn, bn)
+  const floor = Math.min(rn, gn, bn)
+  const l = (peak + floor) / 2
+  if (peak === floor) return { h: 0, s: 0, l }
+  const d = peak - floor
+  const s = l > 0.5 ? d / (2 - peak - floor) : d / (peak + floor)
+  let h = 0
+  if (peak === rn) h = ((gn - bn) / d + (gn < bn ? 6 : 0)) * 60
+  else if (peak === gn) h = ((bn - rn) / d + 2) * 60
+  else h = ((rn - gn) / d + 4) * 60
+  return { h, s, l }
+}
+
+/** HSL back to 8-bit RGB. */
+export function hslToRgb(h: number, s: number, l: number): { r: number; g: number; b: number } {
+  const hn = (((h % 360) + 360) % 360) / 360
+  const sn = Math.min(1, Math.max(0, s))
+  const ln = Math.min(1, Math.max(0, l))
+  if (sn === 0) {
+    const v = Math.round(ln * 255)
+    return { r: v, g: v, b: v }
+  }
+  const q = ln < 0.5 ? ln * (1 + sn) : ln + sn - ln * sn
+  const p = 2 * ln - q
+  const channel = (t: number): number => {
+    let tt = t
+    if (tt < 0) tt += 1
+    if (tt > 1) tt -= 1
+    if (tt < 1 / 6) return p + (q - p) * 6 * tt
+    if (tt < 1 / 2) return q
+    if (tt < 2 / 3) return p + (q - p) * (2 / 3 - tt) * 6
+    return p
+  }
+  return {
+    r: Math.round(channel(hn + 1 / 3) * 255),
+    g: Math.round(channel(hn) * 255),
+    b: Math.round(channel(hn - 1 / 3) * 255),
+  }
+}
+
+/**
+ * Shift a CSS paint through HSL (Recolor-artwork lite): hue rotates by
+ * degrees, saturation/lightness move relatively by percent points.
+ * Unparseable input passes through unchanged; alpha is preserved.
+ */
+export function shiftCssColor(css: string, dh: number, ds: number, dl: number): string {
+  const rgba = parseCssColor(css)
+  if (!rgba) return css
+  const { h, s, l } = rgbToHsl(rgba.r, rgba.g, rgba.b)
+  const { r, g, b } = hslToRgb(
+    h + (Number.isFinite(dh) ? dh : 0),
+    s + (Number.isFinite(ds) ? ds : 0) / 100,
+    l + (Number.isFinite(dl) ? dl : 0) / 100
+  )
+  const hex = (n: number): string => Math.min(255, Math.max(0, n)).toString(16).padStart(2, '0')
+  if (rgba.a >= 1) return `#${hex(r)}${hex(g)}${hex(b)}`
+  return `rgba(${r}, ${g}, ${b}, ${Math.round(rgba.a * 100) / 100})`
+}

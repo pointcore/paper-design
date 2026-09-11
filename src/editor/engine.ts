@@ -8,6 +8,7 @@ import { createDefaultStyle } from './store'
 import { cursorForTool } from './cursors'
 import { gradientAngleFromVector, linearGradientEndpoints, normalizeAngleDeg } from './geometry'
 import { changeCaseText } from './text/text-case'
+import { shiftCssColor } from './color'
 import { parseProjectFile } from './project-file'
 import type { EditorStore } from './store-types'
 
@@ -5277,6 +5278,221 @@ export class EditorEngine {
       this.scope.view.update()
     }
     return changed
+  }
+
+  /**
+   * Shift selected artwork through HSL (Recolor-lite: hue rotates by
+   * degrees, saturation/lightness move by percent points). Solid fills
+   * and strokes repaint; gradients, patterns and unparseable paints are
+   * skipped. Returns leaves repainted; one history entry.
+   */
+  adjustColors(dh: number, ds: number, dl: number): number {
+    if (![dh, ds, dl].every(Number.isFinite)) return 0
+    if (Math.abs(dh) < 1e-9 && Math.abs(ds) < 1e-9 && Math.abs(dl) < 1e-9) return 0
+    const scope = this.scope
+    let changed = 0
+    const repaint = (leaf: paper.Item) => {
+      const anyLeaf = leaf as any
+      let touched = false
+      for (const key of ['fillColor', 'strokeColor'] as const) {
+        const paint = anyLeaf[key]
+        if (!paint || paint.gradient) continue
+        const css = this.colorToCSS(paint)
+        if (!css) continue
+        try {
+          anyLeaf[key] = new scope.Color(shiftCssColor(css, dh, ds, dl))
+          touched = true
+        } catch {
+          continue
+        }
+      }
+      if (touched) {
+        changed++
+        this.refreshItemGradient(leaf)
+      }
+    }
+    for (const item of this.getSelection()) {
+      if ((item as any).locked) continue
+      const children = (item as any).children as paper.Item[] | undefined
+      if (children && (item instanceof scope.Group)) {
+        // Groups repaint every unlocked leaf (exactly once).
+        const walk = (node: paper.Item) => {
+          if ((node as any).locked) return
+          if (node instanceof scope.Path || node instanceof scope.CompoundPath || node instanceof scope.PointText) {
+            repaint(node)
+          } else {
+            const kids = (node as any).children as paper.Item[] | undefined
+            if (kids) for (const k of kids) walk(k)
+          }
+        }
+        for (const child of children) walk(child)
+      } else {
+        const leaf = this.firstLeaf(item)
+        if (leaf) repaint(leaf)
+      }
+    }
+    if (changed > 0) {
+      this.reflowTextsForItems(this.getSelection())
+      this.pushHistory('Adjust Colors')
+      this.scope.view.update()
+    }
+    return changed
+  }
+
+  /**
+   * Stamp triangular arrowheads on open selected paths (AI Stroke
+   * arrowheads, destructive v1: markers are plain filled siblings, so
+   * later stroke edits do not follow them). Length is absolute document
+   * units; paint follows the stroke (else fill, else black). Returns
+   * markers created; one history entry.
+   */
+  addArrowheads(start: boolean, end: boolean, length: number): number {
+    if (!start && !end) return 0
+    if (!Number.isFinite(length) || length <= 0) return 0
+    const len = Math.min(200, length)
+    const scope = this.scope
+    const targets = this.getSelection().filter(
+      (item) =>
+        !(item as any).locked &&
+        item.parent &&
+        item instanceof scope.Path &&
+        !(item instanceof scope.CompoundPath) &&
+        item.segments.length >= 2 &&
+        !item.closed
+    ) as paper.Path[]
+    if (targets.length === 0) return 0
+    const made: paper.Item[] = []
+    for (const path of targets) {
+      const paint = (path as any).strokeColor ?? (path as any).fillColor
+      const segs = path.segments
+      const ends: Array<{ tip: paper.Point; dir: paper.Point }> = []
+      if (start) {
+        const tip = segs[0].point
+        const prev = segs[1].point
+        ends.push({ tip, dir: tip.subtract(prev) })
+      }
+      if (end) {
+        const tip = segs[segs.length - 1].point
+        const prev = segs[segs.length - 2].point
+        ends.push({ tip, dir: tip.subtract(prev) })
+      }
+      for (const { tip, dir } of ends) {
+        if (dir.length < 1e-9) continue
+        const d = dir.normalize()
+        const n = new scope.Point(-d.y, d.x)
+        const base = tip.subtract(d.multiply(len))
+        const half = len * 0.42
+        const head = new scope.Path([
+          tip.clone(),
+          base.add(n.multiply(half)),
+          base.subtract(n.multiply(half)),
+        ]) as paper.Path
+        head.closed = true
+        try {
+          head.fillColor = paint ? (paint.clone ? paint.clone() : new scope.Color(paint)) : new scope.Color('#000000')
+        } catch {
+          head.fillColor = new scope.Color('#000000')
+        }
+        head.strokeColor = null
+        const parent = path.parent ?? this.getActiveLayer()
+        parent.insertChild(parent.children.indexOf(path as any) + 1, head as any)
+        head.data.id = this.genId()
+        head.data.isUserItem = true
+        made.push(head as paper.Item)
+      }
+    }
+    if (made.length === 0) return 0
+    this.clearSelection()
+    made.forEach((item) => {
+      item.selected = true
+    })
+    this.syncSelectionToStore()
+    this.pushHistory('Add Arrowheads')
+    this.scope.view.update()
+    return made.length
+  }
+
+  /**
+   * Select stray points (paths with at most one anchor) across all
+   * unlocked visible artwork. Returns how many were selected.
+   */
+  selectStrays(): number {
+    const scope = this.scope
+    const strays: paper.Item[] = []
+    const walk = (node: paper.Item) => {
+      const data = (node as any).data ?? {}
+      if (data.isChrome || data.isPreview || data.isGuide || data.isArtboard || data.annotation) return
+      if (data.isPatternTile || (node as any).clipMask) return
+      if ((node as any).visible === false || (node as any).locked) return
+      if (node instanceof scope.Path && !(node instanceof scope.CompoundPath)) {
+        if (node.segments.length <= 1) strays.push(node)
+        return
+      }
+      const children = (node as any).children as paper.Item[] | undefined
+      if (children) for (const child of children) walk(child)
+    }
+    for (const layer of this.project.layers) {
+      if (!(layer.data as any)?.isUserLayer || !layer.visible) continue
+      for (const child of layer.children) walk(child as paper.Item)
+    }
+    this.clearSelection()
+    strays.forEach((item) => {
+      item.selected = true
+    })
+    this.syncSelectionToStore()
+    this.scope.view.update()
+    return strays.length
+  }
+
+  /**
+   * Select every text object (annotation labels excluded). Returns count.
+   */
+  selectTextObjects(): number {
+    const scope = this.scope
+    const texts: paper.Item[] = []
+    const walk = (node: paper.Item) => {
+      const data = (node as any).data ?? {}
+      if (data.isChrome || data.isPreview || data.isGuide || data.isArtboard || data.annotation) return
+      if ((node as any).visible === false || (node as any).locked) return
+      if (node instanceof scope.PointText) {
+        texts.push(node)
+        return
+      }
+      const children = (node as any).children as paper.Item[] | undefined
+      if (children) for (const child of children) walk(child)
+    }
+    for (const layer of this.project.layers) {
+      if (!(layer.data as any)?.isUserLayer || !layer.visible) continue
+      for (const child of layer.children) walk(child as paper.Item)
+    }
+    this.clearSelection()
+    texts.forEach((item) => {
+      item.selected = true
+    })
+    this.syncSelectionToStore()
+    this.scope.view.update()
+    return texts.length
+  }
+
+  /**
+   * Best-effort copy of the selection (else all artwork) to the OS
+   * clipboard as PNG. Resolves false when there is nothing to paint,
+   * the API is unavailable or the write is denied.
+   */
+  async copyRasterToClipboard(scale = 2): Promise<boolean> {
+    const s = Number.isFinite(scale) ? Math.min(3, Math.max(1, scale)) : 2
+    const area = this.getSelection().length > 0 ? 'selection' : 'artwork'
+    const url = this.exportRaster({ format: 'png', scale: s, area })
+    if (!url) return false
+    const clipboard = this.systemClipboard()
+    if (!clipboard || typeof ClipboardItem === 'undefined' || !clipboard.write) return false
+    try {
+      const blob = await (await fetch(url)).blob()
+      await clipboard.write([new ClipboardItem({ 'image/png': blob })])
+      return true
+    } catch {
+      return false
+    }
   }
 
   /**

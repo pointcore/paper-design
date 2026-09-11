@@ -164,7 +164,15 @@ export function handleGlobalKeydown(
 
   if (e.ctrlKey || e.metaKey) {
     const key = e.key.toLowerCase()
-    if (key === 'c') {
+    if (key === 'c' && e.shiftKey) {
+      // Copy as PNG (raster) instead of the default SVG copy.
+      engine?.copyRasterToClipboard(2).then((ok) => {
+        if (engine) {
+          store.setStatusMessage(ok ? 'PNG copied to clipboard' : 'Copy as PNG failed')
+        }
+      }).catch(() => undefined)
+      e.preventDefault()
+    } else if (key === 'c') {
       engine?.copySelectedToClipboard()
       engine?.copyToSystemClipboard()?.catch(() => undefined)
       e.preventDefault()
