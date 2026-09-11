@@ -164,8 +164,7 @@ export function hslToRgb(h: number, s: number, l: number): { r: number; g: numbe
  * Shift a CSS paint through HSL (Recolor-artwork lite): hue rotates by
  * degrees, saturation/lightness move relatively by percent points.
  * Unparseable input passes through unchanged; alpha is preserved.
- */
-export function shiftCssColor(css: string, dh: number, ds: number, dl: number): string {
+ */export function shiftCssColor(css: string, dh: number, ds: number, dl: number): string {
   const rgba = parseCssColor(css)
   if (!rgba) return css
   const { h, s, l } = rgbToHsl(rgba.r, rgba.g, rgba.b)
@@ -177,4 +176,12 @@ export function shiftCssColor(css: string, dh: number, ds: number, dl: number): 
   const hex = (n: number): string => Math.min(255, Math.max(0, n)).toString(16).padStart(2, '0')
   if (rgba.a >= 1) return `#${hex(r)}${hex(g)}${hex(b)}`
   return `rgba(${r}, ${g}, ${b}, ${Math.round(rgba.a * 100) / 100})`
+}
+
+/**
+ * Euclidean RGB distance between parsed colors (alpha ignored, 0-442).
+ * Drives magic-wand tolerance matching.
+ */
+export function colorDistanceRgb(a: Rgba, b: Rgba): number {
+  return Math.hypot(a.r - b.r, a.g - b.g, a.b - b.b)
 }

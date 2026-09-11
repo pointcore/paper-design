@@ -5,6 +5,7 @@ import { defineStore } from 'pinia'
 import type {
   ToolName,
   StyleState,
+  StylePreset,
   LayerMeta,
   ArtboardMeta,
   CharStyle,
@@ -162,12 +163,16 @@ export const useEditorStore = defineStore('editor', {
     distributeGap: 10,
     /** Recent fill/stroke colors for the Swatches panel + color bar */
     recentColors: [] as string[],
+    /** Saved appearance presets (Graphic Styles lite, persisted) */
+    stylePresets: [] as StylePreset[],
     /** Live-shape options surfaced in the contextual control bar */
     polygonSides: 5,
     polygonStar: false,
     starRatio: 0.5,
     /** Brush/blob/eraser footprint in screen px ([ ] resize, ControlBar edits) */
     brushSize: 20,
+    /** Magic-wand fill tolerance in RGB distance (0 = exact match) */
+    wandTolerance: 0,
     spiralTurns: 3,
     roundedRadius: 12,
     gridRows: 4,
@@ -487,6 +492,25 @@ export const useEditorStore = defineStore('editor', {
       this.recentColors = next.slice(0, 12)
     },
 
+    /** Replace the style preset list (load from storage) */
+    setStylePresets(list: StylePreset[]) {
+      this.stylePresets = Array.isArray(list) ? list.slice(0, 24) : []
+    },
+
+    /** Save the current appearance as a preset (dedupe by paint, cap 24) */
+    addStylePreset(name: string, style: StyleState): string {
+      const clean = (name || '').trim().slice(0, 40) || `Style ${this.stylePresets.length + 1}`
+      const snapshot = JSON.parse(JSON.stringify(style)) as StyleState
+      const id = `style-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`
+      this.stylePresets = [{ id, name: clean, style: snapshot }, ...this.stylePresets].slice(0, 24)
+      return id
+    },
+
+    /** Delete a style preset */
+    removeStylePreset(id: string) {
+      this.stylePresets = this.stylePresets.filter((p) => p.id !== id)
+    },
+
     /** Live-shape option setters (clamped to sane ranges) */
     setPolygonSides(n: number) {
       if (Number.isFinite(n)) this.polygonSides = Math.min(64, Math.max(3, Math.round(n)))
@@ -499,6 +523,9 @@ export const useEditorStore = defineStore('editor', {
     },
     setBrushSize(n: number) {
       if (Number.isFinite(n)) this.brushSize = Math.min(200, Math.max(1, Math.round(n)))
+    },
+    setWandTolerance(n: number) {
+      if (Number.isFinite(n)) this.wandTolerance = Math.min(100, Math.max(0, Math.round(n)))
     },
     setSpiralTurns(n: number) {
       if (Number.isFinite(n)) this.spiralTurns = Math.min(12, Math.max(1, Math.round(n)))

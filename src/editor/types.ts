@@ -267,6 +267,13 @@ export type AlignTarget = 'selection' | 'board' | 'key'
 /** Extended shaper ops built from the four boolean primitives. */
 export type ExtendedBooleanOp = 'minusBack' | 'divide' | 'trim' | 'outline'
 
+/** Saved single-appearance style preset (Graphic Styles lite). */
+export interface StylePreset {
+  id: string
+  name: string
+  style: StyleState
+}
+
 /** Saved workspace layout preset. */
 export type WorkspacePreset = 'essentials' | 'typography' | 'print'
 

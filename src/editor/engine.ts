@@ -8,7 +8,7 @@ import { createDefaultStyle } from './store'
 import { cursorForTool } from './cursors'
 import { gradientAngleFromVector, linearGradientEndpoints, normalizeAngleDeg } from './geometry'
 import { changeCaseText } from './text/text-case'
-import { isOutOfCmykGamut, shiftCssColor } from './color'
+import { colorDistanceRgb, isOutOfCmykGamut, parseCssColor, shiftCssColor } from './color'
 import { parseProjectFile } from './project-file'
 import type { EditorStore } from './store-types'
 
@@ -4040,18 +4040,41 @@ export class EditorEngine {
   /**
    * Select every appearance leaf sharing an attribute of the
    * first selected leaf (fill / stroke color, stroke width, opacity or
-   * blend mode). Returns how many items were selected. Additive mode
+   * blend mode). Tolerance applies to fill/stroke as an RGB distance
+   * (wand slider). Returns how many items were selected. Additive mode
    * keeps the existing selection (wand Shift-click parity).
    */
-  selectSame(attribute: 'fill' | 'stroke' | 'strokeWidth' | 'opacity' | 'blendMode', additive = false): number {
+  selectSame(
+    attribute: 'fill' | 'stroke' | 'strokeWidth' | 'opacity' | 'blendMode',
+    additive = false,
+    tolerance = 0
+  ): number {
     const leaves = this.appearanceLeaves()
     if (leaves.length === 0) return 0
     const reference = this.getSelection()
       .map((item) => this.firstLeaf(item))
       .find((leaf) => leaf !== null) as paper.Item | undefined
     if (!reference) return 0
-    const key = this.appearanceKey(reference, attribute)
-    const matches = leaves.filter((leaf) => this.appearanceKey(leaf, attribute) === key)
+    const tol = Number.isFinite(tolerance) ? Math.max(0, tolerance) : 0
+    let matches: paper.Item[]
+    if (tol > 0 && (attribute === 'fill' || attribute === 'stroke')) {
+      const paint = (reference as any)[attribute === 'fill' ? 'fillColor' : 'strokeColor'] as any
+      if (paint?.gradient) return 0
+      const refCss = this.colorToCSS(paint)
+      const refRgba = refCss ? parseCssColor(refCss) : null
+      if (!refRgba) return 0
+      matches = leaves.filter((leaf) => {
+        const other = (leaf as any)[attribute === 'fill' ? 'fillColor' : 'strokeColor'] as any
+        if (!other || other.gradient) return refCss === 'none' && !other
+        const css = this.colorToCSS(other)
+        const rgba = css ? parseCssColor(css) : null
+        if (!rgba) return false
+        return colorDistanceRgb(refRgba, rgba) <= tol
+      })
+    } else {
+      const key = this.appearanceKey(reference, attribute)
+      matches = leaves.filter((leaf) => this.appearanceKey(leaf, attribute) === key)
+    }
     if (!additive) this.clearSelection()
     matches.forEach((item) => {
       item.selected = true

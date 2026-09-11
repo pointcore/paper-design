@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   cmykToRgb,
+  colorDistanceRgb,
   cssToCmykString,
   hslToRgb,
   isOutOfCmykGamut,
@@ -111,5 +112,15 @@ describe('shiftCssColor', () => {
 
   it('passes unparseable input through', () => {
     expect(shiftCssColor('nope', 30, 0, 0)).toBe('nope')
+  })
+})
+
+describe('colorDistanceRgb', () => {
+  it('measures Euclidean channel distance', () => {
+    const red = parseCssColor('#ff0000')!
+    const green = parseCssColor('#00ff00')!
+    expect(colorDistanceRgb(red, red)).toBe(0)
+    expect(colorDistanceRgb(red, green)).toBeCloseTo(Math.hypot(255, 255), 9)
+    expect(colorDistanceRgb(red, parseCssColor('#fe0000')!)).toBeCloseTo(1, 9)
   })
 })

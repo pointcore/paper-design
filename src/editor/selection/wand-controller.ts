@@ -1,10 +1,9 @@
 /**
- * Magic wand tool (AI Magic Wand parity, exact-match v1).
+ * Magic wand tool (AI Magic Wand parity).
  *
  * Click artwork to select every unlocked leaf sharing its fill color.
- * Shift-click adds to the selection instead of replacing it. Tolerance /
- * multi-attribute matching is out of scope (use Select Same for width,
- * opacity and blend).
+ * Tolerance (RGB distance, 0 = exact) comes from the store ControlBar
+ * slider. Shift-click adds to the selection instead of replacing it.
  */
 import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
@@ -43,8 +42,11 @@ export class WandController {
         return
       }
       engine.selectItem(top)
-      const n = engine.selectSame('fill', additive)
-      engine.store.setStatusMessage(`Wand selected ${n} item${n === 1 ? '' : 's'} with the same fill`)
+      const tol = Number((engine.store as any).wandTolerance) || 0
+      const n = engine.selectSame('fill', additive, tol)
+      engine.store.setStatusMessage(
+        `Wand selected ${n} item${n === 1 ? '' : 's'} with the same fill${tol > 0 ? ` (±${Math.round(tol)})` : ''}`
+      )
     }
 
     scope.tool.onMouseMove = (event: paper.ToolEvent) => {
