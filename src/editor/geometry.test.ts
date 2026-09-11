@@ -2,7 +2,7 @@
  * Unit tests for shared geometry helpers — run with `vitest run`.
  */
 import { describe, expect, it } from 'vitest'
-import { gradientAngleFromVector, linearGradientEndpoints, normalizeAngleDeg, remainingRuns, reshapeFalloff, rulerUnitFactor, snap45 } from './geometry'
+import { gradientAngleFromVector, linearGradientEndpoints, normalizeAngleDeg, remainingRuns, reshapeFalloff, roundCornerHandle, rulerUnitFactor, snap45 } from './geometry'
 
 /** Minimal PaperScope stand-in (snap45 only news up points). */
 const scope = {
@@ -130,6 +130,23 @@ describe('reshapeFalloff', () => {
     expect(reshapeFalloff(-1, 120)).toBe(0)
     expect(reshapeFalloff(10, 0)).toBe(0)
     expect(reshapeFalloff(Number.NaN, 120)).toBe(0)
+  })
+})
+
+describe('roundCornerHandle', () => {
+  it('scales the radius by the circle kappa', () => {
+    expect(roundCornerHandle(100, 100, 10)).toBeCloseTo(10 * 0.5523, 9)
+  })
+
+  it('clamps to the shorter edge half-length', () => {
+    expect(roundCornerHandle(10, 100, 20)).toBeCloseTo(5 * 0.5523, 9)
+    expect(roundCornerHandle(100, 4, 20)).toBeCloseTo(2 * 0.5523, 9)
+  })
+
+  it('rejects bad input', () => {
+    expect(roundCornerHandle(0, 10, 5)).toBe(0)
+    expect(roundCornerHandle(10, 10, -5)).toBe(0)
+    expect(roundCornerHandle(Number.NaN, 10, 5)).toBe(0)
   })
 })
 

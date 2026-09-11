@@ -178,6 +178,13 @@ export function handleGlobalKeydown(
       engine?.copySelectedToClipboard()
       engine?.copyToSystemClipboard()?.catch(() => undefined)
       e.preventDefault()
+    } else if (key === 'd') {
+      // Duplicate in place claims Ctrl+D (CDR parity); the browser bookmark
+      // shortcut never fires from the canvas, like the Ctrl+J download tab.
+      if (engine && !engine.duplicateInPlace()) {
+        store.setStatusMessage('Nothing to duplicate')
+      }
+      e.preventDefault()
     } else if (key === 'x') {
       // Capture the OS copy before the cut deletes the selection.
       engine?.copyToSystemClipboard()?.catch(() => undefined)

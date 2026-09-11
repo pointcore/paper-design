@@ -68,6 +68,17 @@ export function reshapeFalloff(distance: number, radius: number): number {
 }
 
 /**
+ * Round-corner handle length (AI Round Corners / CDR fillet lite): tangent
+ * run clamped by both edge half-lengths (never eats past a midpoint),
+ * scaled by the circle-approx kappa so short runs stay circular.
+ */
+export function roundCornerHandle(edgeA: number, edgeB: number, radius: number): number {
+  if (!Number.isFinite(edgeA) || !Number.isFinite(edgeB) || !Number.isFinite(radius)) return 0
+  if (edgeA <= 0 || edgeB <= 0 || radius <= 0) return 0
+  return Math.min(radius, edgeA / 2, edgeB / 2) * 0.5523
+}
+
+/**
  * Document units (CSS px at 96dpi) → ruler unit factor for display
  * readouts. Geometry itself never converts; rulers, status bar and the
  * measure tool share this so their numbers agree.

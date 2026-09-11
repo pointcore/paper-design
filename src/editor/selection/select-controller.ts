@@ -10,7 +10,7 @@
 import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
 import { AnchorChrome } from '../path-drawing/anchor-chrome'
-import { remainingRuns } from '../geometry'
+import { remainingRuns, roundCornerHandle } from '../geometry'
 import type { AlignMode, DistributeAxis } from '../types'
 import { selectionColorForItem, selectionColorForItems } from './selection-style'
 import { GuideController } from '../guides/guide-controller'
@@ -1729,6 +1729,85 @@ export class SelectController {
     engine.scope.view.update()
     this.refreshChrome()
     return true
+  }
+
+  /**
+   * Round sharp corners (AI Round Corners / CDR fillet lite): sub-selected
+   * anchors when present, else every sharp non-endpoint anchor of the
+   * selected paths. Handles extend along both edges by the clamped kappa
+   * run; smooth anchors and text runs are left alone. One history entry.
+   */
+  roundSelectedCorners(radius: number): number {
+    const engine = this.engine
+    if (!engine || !Number.isFinite(radius) || radius <= 0) return 0
+    const scope = engine.scope
+    const r = Math.min(500, radius)
+    const targets = new Map<paper.Path, number[] | null>()
+    // Sub-selected anchors only count in direct-select (other tools leave
+    // stale segment sets behind); everywhere else every sharp corner goes.
+    if (this.mode === 'direct-select') {
+      for (const { seg, path } of this.subselectionAnchors()) {
+        if ((path as any).data?.textMode) continue
+        const index = path.segments.indexOf(seg as any)
+        if (index < 0) continue
+        const list = targets.get(path) ?? []
+        if (!list.includes(index)) list.push(index)
+        targets.set(path, list)
+      }
+    }
+    if (targets.size === 0) {
+      for (const item of engine.getSelection()) {
+        if ((item as any).locked || !item.parent) continue
+        const paths: paper.Path[] =
+          item instanceof scope.CompoundPath
+            ? (((item as any).children ?? []) as paper.Item[]).filter(
+                (c): c is paper.Path => c instanceof scope.Path
+              )
+            : item instanceof scope.Path
+              ? [item]
+              : []
+        for (const path of paths) {
+          if ((path as any).data?.textMode) continue
+          targets.set(path, null)
+        }
+      }
+    }
+    if (targets.size === 0) return 0
+    let rounded = 0
+    const touched = new Set<paper.Path>()
+    for (const [path, only] of targets) {
+      const n = path.segments.length
+      if (n < 2) continue
+      const indices = only ?? path.segments.map((_, i) => i)
+      for (const i of indices) {
+        if (!path.closed && (i === 0 || i === n - 1)) continue
+        const seg = path.segments[i]
+        if (!seg) continue
+        const hi = (seg.handleIn as paper.Point).length
+        const ho = (seg.handleOut as paper.Point).length
+        if (hi > 1e-9 || ho > 1e-9) continue
+        const prev = path.segments[(i - 1 + n) % n].point
+        const next = path.segments[(i + 1) % n].point
+        const la = seg.point.getDistance(prev)
+        const lb = seg.point.getDistance(next)
+        const k = roundCornerHandle(la, lb, r)
+        if (k <= 1e-9) continue
+        const u = seg.point.subtract(prev).normalize()
+        const v = next.subtract(seg.point).normalize()
+        seg.handleIn = u.multiply(-k)
+        seg.handleOut = v.multiply(k)
+        touched.add(path)
+        rounded++
+      }
+    }
+    if (rounded > 0) {
+      touched.forEach((path) => engine.refreshItemGradient(path))
+      engine.reflowTextsForItems([...touched])
+      engine.pushHistory('Round Corners')
+      engine.scope.view.update()
+      this.refreshChrome()
+    }
+    return rounded
   }
 
   /**

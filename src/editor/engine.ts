@@ -3005,6 +3005,29 @@ export class EditorEngine {
   }
 
   /**
+   * Detached clone with fresh identity: new ids, no preview flags, thread
+   * links stripped (copies stand alone), deselected. Callers insert it.
+   */
+  private freshClone(item: paper.Item): paper.Item {
+    const clone = (item as any).clone({ insert: false }) as paper.Item
+    const walk = (node: paper.Item) => {
+      const data = (node as any).data ?? ((node as any).data = {})
+      if (data.id || data.isUserItem) {
+        data.id = this.genId()
+        data.isUserItem = true
+      }
+      delete data.isPreview
+      delete data.threadNext
+      delete data.threadPrev
+      ;(node as any).selected = false
+      const children = (node as any).children as paper.Item[] | undefined
+      if (children) for (const child of children) walk(child)
+    }
+    walk(clone)
+    return clone
+  }
+
+  /**
    * Duplicate the unlocked selection in place, then rotate the copies
    * (AI Rotate-dialog Copy parity). Clones get fresh ids, thread links
    * are stripped so copies stand alone, and the copies become the new
@@ -3018,21 +3041,7 @@ export class EditorEngine {
     if (!center) return false
     const clones: paper.Item[] = []
     for (const item of sources) {
-      const clone = (item as any).clone({ insert: false }) as paper.Item
-      const walk = (node: paper.Item) => {
-        const data = (node as any).data ?? ((node as any).data = {})
-        if (data.id || data.isUserItem) {
-          data.id = this.genId()
-          data.isUserItem = true
-        }
-        delete data.isPreview
-        delete data.threadNext
-        delete data.threadPrev
-        ;(node as any).selected = false
-        const children = (node as any).children as paper.Item[] | undefined
-        if (children) for (const child of children) walk(child)
-      }
-      walk(clone)
+      const clone = this.freshClone(item)
       const parent = item.parent ?? this.getActiveLayer()
       parent.insertChild(parent.children.indexOf(item as any) + 1, clone as any)
       clones.push(clone)
@@ -3050,6 +3059,70 @@ export class EditorEngine {
     this.pushHistory('Rotate Copy')
     this.scope.view.update()
     return true
+  }
+
+  /**
+   * Duplicate the unlocked selection in place (CDR duplicate parity):
+   * copies land exactly over their sources and become the selection.
+   */
+  duplicateInPlace(): boolean {
+    const sources = this.getSelection().filter((item) => !item.locked && item.parent)
+    if (sources.length === 0) return false
+    const clones: paper.Item[] = []
+    for (const item of sources) {
+      const clone = this.freshClone(item)
+      const parent = item.parent ?? this.getActiveLayer()
+      parent.insertChild(parent.children.indexOf(item as any) + 1, clone as any)
+      this.refreshItemGradient(clone)
+      clones.push(clone)
+    }
+    this.clearSelection()
+    clones.forEach((item) => {
+      item.selected = true
+    })
+    this.syncSelectionToStore()
+    this.reflowTextsForItems(clones)
+    this.pushHistory('Duplicate in Place')
+    this.scope.view.update()
+    return true
+  }
+
+  /**
+   * Step-and-repeat the unlocked selection (layout staple): `count`
+   * translated copies at (dx, dy) increments. Copies become the new
+   * selection; one history entry. Returns copies made.
+   */
+  stepRepeat(count: number, dx: number, dy: number): number {
+    const n = Math.min(100, Math.max(1, Math.round(Number(count) || 0)))
+    if (!Number.isFinite(dx) || !Number.isFinite(dy) || (dx === 0 && dy === 0)) return 0
+    const step = new this.scope.Point(
+      Math.min(5000, Math.max(-5000, dx)),
+      Math.min(5000, Math.max(-5000, dy))
+    )
+    const sources = this.getSelection().filter((item) => !item.locked && item.parent)
+    if (sources.length === 0 || n < 1) return 0
+    const made: paper.Item[] = []
+    for (const item of sources) {
+      const parent = item.parent ?? this.getActiveLayer()
+      const at = parent.children.indexOf(item as any)
+      for (let i = 1; i <= n; i++) {
+        const clone = this.freshClone(item)
+        clone.position = (clone.position as paper.Point).add(step.multiply(i))
+        parent.insertChild(Math.min(at + i, parent.children.length), clone as any)
+        this.refreshItemGradient(clone)
+        made.push(clone)
+      }
+    }
+    if (made.length === 0) return 0
+    this.clearSelection()
+    made.forEach((item) => {
+      item.selected = true
+    })
+    this.syncSelectionToStore()
+    this.reflowTextsForItems(made)
+    this.pushHistory('Step and Repeat')
+    this.scope.view.update()
+    return made.length
   }
 
   /**
@@ -5391,13 +5464,14 @@ export class EditorEngine {
   /**
    * Offset every selected unlocked path by a distance (AI Offset Path
    * parity, powered by paperjs-offset like Outline Stroke). Positive
-   * expands, negative insets. Results keep the source appearance, sit
-   * beside their sources and become the new selection. Returns how many
-   * offsets were created; records one history entry.
+   * expands, negative insets. `steps` repeats at multiples (CDR contour
+   * parity). Results keep the source appearance, sit beside their sources
+   * and become the new selection. Returns offsets made; one history entry.
    */
-  offsetPaths(distance: number, join: 'miter' | 'round' | 'bevel' = 'miter'): number {
+  offsetPaths(distance: number, join: 'miter' | 'round' | 'bevel' = 'miter', steps = 1): number {
     if (!Number.isFinite(distance) || Math.abs(distance) < 1e-9) return 0
     const dist = Math.min(2000, Math.max(-2000, distance))
+    const reps = Math.min(20, Math.max(1, Math.round(Number(steps) || 1)))
     const scope = this.scope
     const targets = this.getSelection().filter(
       (item) =>
@@ -5408,20 +5482,22 @@ export class EditorEngine {
     if (targets.length === 0) return 0
     const made: paper.Item[] = []
     for (const target of targets) {
-      let result: paper.Path | paper.CompoundPath | null = null
-      try {
-        result = PaperOffset.offset(target as any, dist, { join, limit: 10, insert: false }) as any
-      } catch {
-        result = null
-      }
-      if (!result) continue
       const parent = target.parent ?? this.getActiveLayer()
       const at = parent.children.indexOf(target as any)
-      parent.insertChild(at < 0 ? parent.children.length : at + 1, result as any)
-      result.data.id = this.genId()
-      result.data.isUserItem = true
-      this.applyStyleToItem(result as paper.Item, this.getStyleFromItem(target as paper.Item))
-      made.push(result as paper.Item)
+      for (let i = 1; i <= reps; i++) {
+        let result: paper.Path | paper.CompoundPath | null = null
+        try {
+          result = PaperOffset.offset(target as any, dist * i, { join, limit: 10, insert: false }) as any
+        } catch {
+          result = null
+        }
+        if (!result) continue
+        parent.insertChild(Math.min(at + i, parent.children.length), result as any)
+        result.data.id = this.genId()
+        result.data.isUserItem = true
+        this.applyStyleToItem(result as paper.Item, this.getStyleFromItem(target as paper.Item))
+        made.push(result as paper.Item)
+      }
     }
     if (made.length === 0) return 0
     this.clearSelection()
@@ -5429,7 +5505,7 @@ export class EditorEngine {
       item.selected = true
     })
     this.syncSelectionToStore()
-    this.pushHistory('Offset Path')
+    this.pushHistory(reps > 1 ? 'Contour Offset' : 'Offset Path')
     this.scope.view.update()
     return made.length
   }
@@ -5661,6 +5737,36 @@ export class EditorEngine {
       this.scope.view.update()
     }
     return changed
+  }
+
+  /**
+   * Load the first selected item's appearance into the store defaults
+   * (future shapes; the document is untouched, so no history). Returns
+   * false with an empty selection.
+   */
+  setDefaultsFromSelection(): boolean {
+    const first = this.getSelection()[0]
+    if (!first) return false
+    this.store.updateStyle({ ...this.getStyleFromItem(first) })
+    this.showStatus('Defaults loaded from selection')
+    return true
+  }
+
+  /**
+   * Reset the unlocked selection to the default appearance. Returns
+   * items reset; one history entry.
+   */
+  clearAppearance(): number {
+    const items = this.getSelection().filter((item) => !item.locked && item.parent)
+    if (items.length === 0) return 0
+    const defaults = createDefaultStyle()
+    for (const item of items) {
+      this.applyStyleToItem(item, defaults)
+      this.refreshItemGradient(item)
+    }
+    this.pushHistory('Clear Appearance')
+    this.scope.view.update()
+    return items.length
   }
 
   /** Every text run in the document (annotation labels excluded). */
