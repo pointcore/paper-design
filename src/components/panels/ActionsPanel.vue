@@ -118,6 +118,7 @@ function persistUiPrefs() {
       controlBar: store.ui.showControlBar,
       navigator: store.ui.showNavigator,
       panelWidth: store.ui.panelWidth,
+      panelCollapsed: store.ui.panelCollapsed,
     }))
   } catch { /* private mode */ }
 }

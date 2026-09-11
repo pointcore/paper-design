@@ -1,5 +1,10 @@
 <template>
-  <div class="right-panel" :style="panelStyle">
+  <!-- Collapsed: a slim strip that restores the dock (state persisted). -->
+  <div v-if="collapsed" class="right-panel-collapsed" title="Expand panel" @click="toggleCollapsed">
+    <span class="rpc-label">{{ tabLabel(activeTab) }}</span>
+    <span class="rpc-chevron">«</span>
+  </div>
+  <div v-else class="right-panel" :style="panelStyle">
     <div
       class="rp-resizer"
       title="Drag to resize · double-click to reset"
@@ -19,6 +24,7 @@
       >
         {{ t.label }}
       </button>
+      <button class="rp-collapse" :title="'Collapse panel'" @click="toggleCollapsed">»</button>
     </div>
     <div class="rp-body">
       <div v-show="activeTab === 'property'" class="rp-pane">
@@ -64,6 +70,32 @@ import ActionsPanel from './ActionsPanel.vue'
 
 const store = useEditorStore()
 
+// Panel collapse: a persisted dock pref toggled from the tab strip; the
+// collapsed strip restores with one click.
+const collapsed = computed(() => store.ui.panelCollapsed)
+function toggleCollapsed() {
+  store.setPanelCollapsed(!collapsed.value)
+  persistUiPrefs()
+}
+function tabLabel(key: RightPanelTab): string {
+  return tabs.find((t) => t.key === key)?.label ?? 'Panel'
+}
+function persistUiPrefs() {
+  try {
+    let prefs: Record<string, unknown> = {}
+    const raw = localStorage.getItem('vve.ui')
+    if (raw) {
+      const parsed = JSON.parse(raw) as unknown
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        prefs = parsed as Record<string, unknown>
+      }
+    }
+    prefs.panelCollapsed = store.ui.panelCollapsed
+    prefs.panelWidth = store.ui.panelWidth
+    localStorage.setItem('vve.ui', JSON.stringify(prefs))
+  } catch { /* private mode: session-only dock state */ }
+}
+
 // Draggable panel width (persisted with the other dock prefs). Dragging
 // computes from the window's right edge, which is where the panel sits.
 const DEFAULT_PANEL_WIDTH = 264
@@ -97,18 +129,7 @@ function resetWidth() {
 }
 
 function persistPanelWidth() {
-  try {
-    let prefs: Record<string, unknown> = {}
-    const raw = localStorage.getItem('vve.ui')
-    if (raw) {
-      const parsed = JSON.parse(raw) as unknown
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        prefs = parsed as Record<string, unknown>
-      }
-    }
-    prefs.panelWidth = store.ui.panelWidth
-    localStorage.setItem('vve.ui', JSON.stringify(prefs))
-  } catch { /* private mode: session-only width */ }
+  persistUiPrefs()
 }
 
 const tabs = [
@@ -152,6 +173,41 @@ watch(
   flex-shrink: 0;
   overflow: hidden;
 }
+
+.right-panel-collapsed {
+  width: 22px;
+  min-width: 22px;
+  height: 100%;
+  background: #252526;
+  border-left: 1px solid #161616;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 0;
+  gap: 6px;
+  cursor: pointer;
+  color: #9a9a9a;
+  user-select: none;
+}
+.right-panel-collapsed:hover { color: #fff; }
+.rpc-label {
+  writing-mode: vertical-rl;
+  font-size: 11px;
+  letter-spacing: 1px;
+}
+.rpc-chevron { font-size: 12px; margin-top: auto; }
+
+.rp-collapse {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: #9a9a9a;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0 4px;
+  flex-shrink: 0;
+}
+.rp-collapse:hover { color: #fff; }
 
 .rp-resizer {
   position: absolute;

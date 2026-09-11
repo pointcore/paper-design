@@ -72,7 +72,7 @@ onMounted(() => {
     if (!raw) return
     const prefs = JSON.parse(raw) as {
       workspace?: string; density?: string; controlBar?: boolean; navigator?: boolean
-      panelWidth?: number
+      panelWidth?: number; panelCollapsed?: boolean
     }
     if (prefs.workspace === 'essentials' || prefs.workspace === 'typography' || prefs.workspace === 'print') {
       store.setWorkspace(prefs.workspace)
@@ -83,6 +83,7 @@ onMounted(() => {
     if (typeof prefs.controlBar === 'boolean') store.setShowControlBar(prefs.controlBar)
     if (typeof prefs.navigator === 'boolean') store.setShowNavigator(prefs.navigator)
     if (typeof prefs.panelWidth === 'number') store.setPanelWidth(prefs.panelWidth)
+    if (typeof prefs.panelCollapsed === 'boolean') store.setPanelCollapsed(prefs.panelCollapsed)
   } catch { /* private mode: defaults stand */ }
 })
 
