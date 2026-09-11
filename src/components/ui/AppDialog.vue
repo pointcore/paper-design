@@ -251,9 +251,10 @@ function onOpen() {
     // typing starts immediately (Save As' filename, guide positions, ...).
     nextTick(() => {
       const dlg = document.querySelector<HTMLElement>(`.${instanceClass}`);
-      dlg
-        ?.querySelector<HTMLInputElement>("input:not([type=hidden]), textarea, select")
-        ?.focus();
+      const field = dlg?.querySelector<HTMLInputElement>("input:not([type=hidden]), textarea, select");
+      field?.focus();
+      // Existing text (Save As rename flows) selects so typing overwrites.
+      if (field && field.value) field.select();
     });
   });
 }
