@@ -3,13 +3,17 @@
        @dragover.prevent="onDragOver" @drop.prevent="onDropFiles">
     <!-- Horizontal ruler bar -->
     <div v-if="store.view.rulersVisible" class="ruler ruler-h" ref="rulerHRef"
-         @mousedown.left="onRulerMouseDown($event, 'horizontal')">
+         title="Drag out a guide · double-click adds one here"
+         @mousedown.left="onRulerMouseDown($event, 'horizontal')"
+         @dblclick="onRulerDblClick($event, 'horizontal')">
       <canvas ref="rulerHCanvasRef" class="ruler-canvas"></canvas>
     </div>
 
     <!-- Vertical ruler bar -->
     <div v-if="store.view.rulersVisible" class="ruler ruler-v" ref="rulerVRef"
-         @mousedown.left="onRulerMouseDown($event, 'vertical')">
+         title="Drag out a guide · double-click adds one here"
+         @mousedown.left="onRulerMouseDown($event, 'vertical')"
+         @dblclick="onRulerDblClick($event, 'vertical')">
       <canvas ref="rulerVCanvasRef" class="ruler-canvas"></canvas>
     </div>
 
@@ -767,6 +771,28 @@ function onRulerMouseDown(e: MouseEvent, orientation: 'horizontal' | 'vertical')
   // Listen on window so the drag can continue outside the ruler element.
   window.addEventListener('mousemove', onGuideDragMove)
   window.addEventListener('mouseup', onGuideDragEnd)
+}
+
+/** Double-click a ruler: add a guide right there (grid-snapped like drags). */
+function onRulerDblClick(e: MouseEvent, orientation: 'horizontal' | 'vertical') {
+  if (!engine) return
+  if (store.view.guidesLocked) {
+    store.setStatusMessage('Guides are locked')
+    return
+  }
+  const rect = containerRef.value?.getBoundingClientRect()
+  if (!rect) return
+  const viewPt = engine.scope.view.viewToProject(
+    new engine.scope.Point(e.clientX - rect.left - RULER_SIZE, e.clientY - rect.top - RULER_SIZE)
+  )
+  let pos = orientation === 'horizontal' ? viewPt.y : viewPt.x
+  const snap = store.snap
+  if (snap.enable && snap.grid && snap.gridSize > 0) {
+    pos = Math.round(pos / snap.gridSize) * snap.gridSize
+  }
+  engine.createGuide(pos, orientation)
+  engine.scope.view.update()
+  engine.pushHistory('Add Guide')
 }
 
 function onGuideDragMove(e: MouseEvent) {
