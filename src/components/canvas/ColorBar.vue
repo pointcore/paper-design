@@ -14,11 +14,11 @@
       <el-button size="small" :type="target === 'stroke' ? 'primary' : ''" @click="store.setPaintTarget('stroke')">Stroke</el-button>
     </div>
     <div class="palette">
-      <div v-for="c in palette" :key="c" class="chip" :style="{ background: c }" :title="c + (target === 'fill' ? ' (fill)' : ' (stroke)')" @click="apply(c, false)" @contextmenu.prevent="apply(c, true)" />
+      <div v-for="c in palette" :key="c" class="chip" :class="{ active: c.toLowerCase() === activeColor }" :style="{ background: c }" :title="c + (target === 'fill' ? ' (fill)' : ' (stroke)')" @click="apply(c, false)" @contextmenu.prevent="apply(c, true)" />
       <div class="chip chip-none" title="None" @click="clear()">×</div>
     </div>
     <div class="recent">
-      <div v-for="c in store.recentColors.slice(0, 8)" :key="'r' + c" class="chip chip-sm" :style="{ background: c }" :title="c + ' (right-click to remove)'" @click="apply(c, false)" @contextmenu.prevent="store.removeRecentColor(c)" />
+      <div v-for="c in store.recentColors.slice(0, 8)" :key="'r' + c" class="chip chip-sm" :class="{ active: c.toLowerCase() === activeColor }" :style="{ background: c }" :title="c + ' (right-click to remove)'" @click="apply(c, false)" @contextmenu.prevent="store.removeRecentColor(c)" />
     </div>
     <input ref="colorInput" type="color" class="color-input" @change="onCustomPicked" />
   </div>
@@ -57,6 +57,12 @@ function onCustomPicked() {
   if (!input || !/^#[0-9a-fA-F]{6}$/.test(input.value)) return
   apply(input.value, pickTarget === 'stroke')
 }
+
+/** Current color of the active target, for highlighting matching chips. */
+const activeColor = computed(() => {
+  const c = target.value === 'fill' ? store.style.fillColor : store.style.strokeColor
+  return typeof c === 'string' ? c.toLowerCase() : ''
+})
 
 const fillPreview = computed(() => store.style.gradient ? 'linear-gradient(135deg,#000,#fff)' : (store.style.fillColor ?? 'repeating-conic-gradient(#c9c9c9 0% 25%, #fff 0% 50%) 0 0 / 8px 8px'))
 const strokePreview = computed(() => store.style.strokeColor ?? 'repeating-conic-gradient(#c9c9c9 0% 25%, #fff 0% 50%) 0 0 / 8px 8px')
@@ -135,6 +141,7 @@ function swap() {
 .chip { width: 18px; height: 18px; border-radius: 2px; border: 1px solid #000; cursor: pointer; flex-shrink: 0; }
 .chip-sm { width: 14px; height: 14px; }
 .chip:hover { outline: 1px solid #fff; }
+.chip.active { outline: 2px solid #ffd75e; outline-offset: 1px; }
 .chip-none { display: flex; align-items: center; justify-content: center; background: #fff; color: #c00; font-weight: 700; font-size: 12px; }
 .color-input {
   position: absolute;
