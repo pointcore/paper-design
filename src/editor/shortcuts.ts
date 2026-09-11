@@ -139,7 +139,8 @@ export const COMMAND_SHORTCUTS: Array<{ label: string; desc: string }> = [
   { label: 'Shift+F2', desc: 'Zoom to Selection' },
   { label: 'F4 / Shift+F4', desc: 'Fit All / Fit Page (CDR)' },
   { label: 'Ctrl+R', desc: 'Toggle Rulers' },
-  { label: 'Ctrl+; / Ctrl+"', desc: 'Toggle Guides / Grid' },
+  { label: 'Ctrl+; / Ctrl+Alt+;', desc: 'Toggle Guides / Lock Guides' },
+  { label: 'Ctrl+"', desc: 'Toggle Grid' },
   { label: 'Ctrl+Shift+B', desc: 'Toggle Bounding Box' },
   { label: 'X / Shift+X', desc: 'Flip Paint Target / Swap Fill + Stroke' },
   { label: '[ / ] on brush tools', desc: 'Brush Footprint (Shift = x5)' },
@@ -427,6 +428,10 @@ export function handleGlobalKeydown(
     } else if (e.key === 'PageDown' && !e.altKey && store.hasSelection) {
       if (e.shiftKey) engine?.sendSelectionToBack()
       else engine?.sendBackward()
+      e.preventDefault()
+    } else if (e.code === 'Semicolon' && e.altKey) {
+      // AI Ctrl+Alt+; : lock/unlock guides (ruler drag-out respects it).
+      store.updateView({ guidesLocked: !store.view.guidesLocked })
       e.preventDefault()
     } else if (e.code === 'Semicolon' && !e.altKey) {
       // AI Ctrl+; : toggle guides (the grid lives on Ctrl+"). CanvasHost

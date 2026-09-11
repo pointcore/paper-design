@@ -130,6 +130,16 @@ describe('handleGlobalKeydown', () => {
     expect(store.setStatusMessage).toHaveBeenCalledWith('No transform to repeat')
   })
 
+  it('locks/unlocks guides on Ctrl+Alt+Semicolon', () => {
+    const store = { view: { guidesLocked: true }, updateView: vi.fn() } as any
+    handleGlobalKeydown(
+      key({ key: ';', code: 'Semicolon', ctrlKey: true, altKey: true, target: null }) as KeyboardEvent,
+      store,
+      null
+    )
+    expect(store.updateView).toHaveBeenCalledWith({ guidesLocked: false })
+  })
+
   it('navigates artboards on plain PgUp/PgDn (CDR page parity)', () => {
     const engine = { navigateArtboards: vi.fn(() => true) } as any
     handleGlobalKeydown(
