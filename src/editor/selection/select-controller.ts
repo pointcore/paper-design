@@ -1639,6 +1639,99 @@ export class SelectController {
   }
 
   /**
+   * Split paths at sub-selected anchors (AI scissors-on-anchor parity):
+   * open paths break into runs between the cut anchors, closed paths open
+   * (one anchor) or split into arcs (several). Text-run paths are skipped.
+   * Null with no sub-selection; false when nothing could split.
+   */
+  splitAtSelectedAnchors(): boolean | null {
+    const engine = this.engine
+    if (!engine || this.mode !== 'direct-select') return null
+    const anchors = this.subselectionAnchors()
+    if (anchors.length === 0) return null
+    const scope = engine.scope
+    const byPath = new Map<paper.Path, number[]>()
+    for (const { seg, path } of anchors) {
+      if ((path as any).data?.textMode) continue
+      const index = path.segments.indexOf(seg as any)
+      if (index < 0) continue
+      const list = byPath.get(path) ?? []
+      if (!list.includes(index)) list.push(index)
+      byPath.set(path, list)
+    }
+    // Plan first (mutation invalidates segment identity).
+    const ops: Array<{ path: paper.Path; ranges: Array<[number, number]>; closed: boolean }> = []
+    for (const [path, indices] of byPath) {
+      const n = path.segments.length
+      if (n < 2 || !path.parent) continue
+      const sorted = indices.slice().sort((a, b) => a - b)
+      if (path.closed) {
+        if (sorted.length === 1) {
+          ops.push({ path, ranges: [[sorted[0], sorted[0] + n]], closed: true })
+        } else {
+          const ranges: Array<[number, number]> = []
+          for (let k = 0; k < sorted.length; k++) {
+            ranges.push([sorted[k], sorted[(k + 1) % sorted.length] + (k === sorted.length - 1 ? n : 0)])
+          }
+          ops.push({ path, ranges, closed: true })
+        }
+      } else {
+        const cuts = sorted.filter((i) => i > 0 && i < n - 1)
+        if (cuts.length === 0) continue
+        const bounds = [0, ...cuts, n - 1]
+        const ranges: Array<[number, number]> = []
+        for (let k = 0; k + 1 < bounds.length; k++) ranges.push([bounds[k], bounds[k + 1]])
+        ops.push({ path, ranges, closed: false })
+      }
+    }
+    if (ops.length === 0) return false
+    const pieces: paper.Path[] = []
+    for (const { path, ranges, closed } of ops) {
+      const style = engine.getStyleFromItem(path)
+      const parent = path.parent ?? engine.getActiveLayer()
+      const at = parent.children.indexOf(path as any)
+      const made: paper.Path[] = []
+      ranges.forEach(([from, to], ri) => {
+        const segs: paper.Segment[] = []
+        for (let i = from; i <= to; i++) {
+          const src = path.segments[closed ? i % path.segments.length : i]
+          segs.push(
+            new scope.Segment(
+              src.point.clone(),
+              (src.handleIn as paper.Point).clone(),
+              (src.handleOut as paper.Point).clone()
+            )
+          )
+        }
+        if (segs.length === 0) return
+        const piece = new scope.Path(segs) as paper.Path
+        piece.closed = false
+        parent.insertChild(Math.min(Math.max(at + 1 + ri, 0), parent.children.length), piece as any)
+        piece.data.id = engine.genId()
+        piece.data.isUserItem = true
+        engine.applyStyleToItem(piece, style)
+        made.push(piece)
+      })
+      if (made.length === 0) continue
+      path.remove()
+      pieces.push(...made)
+    }
+    if (pieces.length === 0) return false
+    // Drop the now-stale sub-selection (its segments are gone).
+    this.selectedSegments = []
+    this.clearCurveSelection()
+    engine.clearSelection()
+    pieces.forEach((item) => {
+      item.selected = true
+    })
+    engine.syncSelectionToStore()
+    engine.pushHistory('Split at Anchors')
+    engine.scope.view.update()
+    this.refreshChrome()
+    return true
+  }
+
+  /**
    * Finish an anchor marquee: every anchor inside the rubber band joins the
    * sub-selection. Shift extends the existing sub-selection, otherwise the
    * rubber band defines the whole sub-selection.

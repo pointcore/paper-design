@@ -110,6 +110,10 @@ export const useEditorStore = defineStore('editor', {
     activeLayerId: '',
     /** List of selected Paper.js item ids */
     selectedItemIds: [] as string[],
+    /** Previous selection (AI Reselect parity) */
+    lastSelection: [] as string[],
+    /** Named id-list selections (persisted) */
+    savedSelections: [] as Array<{ id: string; name: string; ids: string[] }>,
     /** Ruler unit */
     rulerUnit: 'px' as RulerUnit,
     /** Arrow-key nudge distance in document units (Shift = x10) */
@@ -292,13 +296,23 @@ export const useEditorStore = defineStore('editor', {
       this.activeLayerId = id
     },
 
-    /** Set selected items */
+    /** Set selected items (stashes the previous set for Reselect) */
     setSelection(itemIds: string[]) {
-      this.selectedItemIds = [...itemIds]
+      const next = [...itemIds]
+      const same =
+        next.length === this.selectedItemIds.length &&
+        next.every((id) => this.selectedItemIds.includes(id))
+      if (!same && this.selectedItemIds.length > 0) {
+        this.lastSelection = [...this.selectedItemIds]
+      }
+      this.selectedItemIds = next
     },
 
-    /** Clear selection */
+    /** Clear selection (stashes for Reselect when something was set) */
     clearSelection() {
+      if (this.selectedItemIds.length > 0) {
+        this.lastSelection = [...this.selectedItemIds]
+      }
       this.selectedItemIds = []
     },
 
@@ -578,6 +592,29 @@ export const useEditorStore = defineStore('editor', {
       if (layer) {
         Object.assign(layer, partial)
       }
+    },
+
+    /** Replace the named-selection list (storage load) */
+    setSavedSelections(list: Array<{ id: string; name: string; ids: string[] }>) {
+      this.savedSelections = Array.isArray(list)
+        ? list
+          .filter((s) => s && typeof s.id === 'string' && typeof s.name === 'string' && Array.isArray(s.ids))
+          .slice(0, 24)
+          .map((s) => ({ id: s.id, name: s.name.slice(0, 40), ids: s.ids.filter((i) => typeof i === 'string').slice(0, 500) }))
+        : []
+    },
+
+    /** Save a named selection (cap 24, newest first) */
+    addSavedSelection(name: string, ids: string[]): string {
+      const clean = (name || '').trim().slice(0, 40) || `Selection ${this.savedSelections.length + 1}`
+      const id = `sel-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`
+      this.savedSelections = [{ id, name: clean, ids: [...ids] }, ...this.savedSelections].slice(0, 24)
+      return id
+    },
+
+    /** Delete a named selection */
+    removeSavedSelection(id: string) {
+      this.savedSelections = this.savedSelections.filter((s) => s.id !== id)
     },
 
     /** Reorder layers */

@@ -216,14 +216,40 @@ export class EditorEngine {
   }
 
   /**
-   * Move an artboard sheet with history. Returns false when missing,
-   * invalid or unmoved.
+   * Move an artboard sheet with history. With `withArtwork`, overlapping
+   * unlocked artwork travels by the same delta (AI move-with-art parity).
+   * Returns false when missing, invalid or unmoved.
    */
-  moveArtboard(boardId: string, x: number, y: number): boolean {
+  moveArtboard(boardId: string, x: number, y: number, opts?: { withArtwork?: boolean }): boolean {
     if (!Number.isFinite(x) || !Number.isFinite(y)) return false
     const board = this.store.artboards.find((b) => b.id === boardId)
     if (!board || (board.x === x && board.y === y)) return false
+    const dx = x - board.x
+    const dy = y - board.y
     this.store.updateArtboard(boardId, { x, y })
+    if (opts?.withArtwork && (dx !== 0 || dy !== 0)) {
+      const before = new this.scope.Rectangle(board.x, board.y, board.width, board.height)
+      const shift = new this.scope.Point(dx, dy)
+      const moved: paper.Item[] = []
+      for (const layer of this.project.layers) {
+        if (!(layer.data as any)?.isUserLayer || !layer.visible || layer.locked) continue
+        for (const child of layer.children) {
+          const c = child as paper.Item
+          if ((c as any).locked || !c.visible || (c as any).data?.isPreview) continue
+          const bounds = (c as any).bounds as paper.Rectangle | undefined
+          if (!bounds) continue
+          try {
+            if (!bounds.intersects(before)) continue
+          } catch {
+            continue
+          }
+          c.position = (c.position as paper.Point).add(shift)
+          this.refreshItemGradient(c)
+          moved.push(c)
+        }
+      }
+      if (moved.length > 0) this.reflowTextsForItems(moved)
+    }
     this.refreshArtboards()
     this.pushHistory('Move Artboard')
     this.scope.view.update()
@@ -518,6 +544,31 @@ export class EditorEngine {
     }
     item.selected = true
     this.syncSelectionToStore()
+  }
+
+  /**
+   * Restore an id list as the selection, skipping missing items (AI
+   * Reselect / saved-selection loading). Returns how many were selected.
+   */
+  selectByIds(ids: string[]): number {
+    let n = 0
+    this.project.deselectAll()
+    for (const id of ids) {
+      const item = this.getItemById(id)
+      if (!item || (item as any).locked) continue
+      item.selected = true
+      n++
+    }
+    this.syncSelectionToStore()
+    this.scope.view.update()
+    return n
+  }
+
+  /** Re-select the previous selection (AI Select > Reselect parity). */
+  reselect(): number {
+    const ids = [...(this.store.lastSelection ?? [])]
+    if (ids.length === 0) return 0
+    return this.selectByIds(ids)
   }
 
   syncSelectionToStore() {

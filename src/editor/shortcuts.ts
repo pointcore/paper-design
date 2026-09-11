@@ -212,6 +212,10 @@ export function handleGlobalKeydown(
       // Browsers may reserve this for devtools; the menu always works.
       engine?.invertSelection()
       e.preventDefault()
+    } else if (key === 'a' && e.shiftKey) {
+      const n = engine?.reselect() ?? 0
+      if (engine && n === 0) store.setStatusMessage('Nothing to reselect')
+      e.preventDefault()
     } else if (key === 'a') {
       // Direct-select with a path selection takes every anchor (AI Ctrl+A);
       // otherwise the whole artwork is selected.
