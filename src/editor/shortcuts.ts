@@ -219,6 +219,11 @@ export function handleGlobalKeydown(
     } else if (key === '-') {
       engine?.zoomAt(1 / 1.2)
       e.preventDefault()
+    } else if (key === 'r' && !e.shiftKey) {
+      // AI/CDR Ctrl+R: toggle rulers (Canvas Settings re-syncs on open;
+      // browsers allow this reload shortcut to be intercepted).
+      store.updateView({ rulersVisible: !store.view.rulersVisible })
+      e.preventDefault()
     } else if (key === 's') {
       try {
         engine?.downloadProjectFile()

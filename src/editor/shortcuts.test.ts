@@ -110,4 +110,21 @@ describe('handleGlobalKeydown', () => {
     expect(empty.setStatusMessage).toHaveBeenCalledWith('Nothing selected to zoom to')
     expect(engine.zoomToSelection).toHaveBeenCalledTimes(1)
   })
+
+  it('toggles rulers on Ctrl+R and leaves Ctrl+Shift+R to the browser', () => {
+    const store = { view: { rulersVisible: false }, updateView: vi.fn() } as any
+    handleGlobalKeydown(
+      key({ key: 'r', code: 'KeyR', ctrlKey: true, target: null }) as KeyboardEvent,
+      store,
+      null
+    )
+    expect(store.updateView).toHaveBeenCalledWith({ rulersVisible: true })
+    store.updateView.mockClear()
+    handleGlobalKeydown(
+      key({ key: 'R', code: 'KeyR', ctrlKey: true, shiftKey: true, target: null }) as KeyboardEvent,
+      store,
+      null
+    )
+    expect(store.updateView).not.toHaveBeenCalled()
+  })
 })
