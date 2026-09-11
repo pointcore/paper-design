@@ -150,7 +150,11 @@ function exportOne(scale: number) {
   try {
     const url = e.exportRaster({ format: format.value, scale, area: area.value })
     if (!url) { store.setStatusMessage('Raster export failed'); return }
-    downloadHref(url, `asset-${area.value}-${scale}x.${format.value}`)
+    // Page-area exports carry the board name so multi-board files sort apart.
+    const label = area.value === 'page'
+      ? (store.activeArtboard?.name || 'page').replace(/[\/:*?"<>|]+/g, '-').slice(0, 40)
+      : area.value
+    downloadHref(url, `asset-${label}-${scale}x.${format.value}`)
     store.setStatusMessage(`Asset exported (${format.value.toUpperCase()} ${scale}x)`)
   } catch { store.setStatusMessage('Raster export failed') }
 }
