@@ -130,6 +130,18 @@ describe('handleGlobalKeydown', () => {
     expect(store.setStatusMessage).toHaveBeenCalledWith('No transform to repeat')
   })
 
+  it('micro-nudges by a tenth on Ctrl+Arrow (CDR parity)', () => {
+    const engine = { getController: vi.fn(() => null), nudgeSelection: vi.fn(() => true) } as any
+    const prevent = vi.fn()
+    handleGlobalKeydown(
+      key({ key: 'ArrowLeft', code: 'ArrowLeft', ctrlKey: true, preventDefault: prevent }) as KeyboardEvent,
+      { nudgeStep: 1 } as any,
+      engine
+    )
+    expect(engine.nudgeSelection).toHaveBeenCalledWith(-0.1, 0)
+    expect(prevent).toHaveBeenCalled()
+  })
+
   it('combines on Ctrl+L and breaks apart on Ctrl+K (CDR parity)', () => {
     const engine = { getSelection: vi.fn(() => ['a', 'b']), makeCompoundPath: vi.fn(() => true), releaseCompoundPath: vi.fn(() => true) } as any
     handleGlobalKeydown(

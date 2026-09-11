@@ -125,6 +125,34 @@ export function isEditableTarget(e: KeyboardEvent): boolean {
 }
 
 /**
+ * Shared arrow-key nudge (plain = x1, Shift = x10, Ctrl/Cmd = x0.1 CDR
+ * micro nudge). In direct-select with a sub-selection the anchors move
+ * instead of whole objects (AI). Repeats are allowed so holding the key
+ * keeps nudging; rapid nudges share one history entry.
+ */
+function applyNudge(
+  e: KeyboardEvent,
+  store: EditorStore,
+  engine: EditorEngine | null,
+  factor: number
+): void {
+  const step = (store.nudgeStep > 0 ? store.nudgeStep : 1) * factor * (e.shiftKey ? 10 : 1)
+  const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0
+  const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0
+  const direct = engine?.getController('direct-select') as SelectController | null
+  if (direct && direct.nudgeSubselection(dx, dy)) {
+    e.preventDefault()
+    return
+  }
+  if (engine?.nudgeSelection(dx, dy)) {
+    // Whole objects moved with no mouse movement: repaint the AI chrome
+    // now or stale outlines linger until the next mousemove.
+    direct?.refreshSelectionChrome()
+    e.preventDefault()
+  }
+}
+
+/**
  * Try to resolve the pressed key to a target tool.
  * Returns null when the key does not map to any tool switch.
  */
@@ -166,6 +194,12 @@ export function handleGlobalKeydown(
 
   if (e.ctrlKey || e.metaKey) {
     const key = e.key.toLowerCase()
+    if (e.key.startsWith('Arrow')) {
+      // CDR micro nudge: Ctrl/Cmd+Arrow moves a tenth of the increment
+      // (Shift still scales it up).
+      applyNudge(e, store, engine, 0.1)
+      return
+    }
     if (key === 'c' && e.shiftKey) {
       // Copy as PNG (raster) instead of the default SVG copy.
       engine?.copyRasterToClipboard(2).then((ok) => {
@@ -361,24 +395,7 @@ export function handleGlobalKeydown(
   }
   if (e.altKey) return
   if (e.key.startsWith('Arrow')) {
-    // Arrow-key nudge: move the unlocked selection by the keyboard
-    // increment (Shift = x10). In direct-select with a sub-selection the
-    // anchors move instead of whole objects (AI). Repeats are allowed so
-    // holding the key keeps nudging; rapid nudges share one history entry.
-    const step = (store.nudgeStep > 0 ? store.nudgeStep : 1) * (e.shiftKey ? 10 : 1)
-    const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0
-    const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0
-    const direct = engine?.getController('direct-select') as SelectController | null
-    if (direct && direct.nudgeSubselection(dx, dy)) {
-      e.preventDefault()
-      return
-    }
-    if (engine?.nudgeSelection(dx, dy)) {
-      // Whole objects moved with no mouse movement: repaint the AI chrome
-      // now or stale outlines linger until the next mousemove.
-      direct?.refreshSelectionChrome()
-      e.preventDefault()
-    }
+    applyNudge(e, store, engine, 1)
     return
   }
   if (e.repeat) return
