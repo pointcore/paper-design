@@ -16,6 +16,7 @@
             <span class="status-item status-click" :title="'Ruler unit (click to cycle)'" @click="cycleUnit">{{ cursorReadout }}</span>
             <span v-if="selectionLabel" class="status-item">{{ selectionLabel }}</span>
             <span class="status-item status-click" :title="'Toggle snapping'" @click="toggleSnap">{{ snapLabel }}</span>
+            <span v-if="store.view.guidesLocked" class="status-item status-click" :title="'Guides are locked (click to unlock)'" @click="store.updateView({ guidesLocked: false })">Guides Locked</span>
             <span v-if="store.keyObjectId" class="status-item status-click" title="Clear key object" @click="clearKey">Key ●</span>
           </div>
           <div class="status-right">
