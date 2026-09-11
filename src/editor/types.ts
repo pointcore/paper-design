@@ -349,6 +349,8 @@ export interface ViewSettings {
   showGrid: boolean
   showGuides: boolean
   guidesLocked: boolean
+  /** AI Hide Bounding Box: frame + handles chrome (outlines always show) */
+  showBoundingBox: boolean
   /** Whether the canvas shows a transparent (checkerboard) background */
   transparentBackground: boolean
   /** Print proof readout: rgb (default) or cmyk numeric preview + gamut flags */

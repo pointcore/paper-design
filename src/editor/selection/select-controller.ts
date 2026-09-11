@@ -2538,6 +2538,14 @@ export class SelectController {
       if (!items.includes(stale)) this.restoreNativeSelection(stale)
     }
     for (const item of items) this.suppressNativeSelection(item)
+    // AI Hide Bounding Box: keep the per-object outlines, drop the frame
+    // and its handles so the selection reads as outlines only.
+    if (engine.store.view.showBoundingBox === false) {
+      for (const item of items) {
+        this.chrome.drawItemOutline(item, selectionColorForItem(engine, item))
+      }
+      return
+    }
     // The oriented frame persists across rotation (never snaps back); it
     // rebuilds upright only when the selection or untracked geometry drifts.
     this.ensureFrame()

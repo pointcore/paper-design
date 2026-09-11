@@ -130,6 +130,20 @@ describe('handleGlobalKeydown', () => {
     expect(store.setStatusMessage).toHaveBeenCalledWith('No transform to repeat')
   })
 
+  it('toggles the bounding box on Ctrl+Shift+B', () => {
+    const select = { dropFrame: vi.fn(), refreshSelectionChrome: vi.fn() } as any
+    const engine = { getController: vi.fn(() => select) } as any
+    const store = { view: { showBoundingBox: true }, updateView: vi.fn() } as any
+    handleGlobalKeydown(
+      key({ key: 'B', code: 'KeyB', ctrlKey: true, shiftKey: true, target: null }) as KeyboardEvent,
+      store,
+      engine
+    )
+    expect(store.updateView).toHaveBeenCalledWith({ showBoundingBox: false })
+    expect(select.dropFrame).toHaveBeenCalledTimes(1)
+    expect(select.refreshSelectionChrome).toHaveBeenCalledTimes(1)
+  })
+
   it('fits all artwork on F4 and frames the page on Shift+F4', () => {
     const engine = { fitToContent: vi.fn(), zoomToArtboard: vi.fn() } as any
     handleGlobalKeydown(key({ key: 'F4', code: 'F4', target: null }) as KeyboardEvent, {} as any, engine)

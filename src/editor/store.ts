@@ -125,6 +125,7 @@ export const useEditorStore = defineStore('editor', {
       showGrid: false,
       showGuides: true,
       guidesLocked: true,
+      showBoundingBox: true,
       transparentBackground: false,
       proofMode: 'rgb',
     } as ViewSettings,

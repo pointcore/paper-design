@@ -161,6 +161,9 @@
               <el-dropdown-item command="controlBar" :icon="store.ui.showControlBar ? Check : undefined">
                 Control Bar
               </el-dropdown-item>
+              <el-dropdown-item command="boundingBox" :icon="store.view.showBoundingBox ? Check : undefined">
+                Bounding Box
+              </el-dropdown-item>
               <el-dropdown-item command="presentation" :icon="store.ui.zenMode ? Check : undefined">
                 Presentation (Tab)
               </el-dropdown-item>
@@ -2537,6 +2540,15 @@ function onViewCmd(cmd: string) {
       const next = store.view.proofMode === 'cmyk' ? 'rgb' : 'cmyk'
       store.updateView({ proofMode: next })
       store.setStatusMessage(next === 'cmyk' ? 'CMYK proof on (numeric preview)' : 'CMYK proof off')
+      break
+    }
+    case 'boundingBox': {
+      store.updateView({ showBoundingBox: !store.view.showBoundingBox })
+      const select = e.getController('select') as { dropFrame?: () => void; refreshSelectionChrome?: () => void } | null
+      select?.dropFrame?.()
+      try {
+        select?.refreshSelectionChrome?.()
+      } catch { /* chrome repaint is best effort */ }
       break
     }
     case 'navigator':

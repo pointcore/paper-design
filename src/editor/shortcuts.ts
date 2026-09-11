@@ -204,6 +204,16 @@ export function handleGlobalKeydown(
       // Paste in front only claims the key when it pastes something, so
       // browser find keeps working with an empty internal clipboard.
       if (engine?.pasteInPlace('front')) e.preventDefault()
+    } else if (key === 'b' && e.shiftKey) {
+      // AI Ctrl+Shift+B: hide/show the selection bounding box (the browser's
+      // bookmarks-bar toggle is interceptable; the View menu always works).
+      store.updateView({ showBoundingBox: !store.view.showBoundingBox })
+      const select = engine?.getController('select') as { dropFrame?: () => void; refreshSelectionChrome?: () => void } | null
+      select?.dropFrame?.()
+      try {
+        select?.refreshSelectionChrome?.()
+      } catch { /* chrome repaint must never break shortcuts */ }
+      e.preventDefault()
     } else if (key === 'b') {
       if (engine?.pasteInPlace('back')) e.preventDefault()
     } else if (key === 'z' && !e.shiftKey) {
