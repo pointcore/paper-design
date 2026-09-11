@@ -13,7 +13,7 @@
            @click="pickedId = entry.id">
         <span class="symbol-name" @dblclick="startRename(entry)">
           <template v-if="renamingId === entry.id">
-            <el-input v-model="renameValue" size="small" @blur="finishRename" @keyup.enter="finishRename" />
+            <el-input v-model="renameValue" size="small" @blur="finishRename" @keyup.enter="finishRename" @keyup.esc="cancelRename" />
           </template>
           <template v-else>{{ entry.name }}</template>
         </span>
@@ -83,9 +83,18 @@ function placeSymbol(id: string) {
   }
 }
 function deleteSymbol(id: string) {
+  const entry = symbols.value.find((s) => s.id === id)
+  // Deleting keeps instances working, but warn when instances exist.
+  if (entry && entry.instances > 0 && !window.confirm(`Delete symbol "${entry.name}"? ${entry.instances} placed instance${entry.instances === 1 ? '' : 's'} will remain editable.`)) {
+    return
+  }
   if (!getEngine()?.deleteSymbol(id)) {
     store.setStatusMessage('Cannot delete that symbol')
   }
+}
+
+function cancelRename() {
+  renamingId.value = ''
 }
 
 function breakLinks() {
