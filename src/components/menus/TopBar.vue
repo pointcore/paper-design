@@ -68,6 +68,7 @@
             <el-dropdown-menu>
               <el-dropdown-item command="transform" :disabled="!store.hasSelection">Transform</el-dropdown-item>
               <el-dropdown-item command="transformEach" :disabled="!store.hasSelection">Transform Each...</el-dropdown-item>
+              <el-dropdown-item command="reflect" :disabled="!store.hasSelection">Reflect...</el-dropdown-item>
               <el-dropdown-item command="bringToFront" :disabled="!store.hasSelection">Bring to Front</el-dropdown-item>
               <el-dropdown-item command="bringForward" :disabled="!store.hasSelection">Bring Forward</el-dropdown-item>
               <el-dropdown-item command="sendBackward" :disabled="!store.hasSelection">Send Backward</el-dropdown-item>
@@ -534,6 +535,34 @@
           </div>
           <el-input-number v-model="gridSplitForm.gutterX" :min="0" size="small" style="width: 100px" />
           <el-input-number v-model="gridSplitForm.gutterY" :min="0" size="small" style="width: 100px" />
+        </div>
+      </div>
+    </AppDialog>
+
+    <!-- Reflect Dialog (mirror about an arbitrary axis angle) -->
+    <AppDialog
+      v-model="reflectVisible"
+      title="Reflect"
+      :width="360"
+      confirm-text="Apply"
+      cancel-text="Close"
+      @confirm="onReflectConfirm"
+      @cancel="reflectVisible = false"
+    >
+      <div class="settings-body app-settings">
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Axis Angle</span>
+            <span class="setting-desc">0 = mirror top/bottom, 90 = mirror left/right</span>
+          </div>
+          <el-input-number v-model="reflectForm.angle" :min="-360" :max="360" size="small" style="width: 110px" />
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Reflect a Copy</span>
+            <span class="setting-desc">Keep the originals in place</span>
+          </div>
+          <el-switch v-model="reflectForm.copy" size="small" />
         </div>
       </div>
     </AppDialog>
@@ -1082,6 +1111,22 @@ function onGridSplitConfirm() {
 }
 const eachVisible = ref(false)
 const eachForm = reactive({ dx: 0, dy: 0, rotate: 0, scale: 100, copies: 0, random: false })
+const reflectVisible = ref(false)
+const reflectForm = reactive({ angle: 0, copy: false })
+function onReflectConfirm() {
+  const e = engineRef?.value
+  if (!e) {
+    reflectVisible.value = false
+    return
+  }
+  if (!e.reflectSelection(Number(reflectForm.angle) || 0, reflectForm.copy)) {
+    store.setStatusMessage('Reflect needs unlocked artwork')
+    return
+  }
+  e.pushHistory(reflectForm.copy ? 'Reflect Copy' : 'Reflect')
+  e.stampSelectionFrame()
+  reflectVisible.value = false
+}
 function onEachConfirm() {
   const e = engineRef?.value
   if (!e) {
@@ -2291,6 +2336,9 @@ function onObjectCmd(cmd: string) {
       break
     case 'transformEach':
       eachVisible.value = true
+      break
+    case 'reflect':
+      reflectVisible.value = true
       break
     case 'bringToFront':
       e.bringSelectionToFront()

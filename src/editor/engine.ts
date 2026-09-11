@@ -3524,6 +3524,57 @@ export class EditorEngine {
   }
 
   /**
+   * Reflect every unlocked selected item across an axis line through the
+   * pivot (AI Object > Transform > Reflect). The axis angle is in degrees:
+   * 0 mirrors top/bottom (horizontal axis), 90 mirrors left/right. With
+   * `copy`, reflected duplicates are created and selected instead. Callers
+   * record history. Returns false when nothing can be reflected.
+   */
+  reflectSelection(axisAngleDeg: number, copy = false, pivot?: paper.Point): boolean {
+    if (!Number.isFinite(axisAngleDeg)) return false
+    const full = this.getSelection()
+    const items = full.filter((item) => !item.locked)
+    if (items.length === 0) return false
+    const center = pivot ?? this.selectionReferencePivot() ?? this.getSelectionBounds()?.center
+    if (!center) return false
+    // Reflection about the angle-th axis = rotate(-angle) -> mirror Y ->
+    // rotate(angle), the same proven rotate/scale primitives the flip and
+    // mirror paths use.
+    const reflect = (item: paper.Item) => {
+      item.rotate(-axisAngleDeg, center)
+      item.scale(1, -1, center)
+      item.rotate(axisAngleDeg, center)
+    }
+    const targets: paper.Item[] = []
+    if (copy) {
+      for (const item of items) {
+        const clone = this.freshClone(item)
+        reflect(clone)
+        const parent = item.parent ?? this.getActiveLayer()
+        parent.insertChild(parent.children.indexOf(item as any) + 1, clone)
+        this.refreshItemGradient(clone)
+        targets.push(clone)
+      }
+    } else {
+      for (const item of items) {
+        reflect(item)
+        this.refreshItemGradient(item)
+        targets.push(item)
+      }
+    }
+    this.clearSelection()
+    targets.forEach((item) => {
+      item.selected = true
+    })
+    this.syncSelectionToStore()
+    this.reflowTextsForItems(targets)
+    // Reflection is non-rigid: the oriented frame cannot track it.
+    this.bumpGeometryVersion()
+    this.scope.view.update()
+    return true
+  }
+
+  /**
    * Mirror every unlocked selected item across a pivot. Horizontal flips
    * left/right, vertical flips top/bottom. The pivot defaults to the
    * reference-point pivot. Callers record history.
