@@ -78,6 +78,10 @@ onMounted(() => {
     if (typeof prefs.controlBar === 'boolean') store.setShowControlBar(prefs.controlBar)
     if (typeof prefs.navigator === 'boolean') store.setShowNavigator(prefs.navigator)
   } catch { /* private mode: defaults stand */ }
+  // Warn before losing unsaved work on reload/close (browsers show chrome).
+  window.addEventListener('beforeunload', (e) => {
+    if (store.hasUnsavedChanges) e.preventDefault()
+  })
 })
 
 const zoomPercent = computed(() => `${Math.round(store.view.zoom * 100)}%`)

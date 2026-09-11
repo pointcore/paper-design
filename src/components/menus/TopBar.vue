@@ -329,6 +329,15 @@
             </el-select>
           </div>
 
+          <div v-if="exportForm.format !== 'png'" class="setting-row">
+            <div class="setting-label">
+              <span class="setting-name">Quality</span>
+            </div>
+            <el-select v-model="exportForm.quality" size="small" style="width: 120px">
+              <el-option v-for="q in exportQualities" :key="q.value" :label="q.label" :value="q.value" />
+            </el-select>
+          </div>
+
           <div class="setting-row">
             <div class="setting-label">
               <span class="setting-name">Area</span>
@@ -739,7 +748,13 @@ const exportForm = reactive({
   format: 'png' as RasterExportFormat,
   scale: 2,
   area: 'artwork' as RasterExportArea,
+  quality: 0.92,
 })
+const exportQualities = [
+  { value: 0.92, label: 'High' },
+  { value: 0.75, label: 'Medium' },
+  { value: 0.55, label: 'Low' },
+]
 const exportFormats = [
   { value: 'png', label: 'PNG' },
   { value: 'jpeg', label: 'JPEG' },
@@ -809,11 +824,25 @@ function blurMenuFocus() {
   if (ae && ae !== document.body && typeof ae.blur === 'function') ae.blur()
 }
 
+/**
+ * Guard destructive document switches (New/Open replace the scene).
+ * Clean documents pass silently; dirty ones need an explicit confirm.
+ */
+function confirmDiscard(): boolean {
+  if (!store.hasUnsavedChanges) return true
+  try {
+    return window.confirm('Discard unsaved changes?')
+  } catch {
+    return true
+  }
+}
+
 function onFileCmd(cmd: string) {
   blurMenuFocus()
   const e = engineRef?.value
   switch (cmd) {
     case 'new': {
+      if (!confirmDiscard()) break
       // New documents inherit the active artboard size (what Canvas
       // Settings shows), not the stale pageSize default from an old file.
       const board = store.activeArtboard
@@ -838,6 +867,7 @@ function onFileCmd(cmd: string) {
     }
     case 'open': {
       if (!e) break
+      if (!confirmDiscard()) break
       const input = document.createElement('input')
       input.type = 'file'
       input.accept = '.json,.vec.json,application/json'
@@ -1025,6 +1055,7 @@ function onExportRasterConfirm() {
       format: exportForm.format,
       scale: exportForm.scale,
       area: exportForm.area,
+      quality: exportForm.quality,
     })
     if (!dataUrl) {
       store.setStatusMessage(rasterFailText(e) ?? 'Raster export failed')

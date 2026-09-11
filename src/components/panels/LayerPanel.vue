@@ -58,7 +58,7 @@
             </template>
             <template v-else>{{ layer.name }}</template>
           </span>
-          <span class="layer-target" :class="{ on: layer.id === store.activeLayerId }" title="Target" @click.stop="selectLayer(layer.id)"></span>
+          <span class="layer-target" :class="{ on: layer.id === store.activeLayerId }" title="Target: click selects all layer artwork" @click.stop="targetLayer(layer.id)"></span>
           <span class="layer-sel" :class="{ on: layersWithSelection.has(layer.id) }" :style="layersWithSelection.has(layer.id) ? { background: layerColor(layer.id) } : undefined"></span>
         </div>
         <div class="layer-children" v-if="layer.expand">
@@ -308,6 +308,21 @@ function selectLayer(id: string) {
       layer.activate()
     }
   }
+}
+
+/** Target circle (AI parity): activate the layer and select all its art. */
+function targetLayer(id: string) {
+  store.setActiveLayer(id)
+  const e = getEngine()
+  if (!e) return
+  const layer = e.project.layers.find((l) => (l.data as any)?.layerId === id)
+  if (layer) {
+    layer.activate()
+  }
+  const n = e.selectLayerArtwork(id)
+  store.setStatusMessage(
+    n > 0 ? `Selected ${n} object${n === 1 ? '' : 's'} on the layer` : 'Layer has no selectable artwork'
+  )
 }
 
 function toggleVisibility(layer: any) {

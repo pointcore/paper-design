@@ -131,7 +131,7 @@ const groups: ToolGroup[] = [
     { name: 'shape-builder', tip: 'Shape Builder Tool (Shift+M)', icon: Share },
     { name: 'width', tip: 'Width Tool (Shift+W)', icon: Expand },
     { name: 'gradient', tip: 'Gradient Tool (G, drag to set angle)', glyph: '🌈' },
-    { name: 'eyedropper', tip: 'Eyedropper Tool (I)', icon: Stamp },
+    { name: 'eyedropper', tip: 'Eyedropper Tool (I, Alt = sample only)', icon: Stamp },
   ] },
   { key: 'transform', members: [
     { name: 'rotate', tip: 'Rotate Tool (Shift+R, drag to rotate)', glyph: '⟳' },
