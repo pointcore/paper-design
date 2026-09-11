@@ -70,6 +70,8 @@
               <el-dropdown-item command="transform" :disabled="!store.hasSelection">Transform</el-dropdown-item>
               <el-dropdown-item command="transformEach" :disabled="!store.hasSelection">Transform Each...</el-dropdown-item>
               <el-dropdown-item command="reflect" :disabled="!store.hasSelection">Reflect...</el-dropdown-item>
+              <el-dropdown-item command="rotate90cw" :disabled="!store.hasSelection">Rotate 90&#176; CW</el-dropdown-item>
+              <el-dropdown-item command="rotate90ccw" :disabled="!store.hasSelection">Rotate 90&#176; CCW</el-dropdown-item>
               <el-dropdown-item command="bringToFront" :disabled="!store.hasSelection">Bring to Front</el-dropdown-item>
               <el-dropdown-item command="bringForward" :disabled="!store.hasSelection">Bring Forward</el-dropdown-item>
               <el-dropdown-item command="sendBackward" :disabled="!store.hasSelection">Send Backward</el-dropdown-item>
@@ -2346,6 +2348,15 @@ function onObjectCmd(cmd: string) {
     case 'reflect':
       reflectVisible.value = true
       break
+    case 'rotate90cw':
+    case 'rotate90ccw': {
+      const pivot = e.selectionReferencePivot() ?? e.getSelectionBounds()?.center
+      if (!pivot) break
+      e.rotateSelection(cmd === 'rotate90cw' ? 90 : -90, pivot)
+      e.pushHistory('Rotate')
+      e.stampSelectionFrame()
+      break
+    }
     case 'bringToFront':
       e.bringSelectionToFront()
       break
