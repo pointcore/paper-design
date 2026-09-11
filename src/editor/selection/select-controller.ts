@@ -2939,7 +2939,13 @@ export class SelectController {
 
     const orientation = engine.getGuideOrientation(this.grabGuide)
     if (!orientation) return
-    const position = orientation === 'horizontal' ? point.y : point.x
+    let position = orientation === 'horizontal' ? point.y : point.x
+    // AI parity: with grid snapping on, guides land on grid crossings
+    // while dragged, not on the raw pointer.
+    const snap = engine.store.snap
+    if (snap.enable && snap.grid && snap.gridSize > 0) {
+      position = Math.round(position / snap.gridSize) * snap.gridSize
+    }
     engine.moveGuide(this.grabGuide, position)
     engine.scope.view.update()
   }

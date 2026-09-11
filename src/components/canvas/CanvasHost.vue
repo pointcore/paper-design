@@ -799,7 +799,12 @@ function onGuideDragEnd(e: MouseEvent) {
     new engine.scope.Point(mouseX - RULER_SIZE, mouseY - RULER_SIZE)
   )
 
-  const pos = guideDragOrientation === 'horizontal' ? viewPt.y : viewPt.x
+  let pos = guideDragOrientation === 'horizontal' ? viewPt.y : viewPt.x
+  // Same grid snapping as dragging an existing guide.
+  const snap = store.snap
+  if (snap.enable && snap.grid && snap.gridSize > 0) {
+    pos = Math.round(pos / snap.gridSize) * snap.gridSize
+  }
   engine.createGuide(pos, guideDragOrientation)
   engine.scope.view.update()
   engine.pushHistory('Add Guide')
