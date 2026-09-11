@@ -1995,15 +1995,17 @@ export class EditorEngine {
 
   /**
    * Download the current document as a versioned project file. Shared by
-   * File > Save and the Ctrl+S shortcut.
+   * File > Save / Save As and the Ctrl+S shortcut.
    */
-  downloadProjectFile(): void {
+  downloadProjectFile(filename?: string): void {
     const fileText = this.exportProjectFile()
     const blob = new Blob([fileText], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
+    const clean = (filename ?? '').trim().replace(/[\\/:*?"<>|]+/g, '-')
+    const stem = clean.replace(/(\.vec)?\.json$/i, '').slice(0, 80) || 'project'
     const a = document.createElement('a')
     a.href = url
-    a.download = 'project.vec.json'
+    a.download = `${stem}.vec.json`
     // Firefox ignores clicks on detached anchors; the delayed revoke keeps
     // large files alive until the download starts.
     document.body.appendChild(a)
@@ -4792,6 +4794,87 @@ export class EditorEngine {
     return null
   }
 
+  /**
+   * Repaint the first selected raster through a canvas 2D filter
+   * (bitmap-effects lite): grayscale / sepia / invert plus brightness.
+   * The filtered copy replaces the original at the same slot (a no-op
+   * preset at 100% brightness resolves false). Tainted sources fail
+   * gracefully with a status message and no history.
+   */
+  adjustImage(preset: 'none' | 'gray' | 'sepia' | 'invert', brightness: number): boolean {
+    const scope = this.scope
+    const b = Number.isFinite(brightness) ? Math.min(150, Math.max(50, brightness)) : 100
+    if (preset === 'none' && b === 100) return false
+    const find = (node: paper.Item): paper.Raster | null => {
+      if ((node as any).locked || !node.parent) return null
+      if (node instanceof scope.Raster) return node
+      const children = (node as any).children as paper.Item[] | undefined
+      if (children) {
+        for (const child of children) {
+          const hit = find(child)
+          if (hit) return hit
+        }
+      }
+      return null
+    }
+    let source: paper.Raster | null = null
+    for (const item of this.getSelection()) {
+      source = find(item)
+      if (source) break
+    }
+    if (!source) return false
+    const canvas = (source as any).canvas as HTMLCanvasElement | undefined
+    if (!canvas || canvas.width < 1 || canvas.height < 1) return false
+    const parts: string[] = []
+    if (preset === 'gray') parts.push('grayscale(1)')
+    else if (preset === 'sepia') parts.push('sepia(1)')
+    else if (preset === 'invert') parts.push('invert(1)')
+    if (b !== 100) parts.push(`brightness(${Math.round((b / 100) * 100) / 100})`)
+    if (parts.length === 0) return false
+    let url: string | null = null
+    try {
+      const out = document.createElement('canvas')
+      out.width = canvas.width
+      out.height = canvas.height
+      const ctx = out.getContext('2d')
+      if (!ctx) return false
+      ctx.filter = parts.join(' ')
+      ctx.drawImage(canvas, 0, 0)
+      url = out.toDataURL('image/png')
+    } catch {
+      this.showStatus('Image adjust failed (unreadable pixels)')
+      return false
+    }
+    if (!url) return false
+    const parent = source.parent ?? this.getActiveLayer()
+    const at = parent.children.indexOf(source as any)
+    const opacity = (source as any).opacity
+    const next = new scope.Raster({ source: url }) as paper.Raster
+    parent.insertChild(Math.min(Math.max(at, 0), parent.children.length), next as any)
+    next.onLoad = () => {
+      next.position = (source as paper.Raster).position.clone()
+      next.opacity = opacity
+      next.data.id = this.genId()
+      next.data.isUserItem = true
+      try {
+        ;(source as paper.Raster).remove()
+      } catch { /* already gone */ }
+      this.clearSelection()
+      next.selected = true
+      this.syncSelectionToStore()
+      this.pushHistory('Adjust Image')
+      this.scope.view.update()
+      this.showStatus('Image adjusted')
+    }
+    next.onError = () => {
+      try {
+        next.remove()
+      } catch { /* already gone */ }
+      this.showStatus('Image adjust failed')
+    }
+    return true
+  }
+
   // ===== Symbols =====
   /**
    * Symbol definitions live behind hidden keeper instances (one invisible
@@ -5713,6 +5796,79 @@ export class EditorEngine {
       this.scope.view.update()
     }
     return removed
+  }
+
+  /**
+   * Match every unlocked selected item to the first one's width and/or
+   * height (layout staple), scaling about each item's own center so
+   * positions hold. Returns items resized; one history entry.
+   */
+  matchSize(mode: 'width' | 'height' | 'both'): number {
+    const items = this.getSelection().filter((item) => !item.locked && item.parent)
+    if (items.length < 2) return 0
+    const ref = (items[0] as any).bounds as paper.Rectangle | undefined
+    if (!ref || !(ref.width > 0) || !(ref.height > 0)) return 0
+    let changed = 0
+    for (let i = 1; i < items.length; i++) {
+      const b = (items[i] as any).bounds as paper.Rectangle | undefined
+      if (!b || !(b.width > 0) || !(b.height > 0)) continue
+      const sx = mode === 'height' ? 1 : ref.width / b.width
+      const sy = mode === 'width' ? 1 : ref.height / b.height
+      if (!Number.isFinite(sx) || !Number.isFinite(sy)) continue
+      if (Math.abs(sx - 1) < 1e-9 && Math.abs(sy - 1) < 1e-9) continue
+      items[i].scale(sx, sy, b.center.clone())
+      this.refreshItemGradient(items[i])
+      changed++
+    }
+    if (changed > 0) {
+      this.reflowTextsForItems(items)
+      this.pushHistory(mode === 'width' ? 'Same Width' : mode === 'height' ? 'Same Height' : 'Same Size')
+      this.scope.view.update()
+    }
+    return changed
+  }
+
+  /**
+   * Fill selected text runs with placeholder copy (AI Fill with
+   * Placeholder Text parity): a sentence for point text, a passage for
+   * area/path frames. Annotation labels excluded. One history entry.
+   */
+  fillPlaceholder(): number {
+    const scope = this.scope
+    const sentence = 'Lorem ipsum dolor sit amet, consectetur adipiscing elit.'
+    const passage =
+      'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor ' +
+      'incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud ' +
+      'exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.'
+    let changed = 0
+    for (const item of this.getSelection()) {
+      if ((item as any).locked || !(item instanceof scope.PointText)) continue
+      if ((item as any).data?.annotation) continue
+      const mode = (item as any).data?.textMode as string | undefined
+      ;(item as any).content = mode && mode !== 'point' ? passage : sentence
+      changed++
+    }
+    if (changed > 0) {
+      this.pushHistory('Fill Placeholder Text')
+      this.scope.view.update()
+    }
+    return changed
+  }
+
+  /**
+   * Drop a guide through the selection center (vertical = X, horizontal =
+   * Y). Respects the guides lock. Returns false with no selection.
+   */
+  guideAtSelection(orientation: GuideOrientation): boolean {
+    if (this.store.view.guidesLocked) return false
+    const bounds = this.getSelectionBounds()
+    if (!bounds) return false
+    const pos = orientation === 'vertical' ? bounds.x + bounds.width / 2 : bounds.y + bounds.height / 2
+    if (!Number.isFinite(pos)) return false
+    const guide = this.createGuide(pos, orientation)
+    if (!guide) return false
+    this.pushHistory('Add Guide')
+    return true
   }
 
   /**

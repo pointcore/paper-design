@@ -378,6 +378,7 @@
             <el-button size="small" class="fmt-btn" title="UPPERCASE" @click="onChangeCase('upper')">AA</el-button>
             <el-button size="small" class="fmt-btn" title="lowercase" @click="onChangeCase('lower')">aa</el-button>
             <el-button size="small" class="fmt-btn" title="Title Case" @click="onChangeCase('title')">Aa</el-button>
+            <el-button size="small" class="grid-btn" title="Fill with placeholder text" @click="onLorem">Lorem</el-button>
           </div>
           <div class="prop-row">
             <span class="prop-label-sm">Leading</span>
@@ -1097,6 +1098,14 @@ function onChangeCase(mode: 'upper' | 'lower' | 'title') {
   if (!e) return
   if (e.changeCase(mode) === 0) {
     store.setStatusMessage('Change Case needs selected text')
+  }
+}
+
+function onLorem() {
+  const e = getEngine()
+  if (!e) return
+  if (e.fillPlaceholder() === 0) {
+    store.setStatusMessage('Placeholder needs selected text')
   }
 }
 

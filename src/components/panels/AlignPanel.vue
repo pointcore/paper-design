@@ -45,6 +45,15 @@
     </div>
 
     <div class="panel-section">
+      <div class="sec-title">Same Size <span class="sec-hint">match the first selected</span></div>
+      <div class="btn-grid-3">
+        <el-button size="small" class="grid-btn" :disabled="store.selectedItemIds.length < 2" @click="doMatchSize('width')">Width</el-button>
+        <el-button size="small" class="grid-btn" :disabled="store.selectedItemIds.length < 2" @click="doMatchSize('height')">Height</el-button>
+        <el-button size="small" class="grid-btn" :disabled="store.selectedItemIds.length < 2" @click="doMatchSize('both')">Both</el-button>
+      </div>
+    </div>
+
+    <div class="panel-section">
       <div class="sec-title">Pathfinder</div>
       <div class="btn-grid-2">
         <el-button size="small" class="grid-btn" :disabled="operandCount < 2" @click="doBoolean('unite')">Unite</el-button>
@@ -168,6 +177,14 @@ function doAverage(axis: 'horizontal' | 'vertical' | 'both') {
   store.setStatusMessage('Average needs 2+ sub-selected anchors')
 }
 
+function doMatchSize(mode: 'width' | 'height' | 'both') {
+  const e = getEngine()
+  if (!e) return
+  if (e.matchSize(mode) === 0) {
+    store.setStatusMessage('Same Size needs 2+ unlocked objects')
+  }
+}
+
 function setKey() {
   const id = store.selectedItemIds[0]
   if (!id) return
@@ -190,6 +207,7 @@ function clearKey() {
 .lbl { font-size: 11px; color: #9a9a9a; }
 .unit { font-size: 11px; color: #8a8a8a; }
 .hint { font-size: 11px; color: #8a8a8a; line-height: 1.5; }
+.sec-hint { color: #8a8a8a; font-weight: 400; }
 .btn-grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
 .btn-grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; }
 .grid-btn { width: 100%; margin: 0 !important; }

@@ -111,6 +111,10 @@
         <span class="cb-label">Size</span>
         <el-input-number v-model="brushSize" :min="1" :max="200" size="small" style="width: 76px" title="Brush footprint ([ ] resize)" @change="onBrushSize" />
       </template>
+      <template v-if="store.tool === 'pencil'">
+        <span class="cb-label">Smooth</span>
+        <el-input-number v-model="pencilSmooth" :min="0.5" :max="10" :step="0.5" size="small" style="width: 76px" title="Simplify tolerance" @change="onPencilSmooth" />
+      </template>
       <span class="cb-label">Stroke</span>
       <el-input-number v-model="strokeWidth" :min="0.1" :max="100" size="small" style="width: 80px" @change="onStrokeWidth" />
       <span class="cb-label">Opacity</span>
@@ -227,6 +231,7 @@ const gridCols = ref((store as any).gridCols ?? 4)
 const strokeWidth = ref(store.style.strokeWidth)
 const opacityPct = ref(Math.round(store.style.opacity * 100))
 const brushSize = ref(Number((store as any).brushSize ?? 20))
+const pencilSmooth = ref(Number((store as any).pencilSmooth ?? 2.5))
 const wandTolerance = ref(Number((store as any).wandTolerance ?? 0))
 const gradientAngle = ref(Math.round(store.style.gradient?.angle ?? 0))
 const gradientType = ref<'linear' | 'radial'>(store.style.gradient?.type ?? 'linear')
@@ -242,6 +247,7 @@ watch(() => store.charStyle.fontFamily, (v) => { fontFamily.value = v })
 watch(() => store.charStyle.fontSize, (v) => { fontSize.value = v })
 watch(() => store.style.strokeWidth, (v) => { strokeWidth.value = v })
 watch(() => (store as any).brushSize, (v) => { brushSize.value = Number(v) || 20 })
+watch(() => (store as any).pencilSmooth, (v) => { pencilSmooth.value = Number(v) || 2.5 })
 watch(() => (store as any).wandTolerance, (v) => { wandTolerance.value = Number(v) || 0 })
 watch(() => store.style.gradient?.angle, (v) => { gradientAngle.value = Math.round(v ?? 0) })
 watch(() => store.style.gradient?.type, (v) => { gradientType.value = v ?? 'linear' })
@@ -350,6 +356,11 @@ function onWandTolerance(v: number | undefined) {
   if (v === undefined) return
   ;(store as any).setWandTolerance?.(v)
   wandTolerance.value = Number((store as any).wandTolerance ?? 0)
+}
+function onPencilSmooth(v: number | undefined) {
+  if (v === undefined) return
+  ;(store as any).setPencilSmooth?.(v)
+  pencilSmooth.value = Number((store as any).pencilSmooth ?? 2.5)
 }
 function applyGradientEdit(label: string) {
   const e = getEngine()

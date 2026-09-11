@@ -10,6 +10,7 @@
               <el-dropdown-item command="new">New Document</el-dropdown-item>
               <el-dropdown-item command="open" divided>Open...</el-dropdown-item>
               <el-dropdown-item command="save">Save</el-dropdown-item>
+              <el-dropdown-item command="saveAs">Save As...</el-dropdown-item>
               <el-dropdown-item command="export" divided>Export SVG</el-dropdown-item>
               <el-dropdown-item command="exportSelection" :disabled="!store.hasSelection">Export Selection SVG</el-dropdown-item>
               <el-dropdown-item command="exportBoardsSvg">Export Boards SVG</el-dropdown-item>
@@ -81,6 +82,7 @@
               <el-dropdown-item command="clearAppearance" :disabled="!store.hasSelection">Clear Appearance</el-dropdown-item>
               <el-dropdown-item command="rasterize" :disabled="!store.hasSelection">Rasterize Selection (2x)</el-dropdown-item>
               <el-dropdown-item command="extractImage" :disabled="!store.hasSelection">Extract Image...</el-dropdown-item>
+              <el-dropdown-item command="adjustImage" :disabled="!store.hasSelection">Adjust Image...</el-dropdown-item>
               <el-dropdown-item command="closePath" :disabled="!store.hasSelection">Close Path</el-dropdown-item>
               <el-dropdown-item command="openPath" :disabled="!store.hasSelection">Open Path</el-dropdown-item>
               <el-dropdown-item command="envArcUpper" divided :disabled="!store.hasSelection">Envelope: Arc Upper</el-dropdown-item>
@@ -383,6 +385,14 @@
           </div>
           <el-button size="small" @click="onGuidesClear">Clear All</el-button>
         </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">At selection</span>
+            <span class="setting-desc">Through the center (respects lock)</span>
+          </div>
+          <el-button size="small" :disabled="!store.hasSelection" @click="onGuideAtSelection('horizontal')">H</el-button>
+          <el-button size="small" :disabled="!store.hasSelection" @click="onGuideAtSelection('vertical')">V</el-button>
+        </div>
       </div>
     </AppDialog>
 
@@ -585,6 +595,59 @@
       </div>
     </AppDialog>
 
+    <!-- Save As Dialog (custom project filename) -->
+    <AppDialog
+      v-model="saveVisible"
+      title="Save As"
+      :width="360"
+      confirm-text="Save"
+      cancel-text="Cancel"
+      @confirm="onSaveConfirm"
+      @cancel="saveVisible = false"
+    >
+      <div class="settings-body app-settings">
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Filename</span>
+            <span class="setting-desc">Saved as .vec.json</span>
+          </div>
+          <el-input v-model="saveName" size="small" placeholder="project" @keyup.enter="onSaveConfirm" />
+        </div>
+      </div>
+    </AppDialog>
+
+    <!-- Adjust Image Dialog (bitmap-effects lite, destructive) -->
+    <AppDialog
+      v-model="imageVisible"
+      title="Adjust Image"
+      :width="360"
+      confirm-text="Apply"
+      cancel-text="Close"
+      @confirm="onImageConfirm"
+      @cancel="imageVisible = false"
+    >
+      <div class="settings-body app-settings">
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Preset</span>
+          </div>
+          <el-select v-model="imageForm.preset" size="small" style="width: 130px">
+            <el-option value="none" label="None" />
+            <el-option value="gray" label="Grayscale" />
+            <el-option value="sepia" label="Sepia" />
+            <el-option value="invert" label="Invert" />
+          </el-select>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Brightness</span>
+            <span class="setting-desc">Percent, applies with the preset</span>
+          </div>
+          <el-input-number v-model="imageForm.brightness" :min="50" :max="150" size="small" style="width: 130px" />
+        </div>
+      </div>
+    </AppDialog>
+
     <!-- Save Selection Dialog (named id-list selections, persisted) -->
     <AppDialog
       v-model="savedSelVisible"
@@ -691,6 +754,15 @@ function onGuidesClear() {
   e.pushHistory('Clear Guides')
   guidesTick.value++
 }
+function onGuideAtSelection(orientation: 'horizontal' | 'vertical') {
+  const e = engineRef?.value
+  if (!e) return
+  if (!e.guideAtSelection(orientation)) {
+    store.setStatusMessage(store.view.guidesLocked ? 'Guides are locked' : 'Select objects first')
+    return
+  }
+  guidesTick.value++
+}
 
 const offsetVisible = ref(false)
 const offsetForm = reactive({
@@ -782,6 +854,40 @@ function onRecolorConfirm() {
   }
   store.setStatusMessage(`Recolored ${n} object${n === 1 ? '' : 's'}`)
   recolorVisible.value = false
+}
+
+const saveVisible = ref(false)
+const saveName = ref('project')
+function onSaveConfirm() {
+  const e = engineRef?.value
+  if (!e) {
+    saveVisible.value = false
+    return
+  }
+  try {
+    e.downloadProjectFile(saveName.value)
+  } catch {
+    store.setStatusMessage('Project save failed')
+  }
+  saveVisible.value = false
+}
+
+const imageVisible = ref(false)
+const imageForm = reactive({
+  preset: 'none' as 'none' | 'gray' | 'sepia' | 'invert',
+  brightness: 100,
+})
+function onImageConfirm() {
+  const e = engineRef?.value
+  if (!e) {
+    imageVisible.value = false
+    return
+  }
+  if (!e.adjustImage(imageForm.preset, Number(imageForm.brightness) || 100)) {
+    store.setStatusMessage('Adjust needs a selected image')
+    return
+  }
+  imageVisible.value = false
 }
 
 const findVisible = ref(false)
@@ -1079,6 +1185,9 @@ function onFileCmd(cmd: string) {
       }
       break
     }
+    case 'saveAs':
+      saveVisible.value = true
+      break
     case 'open': {
       if (!e) break
       if (!confirmDiscard()) break
@@ -1763,6 +1872,9 @@ function onObjectCmd(cmd: string) {
       store.setStatusMessage(`Extracted ${hit.filename}`)
       break
     }
+    case 'adjustImage':
+      imageVisible.value = true
+      break
     case 'adjustColors':
       recolorVisible.value = true
       break
