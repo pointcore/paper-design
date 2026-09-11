@@ -219,6 +219,25 @@ describe('handleGlobalKeydown', () => {
     expect(engine.sendSelectionToBack).toHaveBeenCalledTimes(1)
   })
 
+  it('duplicates and offsets on Alt+Arrow (AI parity)', () => {
+    const engine = { getController: vi.fn(() => null), duplicateSelected: vi.fn(() => true), nudgeSelection: vi.fn(() => true) } as any
+    handleGlobalKeydown(
+      key({ key: 'ArrowRight', code: 'ArrowRight', altKey: true, target: null }) as KeyboardEvent,
+      { nudgeStep: 1 } as any,
+      engine
+    )
+    expect(engine.duplicateSelected).toHaveBeenCalledTimes(1)
+    expect(engine.nudgeSelection).toHaveBeenCalledWith(1, 0)
+    const empty = { setStatusMessage: vi.fn() } as any
+    const failing = { duplicateSelected: vi.fn() } as any
+    handleGlobalKeydown(
+      key({ key: 'ArrowLeft', code: 'ArrowLeft', altKey: true, target: null }) as KeyboardEvent,
+      empty,
+      failing
+    )
+    expect(empty.setStatusMessage).toHaveBeenCalledWith('Nothing to duplicate')
+  })
+
   it('micro-nudges by a tenth on Ctrl+Arrow (CDR parity)', () => {
     const engine = { getController: vi.fn(() => null), nudgeSelection: vi.fn(() => true) } as any
     const prevent = vi.fn()

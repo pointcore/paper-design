@@ -451,6 +451,17 @@ export function handleGlobalKeydown(
     }
     return
   }
+  // AI Alt+Arrow: duplicate the selection and offset the copy by one
+  // nudge step (Shift scales it x10 as usual; key repeats stack copies).
+  if (e.key.startsWith('Arrow') && e.altKey && !e.ctrlKey && !e.metaKey) {
+    if (engine?.duplicateSelected()) {
+      applyNudge(e, store, engine, 1)
+    } else {
+      store.setStatusMessage('Nothing to duplicate')
+    }
+    e.preventDefault()
+    return
+  }
   if (e.altKey) return
   // CDR page navigation: plain PgUp/PgDn move between artboards (the Ctrl
   // variants above own z-order; the canvas never scrolls, so consuming the
