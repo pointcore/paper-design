@@ -175,6 +175,7 @@
           <div class="prop-row">
             <span class="prop-label-sm">Rotate</span>
             <el-input-number v-model="rotateBy" :precision="1" size="small" controls-position="right" placeholder="deg" @change="onRotateByChange" />
+            <el-button size="small" class="icon-btn" title="Rotate a copy (keeps the original)" @click="onRotateCopy">⧉</el-button>
             <el-button size="small" class="icon-btn" :type="store.transform.flipH ? 'primary' : ''" title="Flip Horizontal" @click="onFlipH">⇔</el-button>
             <el-button size="small" class="icon-btn" :type="store.transform.flipV ? 'primary' : ''" title="Flip Vertical" @click="onFlipV">⇕</el-button>
           </div>
@@ -426,6 +427,11 @@
           <div class="btn-grid-2">
             <el-button size="small" class="grid-btn" :disabled="store.selectedItemIds.length < 3" @click="onDistributeGap('horizontal')">Gap H</el-button>
             <el-button size="small" class="grid-btn" :disabled="store.selectedItemIds.length < 3" @click="onDistributeGap('vertical')">Gap V</el-button>
+          </div>
+          <div class="btn-grid-3">
+            <el-button size="small" class="grid-btn" title="Average sub-selected anchors horizontally" @click="onAverage('horizontal')">Avg H</el-button>
+            <el-button size="small" class="grid-btn" title="Average sub-selected anchors vertically" @click="onAverage('vertical')">Avg V</el-button>
+            <el-button size="small" class="grid-btn" title="Average sub-selected anchors on both axes" @click="onAverage('both')">Avg Both</el-button>
           </div>
         </div>
       </div>
@@ -1429,6 +1435,26 @@ function onRotateByChange(val: number | undefined) {
   rotateBy.value = 0
 }
 
+function onRotateCopy() {
+  const e = getEngine()
+  const val = Number(rotateBy.value)
+  if (!e || !val) {
+    rotateBy.value = 0
+    store.setStatusMessage('Enter degrees, then Rotate Copy')
+    return
+  }
+  const pivot = e.selectionReferencePivot() ?? e.getSelectionBounds()?.center
+  if (!pivot) {
+    rotateBy.value = 0
+    return
+  }
+  if (!e.rotateCopy(val, pivot)) {
+    store.setStatusMessage('Rotate Copy needs unlocked artwork')
+  }
+  e.stampSelectionFrame()
+  rotateBy.value = 0
+}
+
 function onSkewChange() {
   const e = getEngine()
   const skewX = skewXBy.value || 0
@@ -1520,6 +1546,17 @@ function onDistributeGap(axis: DistributeAxis) {
   if (e.distributeSpacing(axis)) {
     e.pushHistory('Distribute Gaps')
   }
+}
+
+function onAverage(axis: 'horizontal' | 'vertical' | 'both') {
+  const e = getEngine()
+  if (!e) return
+  const sc = e.getController('direct-select') as {
+    averageSubselection?: (a: 'horizontal' | 'vertical' | 'both') => boolean | null
+  } | null
+  const sub = sc?.averageSubselection?.(axis) ?? null
+  if (sub === true) return
+  store.setStatusMessage('Average needs 2+ sub-selected anchors')
 }
 
 /** Number of selected unlocked paths usable as boolean operands. */

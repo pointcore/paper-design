@@ -12,6 +12,7 @@
               <el-dropdown-item command="save">Save</el-dropdown-item>
               <el-dropdown-item command="export" divided>Export SVG</el-dropdown-item>
               <el-dropdown-item command="exportSelection" :disabled="!store.hasSelection">Export Selection SVG</el-dropdown-item>
+              <el-dropdown-item command="exportBoardsSvg">Export Boards SVG</el-dropdown-item>
               <el-dropdown-item command="exportRaster">Export Raster...</el-dropdown-item>
               <el-dropdown-item command="exportPdf">Export PDF (Raster)</el-dropdown-item>
               <el-dropdown-item command="exportBoardsPdf">Export All Boards PDF (Raster)</el-dropdown-item>
@@ -70,6 +71,7 @@
               <el-dropdown-item command="cleanUp">Clean Up...</el-dropdown-item>
               <el-dropdown-item command="arrowheads" :disabled="!store.hasSelection">Add Arrowheads...</el-dropdown-item>
               <el-dropdown-item command="adjustColors" :disabled="!store.hasSelection">Adjust Colors...</el-dropdown-item>
+              <el-dropdown-item command="rasterize" :disabled="!store.hasSelection">Rasterize Selection (2x)</el-dropdown-item>
               <el-dropdown-item command="closePath" :disabled="!store.hasSelection">Close Path</el-dropdown-item>
               <el-dropdown-item command="openPath" :disabled="!store.hasSelection">Open Path</el-dropdown-item>
               <el-dropdown-item command="envArcUpper" divided :disabled="!store.hasSelection">Envelope: Arc Upper</el-dropdown-item>
@@ -742,6 +744,28 @@ function onFileCmd(cmd: string) {
       store.setStatusMessage('Selection exported')
       break
     }
+    case 'exportBoardsSvg': {
+      if (!e) break
+      const boards = store.artboards.filter((b) => b.width > 0 && b.height > 0)
+      if (boards.length === 0) {
+        store.setStatusMessage('Nothing to export')
+        break
+      }
+      let painted = 0
+      for (const board of boards) {
+        const svg = e.exportBoardVectorSVG(board, { bleed: 0, marks: false })
+        if (!svg) continue
+        const str = new XMLSerializer().serializeToString(svg)
+        const blob = new Blob([str], { type: 'image/svg+xml' })
+        const url = URL.createObjectURL(blob)
+        downloadHref(url, `${board.name || 'artboard'}.svg`)
+        painted++
+      }
+      store.setStatusMessage(
+        painted > 0 ? `Exported ${painted} of ${boards.length} boards` : 'Board export failed'
+      )
+      break
+    }
     case 'import': {
       const input = document.createElement('input')
       input.type = 'file'
@@ -1281,6 +1305,11 @@ function onObjectCmd(cmd: string) {
     }
     case 'arrowheads':
       arrowVisible.value = true
+      break
+    case 'rasterize':
+      if (e && !e.rasterizeSelection()) {
+        store.setStatusMessage('Rasterize needs unlocked artwork')
+      }
       break
     case 'adjustColors':
       recolorVisible.value = true

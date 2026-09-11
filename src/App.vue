@@ -12,7 +12,7 @@
         <ColorBar />
         <div class="status-bar">
           <div class="status-left">
-            <span class="status-item">{{ cursorReadout }}</span>
+            <span class="status-item status-click" :title="'Ruler unit (click to cycle)'" @click="cycleUnit">{{ cursorReadout }}</span>
             <span v-if="selectionLabel" class="status-item">{{ selectionLabel }}</span>
             <span class="status-item status-click" :title="'Toggle snapping'" @click="toggleSnap">{{ snapLabel }}</span>
             <span v-if="store.keyObjectId" class="status-item status-click" title="Clear key object" @click="clearKey">Key ●</span>
@@ -97,6 +97,12 @@ const artboardLabel = computed(() => {
 
 function toggleSnap() {
   store.updateSnap({ enable: !store.snap.enable })
+}
+/** Cycle ruler units px → pt → mm → cm → in (geometry stays in px). */
+function cycleUnit() {
+  const order = ['px', 'pt', 'mm', 'cm', 'in'] as const
+  const next = order[(order.indexOf(store.rulerUnit) + 1) % order.length]
+  store.setRulerUnit(next)
 }
 function clearKey() {
   ;(store as any).setKeyObject?.('')

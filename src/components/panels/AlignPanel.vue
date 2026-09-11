@@ -36,6 +36,12 @@
         <el-input-number v-model="gap" :min="0" :max="2000" size="small" controls-position="right" @change="onGap" />
         <span class="unit">px</span>
       </div>
+      <div class="btn-grid-3">
+        <el-button size="small" class="grid-btn" title="Average sub-selected anchors horizontally" @click="doAverage('horizontal')">Avg H</el-button>
+        <el-button size="small" class="grid-btn" title="Average sub-selected anchors vertically" @click="doAverage('vertical')">Avg V</el-button>
+        <el-button size="small" class="grid-btn" title="Average sub-selected anchors on both axes" @click="doAverage('both')">Avg Both</el-button>
+      </div>
+      <div class="hint">Average needs 2+ sub-selected anchors (Direct Select).</div>
     </div>
 
     <div class="panel-section">
@@ -149,6 +155,17 @@ function doExtended(op: 'minusBack' | 'divide' | 'trim' | 'outline') {
   if (!(e as any).extendedBoolean?.(op)) {
     store.setStatusMessage(op === 'outline' ? 'Outline needs a path with a stroke' : 'Need two unlocked paths')
   }
+}
+
+function doAverage(axis: 'horizontal' | 'vertical' | 'both') {
+  const e = getEngine()
+  if (!e) return
+  const sc = e.getController('direct-select') as {
+    averageSubselection?: (a: 'horizontal' | 'vertical' | 'both') => boolean | null
+  } | null
+  const sub = sc?.averageSubselection?.(axis) ?? null
+  if (sub === true) return
+  store.setStatusMessage('Average needs 2+ sub-selected anchors')
 }
 
 function setKey() {

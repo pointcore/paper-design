@@ -100,6 +100,10 @@
 
     <!-- Paint tools: stroke width + opacity quick -->
     <template v-else-if="isPaintTool">
+      <template v-if="isBrushTool">
+        <span class="cb-label">Size</span>
+        <el-input-number v-model="brushSize" :min="1" :max="200" size="small" style="width: 76px" title="Brush footprint ([ ] resize)" @change="onBrushSize" />
+      </template>
       <span class="cb-label">Stroke</span>
       <el-input-number v-model="strokeWidth" :min="0.1" :max="100" size="small" style="width: 80px" @change="onStrokeWidth" />
       <span class="cb-label">Opacity</span>
@@ -163,6 +167,7 @@ const isTextTool = computed(() => store.tool === 'type' || store.tool === 'area-
 const isShapeTool = computed(() => ['rect', 'rounded-rect', 'ellipse', 'polygon', 'arc', 'spiral', 'line', 'rect-grid', 'polar-grid'].includes(store.tool))
 const isTransformTool = computed(() => store.tool === 'rotate' || store.tool === 'scale' || store.tool === 'mirror')
 const isPaintTool = computed(() => ['pencil', 'blob-brush', 'brush', 'eraser', 'width'].includes(store.tool))
+const isBrushTool = computed(() => store.tool === 'blob-brush' || store.tool === 'brush' || store.tool === 'eraser')
 
 const alignBtns: Array<{ mode: AlignMode; text: string; label: string }> = [
   { mode: 'left', text: '◀', label: 'Align Left' },
@@ -212,6 +217,7 @@ const gridRows = ref((store as any).gridRows ?? 4)
 const gridCols = ref((store as any).gridCols ?? 4)
 const strokeWidth = ref(store.style.strokeWidth)
 const opacityPct = ref(Math.round(store.style.opacity * 100))
+const brushSize = ref(Number((store as any).brushSize ?? 20))
 const gradientAngle = ref(Math.round(store.style.gradient?.angle ?? 0))
 const gradientType = ref<'linear' | 'radial'>(store.style.gradient?.type ?? 'linear')
 const calloutColor = ref(store.calloutStyle.color)
@@ -225,6 +231,7 @@ const scalePct = ref(100)
 watch(() => store.charStyle.fontFamily, (v) => { fontFamily.value = v })
 watch(() => store.charStyle.fontSize, (v) => { fontSize.value = v })
 watch(() => store.style.strokeWidth, (v) => { strokeWidth.value = v })
+watch(() => (store as any).brushSize, (v) => { brushSize.value = Number(v) || 20 })
 watch(() => store.style.gradient?.angle, (v) => { gradientAngle.value = Math.round(v ?? 0) })
 watch(() => store.style.gradient?.type, (v) => { gradientType.value = v ?? 'linear' })
 
@@ -317,6 +324,16 @@ function onOpacity(v: number | undefined) {
   if (v === undefined) return
   const o = Math.min(100, Math.max(0, v)) / 100
   store.updateStyle({ opacity: o })
+}
+function onBrushSize(v: number | undefined) {
+  if (v === undefined) return
+  ;(store as any).setBrushSize?.(v)
+  brushSize.value = Number((store as any).brushSize ?? 20)
+  const e = getEngine()
+  const ctrl = e?.getController(store.tool) as { refreshCursor?: () => void } | null
+  try {
+    ctrl?.refreshCursor?.()
+  } catch { /* cursor repaint must never break panel edits */ }
 }
 function applyGradientEdit(label: string) {
   const e = getEngine()
