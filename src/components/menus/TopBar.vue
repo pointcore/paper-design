@@ -3,7 +3,7 @@
     <div class="menus">
       <div class="app-title">Vector Editor</div>
       <div class="menu-group">
-        <el-dropdown trigger="click" @command="onFileCmd">
+        <el-dropdown trigger="click" @command="onFileCmd" @visible-change="onFileMenuVisible">
           <span class="menu-label">File</span>
           <template #dropdown>
             <el-dropdown-menu>
@@ -11,6 +11,12 @@
               <el-dropdown-item command="open" divided>Open...</el-dropdown-item>
               <el-dropdown-item command="save">Save</el-dropdown-item>
               <el-dropdown-item command="saveAs">Save As...</el-dropdown-item>
+              <el-dropdown-item
+                v-for="(rf, i) in recentFiles"
+                :key="rf.id"
+                :command="'recent:' + rf.id"
+                :divided="i === 0"
+              >{{ rf.name }}</el-dropdown-item>
               <el-dropdown-item command="export" divided>Export SVG</el-dropdown-item>
               <el-dropdown-item command="exportSelection" :disabled="!store.hasSelection">Export Selection SVG</el-dropdown-item>
               <el-dropdown-item command="exportBoardsSvg">Export Boards SVG</el-dropdown-item>
@@ -895,10 +901,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, inject, watch, type Ref } from 'vue'
+import { ref, reactive, computed, inject, watch, onMounted, type Ref } from 'vue'
 import { QuestionFilled, Check } from '@element-plus/icons-vue'
 import AppDialog from '../ui/AppDialog.vue'
 import { uniqueSelectionName, pruneSelectionIds } from '../../editor/selection/saved-selection'
+import { listRecentProjects, loadRecentProjectText } from '../../editor/recent-files'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
 import type { RulerUnit, RasterExportFormat, RasterExportArea } from '../../editor/types'
@@ -1593,9 +1600,41 @@ function confirmDiscard(): boolean {
   }
 }
 
-function onFileCmd(cmd: string) {
+// File > Recent: loaded when the menu opens (and once at startup).
+const recentFiles = ref<Array<{ id: string; name: string; savedAt: number }>>([])
+async function refreshRecentFiles() {
+  try {
+    recentFiles.value = await listRecentProjects()
+  } catch {
+    recentFiles.value = []
+  }
+}
+function onFileMenuVisible(visible: boolean) {
+  if (visible) void refreshRecentFiles()
+}
+onMounted(() => {
+  void refreshRecentFiles()
+})
+
+async function onFileCmd(cmd: string) {
   blurMenuFocus()
   const e = engineRef?.value
+  if (cmd.startsWith('recent:')) {
+    if (!confirmDiscard()) return
+    if (!e) return
+    try {
+      const text = await loadRecentProjectText(cmd.slice(7))
+      if (!text) {
+        store.setStatusMessage('That recent file is gone (cleared or overwritten)')
+        return
+      }
+      e.importProjectFile(text)
+      store.setStatusMessage('Project opened')
+    } catch (err) {
+      store.setStatusMessage(err instanceof Error ? err.message : 'Project open failed')
+    }
+    return
+  }
   switch (cmd) {
     case 'new': {
       if (!confirmDiscard()) break

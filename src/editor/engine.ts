@@ -10,6 +10,7 @@ import { gradientAngleFromVector, linearGradientEndpoints, normalizeAngleDeg } f
 import { changeCaseText } from './text/text-case'
 import { colorDistanceRgb, invertCssColor, isOutOfCmykGamut, parseCssColor, rgbToCmyk, shiftCssColor } from './color'
 import { parseProjectFile } from './project-file'
+import { recordRecentProject } from './recent-files'
 import type { EditorStore } from './store-types'
 
 /** Identifier stamped into every saved project file. */
@@ -2144,6 +2145,8 @@ export class EditorEngine {
     setTimeout(() => URL.revokeObjectURL(url), 4000)
     this.markSaved()
     this.showStatus('Project saved')
+    // Mirror into the File > Recent list (best effort, non-blocking).
+    void recordRecentProject(stem, fileText)
   }
 
   /**
