@@ -76,7 +76,7 @@
 import { computed, ref, watch, inject, type Ref } from 'vue'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
-import type { AlignMode, BooleanOperation, DistributeAxis } from '../../editor/types'
+import type { AlignMode, AlignTarget, BooleanOperation, DistributeAxis } from '../../editor/types'
 
 const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
@@ -91,19 +91,19 @@ const alignBtns: Array<{ mode: AlignMode; text: string; label: string }> = [
   { mode: 'bottom', text: 'Bottom', label: 'Align Bottom' },
 ]
 
-const alignTarget = ref((store as any).alignTarget ?? 'selection')
-watch(() => (store as any).alignTarget, (v) => { alignTarget.value = v })
-function onTargetChange(v: string) { (store as any).setAlignTarget?.(v) }
+const alignTarget = ref(store.alignTarget ?? 'selection')
+watch(() => store.alignTarget, (v) => { alignTarget.value = v })
+function onTargetChange(v: AlignTarget) { store.setAlignTarget(v) }
 
-const gap = ref((store as any).distributeGap ?? 10)
-watch(() => (store as any).distributeGap, (v) => { gap.value = v })
-function onGap(v: number | undefined) { if (v !== undefined) (store as any).setDistributeGap?.(v) }
+const gap = ref(store.distributeGap ?? 10)
+watch(() => store.distributeGap, (v) => { gap.value = v })
+function onGap(v: number | undefined) { if (v !== undefined) store.setDistributeGap(v) }
 
 const keyName = computed(() => {
-  const id = (store as any).keyObjectId as string
+  const id = store.keyObjectId
   if (!id) return ''
   const e = getEngine()
-  const item = id && e ? (e as any).getItemById?.(id) : null
+  const item = id && e ? e.getItemById(id) : null
   if (!item) return 'missing — pick again'
   return String((item as any).name || (item as any).data?.name || id.slice(0, 8))
 })
@@ -119,9 +119,9 @@ const operandCount = computed(() => {
 function resolveTarget(): paper.Rectangle | undefined {
   const e = getEngine()
   if (!e) return undefined
-  const t = (store as any).alignTarget ?? 'selection'
+  const t = store.alignTarget ?? 'selection'
   if (t === 'board') return e.getActiveArtboardRect() ?? undefined
-  if (t === 'key') return (e as any).getKeyObjectBounds?.() ?? undefined
+  if (t === 'key') return e.getKeyObjectBounds() ?? undefined
   return undefined
 }
 
@@ -161,7 +161,7 @@ function doBoolean(op: BooleanOperation) {
 function doExtended(op: 'minusBack' | 'divide' | 'trim' | 'outline') {
   const e = getEngine()
   if (!e) return
-  if (!(e as any).extendedBoolean?.(op)) {
+  if (!e.extendedBoolean(op)) {
     store.setStatusMessage(op === 'outline' ? 'Outline needs a path with a stroke' : 'Need two unlocked paths')
   }
 }
@@ -188,13 +188,13 @@ function doMatchSize(mode: 'width' | 'height' | 'both') {
 function setKey() {
   const id = store.selectedItemIds[0]
   if (!id) return
-  ;(store as any).setKeyObject?.(id)
-  ;(store as any).setAlignTarget?.('key')
+  ;store.setKeyObject?.(id)
+  ;store.setAlignTarget?.('key')
   store.setStatusMessage('Key object set (align target)')
 }
 function clearKey() {
-  ;(store as any).setKeyObject?.('')
-  ;(store as any).setAlignTarget?.('selection')
+  ;store.setKeyObject?.('')
+  ;store.setAlignTarget?.('selection')
 }
 </script>
 

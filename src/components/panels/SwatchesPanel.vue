@@ -163,7 +163,7 @@ onMounted(() => {
     const list = JSON.parse(raw) as Array<{ id?: unknown; name?: unknown; style?: unknown }>
     if (!Array.isArray(list)) return
     const clean = list
-      .filter((p) => p && typeof p === 'object' && typeof (p.style as any) === 'object' && (p.style as any) !== null)
+      .filter((p) => p && typeof p === 'object' && typeof p.style === 'object' && p.style !== null)
       .slice(0, 24)
       .map((p, i) => ({
         id: typeof p.id === 'string' && p.id ? p.id : `style-restored-${i}`,
