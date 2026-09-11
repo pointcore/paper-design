@@ -31,6 +31,15 @@ export class MeasureController {
     applyToolCursor(this.engine.canvas, 'measure')
   }
 
+  /**
+   * Tool switch: the paper Tool is replaced so the drag's mouse-up never
+   * arrives — drop the preview and the measuring state instead of leaving
+   * a frozen dashed line and a stuck drag flag behind.
+   */
+  deactivate() {
+    if (this.isMeasuring) this.cancelMeasure()
+  }
+
   private setupTool() {
     const engine = this.engine
     if (!engine) return

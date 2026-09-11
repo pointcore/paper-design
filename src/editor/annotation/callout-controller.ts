@@ -45,6 +45,21 @@ export class CalloutController {
     this.setupTool()
   }
 
+  /**
+   * Tool switch: an in-progress multi-click draft never reaches its
+   * commit, so remove the fragment instead of leaving stray geometry on
+   * the annotation layer (label edits commit via the store subscription).
+   */
+  deactivate() {
+    if (!this.isDrawing) return
+    this.currentPath?.remove()
+    this.isDrawing = false
+    this.points = []
+    this.currentPath = null
+    this.engine?.store.setDragging(false)
+    this.engine?.scope.view.update()
+  }
+
   private getNativeEvent(event: paper.ToolEvent): MouseEvent {
     return (event as any).event as MouseEvent
   }
