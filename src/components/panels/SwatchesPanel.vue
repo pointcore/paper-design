@@ -6,7 +6,7 @@
         <el-option v-for="l in libraries" :key="l.name" :label="l.name" :value="l.name" />
       </el-select>
       <div class="sw-grid">
-        <div v-for="c in presets" :key="c" class="sw" :class="{ active: c.toLowerCase() === activeColor }" :style="{ background: c }" :title="c" @click="apply(c, $event)" />
+        <div v-for="c in presets" :key="c" class="sw" :class="{ active: c.toLowerCase() === activeColor }" :style="{ background: c }" :title="c + ' (right-click = stroke)'" @click="apply(c, $event)" @contextmenu.prevent="apply(c, $event)" />
         <div class="sw sw-none" title="No fill" @click="clearFill">×</div>
       </div>
     </div>
@@ -14,7 +14,7 @@
       <div class="sec-title">Recent</div>
       <div class="sw-grid">
         <div v-if="store.recentColors.length === 0" class="hint">Paint something to build recents.</div>
-        <div v-for="c in store.recentColors" :key="c" class="sw" :class="{ active: c.toLowerCase() === activeColor }" :style="{ background: c }" :title="c" @click="apply(c, $event)" />
+        <div v-for="c in store.recentColors" :key="c" class="sw" :class="{ active: c.toLowerCase() === activeColor }" :style="{ background: c }" :title="c + ' (right-click = stroke)'" @click="apply(c, $event)" @contextmenu.prevent="apply(c, $event)" />
       </div>
     </div>
     <div class="panel-section">
@@ -81,13 +81,14 @@ const presets = computed(() => libraries.find((l) => l.name === library.value)?.
 
 function apply(color: string, e: MouseEvent) {
   const engine = getEngine()
+  const toStroke = e.altKey || e.type === 'contextmenu'
   store.pushRecentColor(color)
   if (!engine) {
-    if (e.altKey) store.updateStyle({ strokeColor: color })
+    if (toStroke) store.updateStyle({ strokeColor: color })
     else store.updateStyle({ fillColor: color, gradient: null })
     return
   }
-  if (e.altKey) {
+  if (toStroke) {
     store.updateStyle({ strokeColor: color })
     engine.getSelection().forEach((item: any) => { if (item.strokeColor !== undefined) item.strokeColor = color })
     engine.scope.view.update()
