@@ -1001,6 +1001,20 @@ export class TextController {
         this.commit()
         return
       }
+      // Point text is single-line (AI): Enter commits the session. Area,
+      // path and vertical sessions keep Enter as a line break. The guard
+      // keeps IME composition confirmation from committing early.
+      if (
+        e.key === 'Enter' &&
+        !e.isComposing &&
+        !e.ctrlKey && !e.metaKey && !e.altKey &&
+        this.activeKind() === 'point'
+      ) {
+        e.preventDefault()
+        e.stopPropagation()
+        this.commit()
+        return
+      }
       // AI Ctrl+Shift+> / <: step the font size of the text being edited.
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && (e.code === 'Period' || e.code === 'Comma')) {
         e.preventDefault()
