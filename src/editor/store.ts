@@ -153,8 +153,10 @@ export const useEditorStore = defineStore('editor', {
     history: [] as HistoryEntry[],
     /** History index (-1 means empty) */
     historyIndex: -1,
-    /** Saved revision (matches history index/length right after save/open/new) */
-    savedRevision: { index: -1, length: 0 },
+    /** Monotonic document revision, bumped by every history mutation */
+    revision: 0,
+    /** Revision value captured at the last save / open / new */
+    savedRevision: 0,
     /** History stack size limit */
     historyLimit: 100,
     /** Callout style */
@@ -248,10 +250,10 @@ export const useEditorStore = defineStore('editor', {
     },
     /** Whether the document differs from the last save/open/new */
     hasUnsavedChanges(state): boolean {
-      return (
-        state.historyIndex !== state.savedRevision.index ||
-        state.history.length !== state.savedRevision.length
-      )
+      // A monotonic revision (not historyIndex/length) is what makes this
+      // survive the 100-entry cap: once the stack is full, index and length
+      // freeze, so comparing them silently reported "clean" forever.
+      return state.revision !== state.savedRevision
     },
   },
 
@@ -369,9 +371,14 @@ export const useEditorStore = defineStore('editor', {
       this.historyIndex = index
     },
 
-    /** Mark the current history position as saved (clean) */
-    setSavedRevision(index: number, length: number) {
-      this.savedRevision = { index, length }
+    /** Record that the document changed (undo/redo/clear included). */
+    bumpRevision() {
+      this.revision++
+    },
+
+    /** Capture the current revision as the saved (clean) one. */
+    markRevisionSaved() {
+      this.savedRevision = this.revision
     },
 
     /**

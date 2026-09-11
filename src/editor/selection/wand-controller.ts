@@ -41,7 +41,9 @@ export class WandController {
         }
         return
       }
-      engine.selectItem(top)
+      // Additive (Shift) must not clear first: selectItem() defaults to a
+      // replacing selection, which left selectSame() nothing to add to.
+      engine.selectItem(top, additive)
       const tol = Number((engine.store as any).wandTolerance) || 0
       const n = engine.selectSame('fill', additive, tol)
       engine.store.setStatusMessage(

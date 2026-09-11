@@ -105,7 +105,13 @@ export class TransformController {
       this.dragging = false
       if (this.moved) {
         engine.pushHistory(this.mode === 'rotate' ? 'Rotate' : 'Scale')
-        engine.stampSelectionFrame()
+        // rotateSelection rigidly syncs the oriented frame; scaleSelection
+        // has no frame counterpart, so stamping here (which only writes
+        // frame.version) froze the frame at its pre-scale size and offset.
+        // Drop it instead so it rebuilds from the live bounds.
+        if (this.mode === 'rotate') engine.stampSelectionFrame()
+        else engine.dropSelectionFrame()
+        engine.syncSelectionToStore()
       }
       this.moved = false
     }

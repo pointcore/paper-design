@@ -643,16 +643,20 @@ export class SelectController {
         // but the move affordance reads better on the web canvas).
         engine.canvas.style.cursor = 'move'
       } else {
-        if (event.modifiers.shift) return
-        engine.clearSelection()
-        this.clearAnchorSelection()
-        this.clearCurveSelection()
-        this.refreshChrome()
+        // Shift starts an additive marquee. The old early return made
+        // Shift-drag a complete no-op and left marqueeShift permanently
+        // false, so the additive branches below were dead code.
+        this.marqueeShift = !!event.modifiers.shift
+        if (!this.marqueeShift) {
+          engine.clearSelection()
+          this.clearAnchorSelection()
+          this.clearCurveSelection()
+          this.refreshChrome()
+        }
         this.isMarquee = true
         // Direct-select marquee sub-selects anchors; the select tool marquee
         // selects whole objects.
         this.anchorMarquee = this.mode === 'direct-select'
-        this.marqueeShift = !!event.modifiers.shift
         this.dragStart = { x: event.point.x, y: event.point.y }
         this.createMarquee(event.point.x, event.point.y)
         engine.store.setDragging(true)
@@ -718,6 +722,10 @@ export class SelectController {
       engine.store.setDragging(false)
       // Back to the AI-aligned tool default (arrow / white arrow).
       engine.canvas.style.cursor = cursorForTool(this.mode)
+      // Geometry changed without the id set changing, so the store would
+      // otherwise keep pre-drag bounds: the Properties panel would recompute
+      // X/Y from a stale anchor and snap the object back on the next edit.
+      engine.syncSelectionToStore()
       this.refreshChrome()
     }
 
@@ -2761,7 +2769,10 @@ export class SelectController {
     userLayers.forEach((layer) => {
       if (!layer.visible || layer.locked) return
       layer.children.forEach((child: any) => {
-        if (!child.visible) return
+        // Locked items are skipped here because Paper only filters them in
+        // hitTest; this marquee walks children by hand, so it used to select
+        // locked artwork that clicks could never reach.
+        if (!child.visible || child.locked) return
         if (rectInProject.intersects(child.bounds)) {
           child.selected = true
         }

@@ -19,6 +19,8 @@ export class GradientController {
   private start: { x: number; y: number } | null = null
   private preview: paper.Path | null = null
   private committed = false
+  /** Whether ensureLinearGradient() already ran for this gesture. */
+  private gradientEnsured = false
   private savedGradient: { type: 'linear' | 'radial'; stops: Array<{ offset: number; color: string }>; angle?: number } | null = null
 
   attachEngine(engine: EditorEngine) {
@@ -46,18 +48,28 @@ export class GradientController {
         engine.store.setStatusMessage('Select objects to edit their gradient')
         return
       }
-      this.ensureLinearGradient()
+      // Snapshot the appearance BEFORE touching it. ensureLinearGradient()
+      // rewrites the style, so capturing afterwards made Escape restore the
+      // freshly auto-created gradient instead of the user's original state.
       const g = engine.store.style.gradient
       this.savedGradient = g
         ? { type: g.type, stops: g.stops.map((s) => ({ ...s })), angle: g.angle }
         : null
       this.dragging = true
       this.committed = false
+      this.gradientEnsured = false
       this.start = { x: event.point.x, y: event.point.y }
     }
 
     scope.tool.onMouseDrag = (event: paper.ToolEvent) => {
       if (!this.dragging || !this.start) return
+      // Materialize the gradient only once a real drag starts: doing it on
+      // mouse-down repainted the selection on a plain click, with no history
+      // entry to undo it.
+      if (!this.gradientEnsured) {
+        this.ensureLinearGradient()
+        this.gradientEnsured = true
+      }
       let angle = gradientAngleFromVector(event.point.x - this.start.x, event.point.y - this.start.y)
       if (event.modifiers.shift) angle = Math.round(angle / 45) * 45
       this.applyAngle(normalizeAngleDeg(angle), false)
@@ -71,6 +83,7 @@ export class GradientController {
       this.clearPreview()
       if (this.committed) engine.pushHistory('Change Gradient')
       this.committed = false
+      this.gradientEnsured = false
       this.savedGradient = null
       this.start = null
     }
@@ -147,9 +160,10 @@ export class GradientController {
     this.dragging = false
     this.start = null
     this.clearPreview()
-    if (engine && this.committed && this.savedGradient) {
-      // Roll back the live preview edits (they recorded no history yet).
-      engine.store.updateStyle({ gradient: { ...this.savedGradient } })
+    if (engine && this.committed) {
+      // Roll back the live preview edits (they recorded no history yet) to
+      // the appearance captured on mouse-down; null means "had no gradient".
+      engine.store.updateStyle({ gradient: this.savedGradient ? { ...this.savedGradient } : null })
       engine.getSelection().forEach((item: any) => {
         engine.applyStyleToItem(item, engine.store.style)
       })

@@ -16,13 +16,18 @@ export class CalloutController {
   private editingItem: paper.PointText | null = null
   private overlay: HTMLTextAreaElement | null = null
   private unsubscribeStore: (() => void) | null = null
+  /** Tool that was active when the current label edit began. */
+  private editTool: string | null = null
 
   attachEngine(engine: EditorEngine) {
     this.engine = engine
     this.snapService.attachEngine(engine)
-    // Commit an open label edit when the active tool changes.
+    // Commit an open label edit on a real tool switch. The guard used to be
+    // `state.tool !== 'callout'`, which is always true when the edit was
+    // started from a select tool — so the first store write (a mouse-move
+    // cursor update) committed the label immediately.
     this.unsubscribeStore = engine.store.$subscribe((_mutation, state) => {
-      if (state.tool !== 'callout' && this.editingItem) {
+      if (this.editingItem && this.editTool !== null && state.tool !== this.editTool) {
         this.commitLabel()
       }
     })
@@ -158,6 +163,7 @@ export class CalloutController {
     if (!((item.data as any)?.annotation)) return
     if (this.editingItem) this.commitLabel()
     this.editingItem = item
+    this.editTool = engine.store.tool
     item.visible = false
     engine.scope.view.update()
 
@@ -235,6 +241,7 @@ export class CalloutController {
     const overlay = this.overlay
     this.editingItem = null
     this.overlay = null
+    this.editTool = null
     if (overlay) overlay.remove()
     if (!engine || !item || !item.parent) {
       engine?.scope.view.update()

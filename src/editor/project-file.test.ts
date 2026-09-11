@@ -51,6 +51,26 @@ describe('parseProjectFile', () => {
     )
   })
 
+  it('rejects snapshots that are not project-shaped', () => {
+    // These used to pass validation: Paper imports them without throwing,
+    // so the open document was silently replaced by an empty scene.
+    expect(() => parseProjectFile(envelope({ snapshot: {} }), MAX_VERSION)).toThrow(
+      'Invalid project file: missing snapshot'
+    )
+    expect(() => parseProjectFile(envelope({ snapshot: { foo: 1 } }), MAX_VERSION)).toThrow(
+      'Invalid project file: missing snapshot'
+    )
+    expect(() => parseProjectFile(envelope({ snapshot: [] }), MAX_VERSION)).toThrow(
+      'Invalid project file: missing snapshot'
+    )
+    expect(() => parseProjectFile(envelope({ snapshot: { layers: [] } }), MAX_VERSION)).toThrow(
+      'Invalid project file: missing snapshot'
+    )
+    expect(() => parseProjectFile(envelope({ version: 1, snapshot: '{}' }), MAX_VERSION)).toThrow(
+      'Invalid project file: missing snapshot'
+    )
+  })
+
   it('rejects future versions', () => {
     expect(() => parseProjectFile(envelope({ version: 99 }), MAX_VERSION)).toThrow(
       'Unsupported project file version'

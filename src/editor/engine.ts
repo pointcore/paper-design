@@ -71,6 +71,15 @@ export class EditorEngine {
       this.store.setActiveArtboard(id)
     }
     this.refreshArtboards()
+    // Seed a baseline history entry: without it the first edit lands at
+    // index 0, where undo() (which requires index > 0) silently refuses,
+    // so the very first operation could never be taken back.
+    this.history = [{ name: 'New Document', icon: '', timestamp: Date.now() }]
+    this.historySnapshots = [this.snapshotProject()]
+    this.historyMeta = [this.captureDocMeta()]
+    this.historyIndex = 0
+    this.store.setHistory(this.history, this.historyIndex)
+    this.markSaved()
     // Seed the cached transform from Paper's authoritative view so the
     // first pan/zoom never starts from a stale (0,0) origin.
     this.syncViewBookkeeping()
@@ -576,6 +585,17 @@ export class EditorEngine {
       (item) => (item as any).data?.id as string
     )
     this.store.setSelection(ids.filter(Boolean))
+    // Mirror the united selection bounds into the store: the status bar
+    // reads transform.width/height, and the Properties panel re-reads X/Y/W/H
+    // off this same selection change, so both stay honest after a canvas
+    // move (nothing else ever wrote width/height — the readout was 0×0).
+    const bounds = ids.length > 0 ? this.getSelectionBounds() : null
+    this.store.updateTransform({
+      x: bounds ? Math.round(bounds.x * 10) / 10 : 0,
+      y: bounds ? Math.round(bounds.y * 10) / 10 : 0,
+      width: bounds ? Math.round(bounds.width * 10) / 10 : 0,
+      height: bounds ? Math.round(bounds.height * 10) / 10 : 0,
+    })
     this.refreshSelectionChrome()
   }
 
@@ -1969,6 +1989,7 @@ export class EditorEngine {
     }
     this.historyIndex = this.history.length - 1
     this.store.setHistory(this.history, this.historyIndex)
+    this.store.bumpRevision()
     if (!EditorEngine.FRAME_SAFE_HISTORY.has(name)) {
       this.geometryVersion++
     }
@@ -1992,6 +2013,7 @@ export class EditorEngine {
         this.historyMeta[this.historyIndex] ?? null
       )
       this.store.setHistoryIndex(this.historyIndex)
+      this.store.bumpRevision()
     }
   }
 
@@ -2003,6 +2025,7 @@ export class EditorEngine {
         this.historyMeta[this.historyIndex] ?? null
       )
       this.store.setHistoryIndex(this.historyIndex)
+      this.store.bumpRevision()
     }
   }
 
@@ -2021,6 +2044,7 @@ export class EditorEngine {
       this.historyMeta[this.historyIndex] ?? null
     )
     this.store.setHistoryIndex(this.historyIndex)
+    this.store.bumpRevision()
   }
 
   /** Drop the whole history stack (history panel clear action). */
@@ -2030,15 +2054,18 @@ export class EditorEngine {
     this.historyMeta = []
     this.historyIndex = -1
     this.store.setHistory([], -1)
-    this.markSaved()
+    // Clearing drops undo history; the document content itself is untouched,
+    // so the dirty flag must keep its previous value. It used to call
+    // markSaved() here, which reported an edited document as saved and
+    // suppressed the New/Open/reload warnings right after losing undo.
     this.clearSelection()
     this.clearIsolationState()
     this.thumbCache?.clear?.()
   }
 
-  /** Mark the current history position as the saved (clean) revision. */
+  /** Mark the current revision as the saved (clean) one. */
   markSaved(): void {
-    this.store.setSavedRevision(this.store.historyIndex, this.store.history.length)
+    this.store.markRevisionSaved()
   }
 
   // ===== Document (Save/Open/New) =====
@@ -2239,6 +2266,8 @@ export class EditorEngine {
     this.historyMeta = []
     this.historyIndex = -1
     this.store.setHistory([], -1)
+    // Bitmap stash is keyed by item id and belongs to the outgoing document.
+    this.imageStash.clear()
     this.pushHistory(name)
     this.markSaved()
   }
@@ -3418,6 +3447,9 @@ export class EditorEngine {
     } catch {
       // Frame bookkeeping must never break document ops.
     }
+    // Position changed with an unchanged id set: refresh the mirrored bounds
+    // so the Properties panel does not edit against a pre-nudge anchor.
+    this.syncSelectionToStore()
     return true
   }
 
@@ -3434,6 +3466,7 @@ export class EditorEngine {
       this.historyMeta[this.historyIndex] = this.captureDocMeta()
       last.timestamp = now
       this.store.setHistory(this.history, this.historyIndex)
+      this.store.bumpRevision()
     } else {
       this.pushHistory(name)
     }
@@ -3912,6 +3945,13 @@ export class EditorEngine {
     const raster = new this.scope.Raster({ source: url }) as paper.Raster
     parent.addChild(raster)
     raster.onLoad = () => {
+      // exportRaster ran at 2x, so the bitmap lands at twice the selection
+      // size (a data URL carries no DPI): scale it back into the original
+      // bounds before placing it.
+      const nb = (raster as any).bounds as paper.Rectangle | undefined
+      if (nb && nb.width > 0 && nb.height > 0) {
+        raster.scale(bounds.width / nb.width, bounds.height / nb.height)
+      }
       raster.position = bounds.center.clone()
       raster.data.id = this.genId()
       raster.data.isUserItem = true
@@ -5158,6 +5198,7 @@ export class EditorEngine {
       next.opacity = opacity
       next.data.id = this.genId()
       next.data.isUserItem = true
+      this.carryImageStash(source as paper.Raster, next)
       try {
         ;(source as paper.Raster).remove()
       } catch { /* already gone */ }
@@ -5253,6 +5294,7 @@ export class EditorEngine {
         next.opacity = opacity
         next.data.id = this.genId()
         next.data.isUserItem = true
+        this.carryImageStash(source, next)
         try {
           source.remove()
         } catch { /* already gone */ }
@@ -5275,31 +5317,55 @@ export class EditorEngine {
   }
 
   /**
+   * Pre-edit pixels of destructively edited rasters, keyed by item id.
+   * Deliberately session-only (never written into item.data): item data is
+   * serialized into every history snapshot and project file, so stashing a
+   * full PNG there would double the bitmap payload of each edited image.
+   */
+  private imageStash = new Map<string, string>()
+
+  /**
    * Remember a raster's current pixels once, so destructive bitmap ops
    * (adjust / downsample / replace) stay reversible via Reset Image.
    * Tainted canvases simply stash nothing.
    */
   private stashOriginalSource(raster: paper.Raster): void {
-    const data = (raster as any).data ?? {}
-    if (typeof data.originalSource === 'string' && data.originalSource.startsWith('data:')) return
+    const id = (raster as any).data?.id as string | undefined
+    if (!id || this.imageStash.has(id)) return
     try {
       const url = (raster as any).canvas?.toDataURL?.('image/png') as string | undefined
-      if (typeof url === 'string' && url.startsWith('data:')) data.originalSource = url
+      if (typeof url === 'string' && url.startsWith('data:')) this.imageStash.set(id, url)
     } catch { /* tainted: nothing to stash */ }
   }
 
   /**
+   * Hand the stash entry of a replaced raster to its replacement. Must run
+   * after the replacement has its own data.id; otherwise the original is
+   * dropped together with the item it belonged to.
+   */
+  private carryImageStash(from: paper.Raster, to: paper.Raster): void {
+    const fromId = (from as any).data?.id as string | undefined
+    const toId = (to as any).data?.id as string | undefined
+    if (!fromId || !toId) return
+    const url = this.imageStash.get(fromId)
+    if (url && !this.imageStash.has(toId)) this.imageStash.set(toId, url)
+  }
+
+  /**
    * Restore the stashed pre-edit pixels of the first selected raster
-   * (one level). Returns false with nothing to restore.
+   * (one level). Returns false with nothing to restore. The stash is
+   * session-only, so this survives undo/redo of the destructive op but not
+   * a save + reload (the op itself is still undoable through history).
    */
   resetImage(): boolean {
     const scope = this.scope
+    const stashedId = (node: paper.Item): string | null => {
+      const id = (node as any).data?.id as string | undefined
+      return id && this.imageStash.has(id) ? id : null
+    }
     const find = (node: paper.Item): paper.Raster | null => {
       if ((node as any).locked || !node.parent) return null
-      if (node instanceof scope.Raster) {
-        const url = (node as any).data?.originalSource
-        return typeof url === 'string' && url.startsWith('data:') ? node : null
-      }
+      if (node instanceof scope.Raster) return stashedId(node) ? node : null
       const children = (node as any).children as paper.Item[] | undefined
       if (children) {
         for (const child of children) {
@@ -5315,7 +5381,8 @@ export class EditorEngine {
       if (source) break
     }
     if (!source) return false
-    const url = (source as any).data.originalSource as string
+    const url = this.imageStash.get(stashedId(source) as string)
+    if (!url) return false
     const bounds = (source as any).bounds as paper.Rectangle | undefined
     if (!bounds || bounds.width < 1 || bounds.height < 1) return false
     const parent = source.parent ?? this.getActiveLayer()
@@ -5332,6 +5399,9 @@ export class EditorEngine {
       next.opacity = opacity
       next.data.id = this.genId()
       next.data.isUserItem = true
+      // Keep the stash reachable under the new id so Reset Image stays
+      // repeatable instead of burning itself on the first use.
+      this.carryImageStash(source as paper.Raster, next)
       try {
         ;(source as paper.Raster).remove()
       } catch { /* already gone */ }
@@ -5394,6 +5464,7 @@ export class EditorEngine {
       next.opacity = opacity
       next.data.id = this.genId()
       next.data.isUserItem = true
+      this.carryImageStash(source as paper.Raster, next)
       try {
         ;(source as paper.Raster).remove()
       } catch { /* already gone */ }

@@ -409,6 +409,7 @@ function onRotateBy(v: number | undefined) {
   e.rotateSelection(v, pivot)
   e.pushHistory('Rotate')
   e.stampSelectionFrame()
+  e.syncSelectionToStore()
   rotateBy.value = 0
 }
 function onScalePct(v: number | undefined) {
@@ -419,7 +420,10 @@ function onScalePct(v: number | undefined) {
   if (!pivot) { scalePct.value = 100; return }
   e.scaleSelection(f, f, pivot)
   e.pushHistory('Scale')
-  e.stampSelectionFrame()
+  // scaleSelection has no frame counterpart — stamping would keep the
+  // pre-scale frame; drop it so the next paint rebuilds from live bounds.
+  e.dropSelectionFrame()
+  e.syncSelectionToStore()
   scalePct.value = 100
 }
 function flip(dir: 'horizontal' | 'vertical') {
@@ -430,6 +434,7 @@ function flip(dir: 'horizontal' | 'vertical') {
   e.flipSelection(dir, pivot)
   e.pushHistory(dir === 'horizontal' ? 'Flip Horizontal' : 'Flip Vertical')
   e.stampSelectionFrame()
+  e.syncSelectionToStore()
 }
 </script>
 

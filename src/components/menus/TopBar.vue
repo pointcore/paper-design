@@ -884,7 +884,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, inject, type Ref } from 'vue'
+import { ref, reactive, computed, inject, watch, type Ref } from 'vue'
 import { QuestionFilled, Check } from '@element-plus/icons-vue'
 import AppDialog from '../ui/AppDialog.vue'
 import { uniqueSelectionName, pruneSelectionIds } from '../../editor/selection/saved-selection'
@@ -899,6 +899,16 @@ const settingsVisible = computed({
   get: () => store.ui.settingsOpen,
   set: (v: boolean) => store.setSettingsOpen(v),
 })
+// The form is seeded once at setup, but the dialog can also be opened from
+// the Properties panel and the tool rail (which only flip settingsOpen), so
+// re-sync on every open. Otherwise the stale page size overwrote the active
+// artboard on the next Page Size change.
+watch(
+  () => store.ui.settingsOpen,
+  (open) => {
+    if (open) syncSettingsFromStore()
+  }
+)
 const exportVisible = ref(false)
 const guidesVisible = ref(false)
 const guidesTick = ref(0)

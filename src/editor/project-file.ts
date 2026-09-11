@@ -24,15 +24,30 @@ export function parseProjectFile(fileText: string, maxVersion: number): ProjectF
     throw new Error('Invalid project file: not valid JSON')
   }
   const rawSnapshot = (parsed as any)?.snapshot as unknown
-  const snapshotOk =
-    typeof rawSnapshot === 'string'
-      ? rawSnapshot.length > 0
-      : typeof rawSnapshot === 'object' && rawSnapshot !== null
-  if (!parsed || typeof parsed !== 'object' || !snapshotOk) {
+  if (!parsed || typeof parsed !== 'object' || !looksLikeProjectSnapshot(rawSnapshot)) {
     throw new Error('Invalid project file: missing snapshot')
   }
   if (typeof parsed.version === 'number' && parsed.version > maxVersion) {
     throw new Error('Unsupported project file version')
   }
   return parsed
+}
+
+/**
+ * A snapshot must actually describe a Paper project. Accepting any non-null
+ * object let `{"version":2,"snapshot":{}}` through: Paper imports it without
+ * throwing, so the open document was replaced by an empty scene and the
+ * engine's rollback (which only fires on a throw) never ran.
+ */
+function looksLikeProjectSnapshot(value: unknown): boolean {
+  if (typeof value === 'string') {
+    // Cheap substring probe instead of JSON.parse: the engine is about to
+    // hand this (possibly 150 MB) string to Paper and parse it itself.
+    return value.includes('"layers"')
+  }
+  if (!value || typeof value !== 'object') return false
+  const layers = (value as Record<string, unknown>).layers
+  // The engine always keeps grid/user/overlay/annotation/guide layers, so a
+  // legitimate export never carries an empty stack.
+  return Array.isArray(layers) && layers.length > 0
 }
