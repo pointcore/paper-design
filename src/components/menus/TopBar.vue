@@ -16,6 +16,7 @@
                 :key="rf.id"
                 :command="'recent:' + rf.id"
                 :divided="i === 0"
+                :title="'Saved ' + new Date(rf.savedAt).toLocaleString()"
               >{{ rf.name }}</el-dropdown-item>
               <el-dropdown-item v-if="recentFiles.length > 0" command="clearRecent" divided>Clear Recent</el-dropdown-item>
               <el-dropdown-item command="export" divided>Export SVG</el-dropdown-item>
