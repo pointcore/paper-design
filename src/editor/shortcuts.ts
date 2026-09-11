@@ -347,6 +347,14 @@ export function handleGlobalKeydown(
 
   if (e.repeat) return
 
+  // Zoom to selection (CDR Shift+F2 parity; the View menu owns the command).
+  if (e.key === 'F2' && e.shiftKey && !e.altKey) {
+    if (store.hasSelection) engine?.zoomToSelection()
+    else store.setStatusMessage('Nothing selected to zoom to')
+    e.preventDefault()
+    return
+  }
+
   // Fill/stroke target (AI X / Shift+X parity): plain X flips the paint
   // target, Shift+X swaps the paints everywhere.
   if (key(e) === 'x') {

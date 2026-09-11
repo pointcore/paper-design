@@ -91,4 +91,23 @@ describe('handleGlobalKeydown', () => {
     )
     expect(engine.zoomAt).toHaveBeenCalledWith(1 / 1.2)
   })
+
+  it('zooms to the selection on Shift+F2 and reports an empty selection', () => {
+    const engine = { zoomToSelection: vi.fn() } as any
+    const dirty = { hasSelection: true, setStatusMessage: vi.fn() } as any
+    handleGlobalKeydown(
+      key({ key: 'F2', code: 'F2', shiftKey: true, target: null }) as KeyboardEvent,
+      dirty,
+      engine
+    )
+    expect(engine.zoomToSelection).toHaveBeenCalledTimes(1)
+    const empty = { hasSelection: false, setStatusMessage: vi.fn() } as any
+    handleGlobalKeydown(
+      key({ key: 'F2', code: 'F2', shiftKey: true, target: null }) as KeyboardEvent,
+      empty,
+      engine
+    )
+    expect(empty.setStatusMessage).toHaveBeenCalledWith('Nothing selected to zoom to')
+    expect(engine.zoomToSelection).toHaveBeenCalledTimes(1)
+  })
 })
