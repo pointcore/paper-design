@@ -291,6 +291,23 @@ export function handleGlobalKeydown(
         }
         e.preventDefault()
       }
+    } else if (key === 'l' && !e.shiftKey && !e.altKey) {
+      // CDR Ctrl+L: combine into a compound path (the browser address-bar
+      // shortcut is interceptable; the Object menu always works).
+      if ((engine?.getSelection().length ?? 0) > 0) {
+        if (!engine?.makeCompoundPath()) {
+          store.setStatusMessage('Compound needs at least two unlocked paths')
+        }
+        e.preventDefault()
+      }
+    } else if (key === 'k' && !e.shiftKey && !e.altKey) {
+      // CDR Ctrl+K: break a compound path apart.
+      if ((engine?.getSelection().length ?? 0) > 0) {
+        if (!engine?.releaseCompoundPath()) {
+          store.setStatusMessage('Select a compound path to break apart')
+        }
+        e.preventDefault()
+      }
     } else if (key === '2' && !e.shiftKey && !e.altKey) {
       if ((engine?.getSelection().length ?? 0) > 0) {
         engine?.setSelectedLocked(true)

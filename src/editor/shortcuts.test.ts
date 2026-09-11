@@ -130,6 +130,22 @@ describe('handleGlobalKeydown', () => {
     expect(store.setStatusMessage).toHaveBeenCalledWith('No transform to repeat')
   })
 
+  it('combines on Ctrl+L and breaks apart on Ctrl+K (CDR parity)', () => {
+    const engine = { getSelection: vi.fn(() => ['a', 'b']), makeCompoundPath: vi.fn(() => true), releaseCompoundPath: vi.fn(() => true) } as any
+    handleGlobalKeydown(
+      key({ key: 'l', code: 'KeyL', ctrlKey: true, target: null }) as KeyboardEvent,
+      {} as any,
+      engine
+    )
+    expect(engine.makeCompoundPath).toHaveBeenCalledTimes(1)
+    handleGlobalKeydown(
+      key({ key: 'k', code: 'KeyK', ctrlKey: true, target: null }) as KeyboardEvent,
+      {} as any,
+      engine
+    )
+    expect(engine.releaseCompoundPath).toHaveBeenCalledTimes(1)
+  })
+
   it('deselects on Ctrl+Shift+A and reselecs on Ctrl+6 (AI parity)', () => {
     const engine = { clearSelection: vi.fn(), reselect: vi.fn(() => 1) } as any
     handleGlobalKeydown(
