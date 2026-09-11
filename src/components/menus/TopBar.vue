@@ -40,6 +40,7 @@
               <el-dropdown-item command="delete" divided :disabled="!store.hasSelection">Delete</el-dropdown-item>
               <el-dropdown-item command="selectAll" divided>Select All</el-dropdown-item>
               <el-dropdown-item command="invertSelection">Invert Selection</el-dropdown-item>
+              <el-dropdown-item command="findReplace" divided>Find &amp; Replace...</el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
@@ -133,6 +134,10 @@
               <el-dropdown-item command="controlBar" :icon="store.ui.showControlBar ? Check : undefined">
                 Control Bar
               </el-dropdown-item>
+              <el-dropdown-item command="presentation" :icon="store.ui.zenMode ? Check : undefined">
+                Presentation (Tab)
+              </el-dropdown-item>
+              <el-dropdown-item command="preflight">Preflight...</el-dropdown-item>
               <el-dropdown-item command="canvasSettings" divided>Canvas Settings...</el-dropdown-item>
             </el-dropdown-menu>
           </template>
@@ -420,8 +425,7 @@
       </div>
     </AppDialog>
 
-    <!-- Adjust Colors Dialog (Recolor-lite through HSL) -->
-    <AppDialog
+    <!-- Adjust Colors Dialog (Recolor-lite through HSL) -->    <AppDialog
       v-model="recolorVisible"
       title="Adjust Colors"
       :width="360"
@@ -448,6 +452,64 @@
             <span class="setting-name">Lightness</span>
           </div>
           <el-input-number v-model="recolorForm.light" :min="-100" :max="100" size="small" style="width: 130px" />
+        </div>
+      </div>
+    </AppDialog>
+
+    <!-- Find & Replace Dialog (AI Find/Change parity + word count) -->
+    <AppDialog
+      v-model="findVisible"
+      title="Find & Replace"
+      :width="400"
+      :show-footer="false"
+    >
+      <template #footer>
+        <el-button size="small" @click="findVisible = false">Close</el-button>
+      </template>
+      <div class="settings-body app-settings">
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Find</span>
+          </div>
+          <el-input v-model="findForm.find" size="small" placeholder="Text to find" @input="findIndex = 0" />
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Replace</span>
+          </div>
+          <el-input v-model="findForm.replace" size="small" placeholder="Replacement" />
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Match case</span>
+          </div>
+          <el-checkbox v-model="findForm.matchCase" />
+          <span class="setting-desc">{{ findCountText }}</span>
+        </div>
+        <div class="setting-row">
+          <el-button size="small" :disabled="findMatches.length === 0" @click="findNext">Find Next</el-button>
+          <el-button size="small" :disabled="!store.hasSelection || !findForm.find" @click="replaceOne">Replace</el-button>
+          <el-button size="small" :disabled="findMatches.length === 0" @click="replaceAll">Replace All</el-button>
+        </div>
+        <div class="setting-desc">{{ wordCountText }}</div>
+      </div>
+    </AppDialog>
+
+    <!-- Preflight Dialog (print-readiness: overflow / gamut / dpi / layers) -->
+    <AppDialog
+      v-model="preflightVisible"
+      title="Preflight"
+      :width="440"
+      :show-footer="false"
+    >
+      <template #footer>
+        <el-button size="small" @click="preflightVisible = false">Close</el-button>
+      </template>
+      <div class="settings-body app-settings">
+        <div v-if="preflightRows.length === 0" class="setting-desc">No issues — overflow, gamut, image resolution and empty layers all pass.</div>
+        <div v-for="(row, i) in preflightRows" :key="i" class="setting-row preflight-row" :class="{ clickable: !!row.itemId }" @click="row.itemId && gotoIssue(row.itemId)">
+          <el-tag size="small" :type="preflightTag(row.kind)">{{ preflightKind(row.kind) }}</el-tag>
+          <span class="setting-desc">{{ row.message }}</span>
         </div>
       </div>
     </AppDialog>
@@ -568,6 +630,107 @@ function onRecolorConfirm() {
   store.setStatusMessage(`Recolored ${n} object${n === 1 ? '' : 's'}`)
   recolorVisible.value = false
 }
+
+const findVisible = ref(false)
+const findForm = reactive({ find: '', replace: '', matchCase: false })
+const findIndex = ref(0)
+const findTick = ref(0)
+const findMatches = computed(() => {
+  void findTick.value
+  void store.historyIndex
+  void findVisible.value
+  const e = engineRef?.value
+  if (!e || !findForm.find) return []
+  try {
+    return e.findText(findForm.find, findForm.matchCase)
+  } catch {
+    return []
+  }
+})
+const findCountText = computed(() => {
+  if (!findForm.find) return 'Type to search the document'
+  const n = findMatches.value.length
+  return n === 0 ? 'No matches' : `${n} match${n === 1 ? '' : 'es'}`
+})
+const wordStats = computed(() => {
+  void store.historyIndex
+  void store.selectedItemIds.join(',')
+  try {
+    return engineRef?.value?.textStats() ?? { words: 0, chars: 0, runs: 0 }
+  } catch {
+    return { words: 0, chars: 0, runs: 0 }
+  }
+})
+const wordCountText = computed(() => {
+  const s = wordStats.value
+  const scope = store.hasSelection ? 'selection' : 'document'
+  return `${s.words} words · ${s.chars} chars · ${s.runs} runs (${scope})`
+})
+function openFind() {
+  findTick.value++
+  findIndex.value = 0
+  findVisible.value = true
+}
+function findNext() {
+  const e = engineRef?.value
+  const matches = findMatches.value
+  if (!e || matches.length === 0) return
+  findIndex.value = (findIndex.value + 1) % matches.length
+  const target = matches[findIndex.value]
+  e.clearSelection()
+  target.selected = true
+  e.syncSelectionToStore()
+}
+function replaceOne() {
+  const e = engineRef?.value
+  if (!e || !findForm.find) return
+  const n = e.replaceText(findForm.find, findForm.replace, findForm.matchCase)
+  store.setStatusMessage(n > 0 ? `Replaced in ${n} run${n === 1 ? '' : 's'}` : 'No replacement in the selection')
+  findTick.value++
+}
+function replaceAll() {
+  const e = engineRef?.value
+  if (!e || !findForm.find) return
+  e.clearSelection()
+  findMatches.value.forEach((item) => {
+    item.selected = true
+  })
+  e.syncSelectionToStore()
+  const n = e.replaceText(findForm.find, findForm.replace, findForm.matchCase)
+  store.setStatusMessage(n > 0 ? `Replaced in ${n} run${n === 1 ? '' : 's'}` : 'Nothing replaced')
+  findTick.value++
+}
+
+const preflightVisible = ref(false)
+const preflightTick = ref(0)
+const preflightRows = computed(() => {
+  void preflightTick.value
+  void store.historyIndex
+  void preflightVisible.value
+  try {
+    return engineRef?.value?.preflight() ?? []
+  } catch {
+    return []
+  }
+})
+function openPreflight() {
+  preflightTick.value++
+  preflightVisible.value = true
+}
+function preflightKind(kind: string): string {
+  switch (kind) {
+    case 'overflow': return 'Overflow'
+    case 'gamut': return 'Gamut'
+    case 'dpi': return 'DPI'
+    default: return 'Layer'
+  }
+}
+function preflightTag(kind: string): 'danger' | 'warning' | 'info' {
+  return kind === 'overflow' || kind === 'dpi' ? 'danger' : kind === 'gamut' ? 'warning' : 'info'
+}
+function gotoIssue(id: string) {
+  engineRef?.value?.selectItemById(id)
+}
 const exportForm = reactive({
   format: 'png' as RasterExportFormat,
   scale: 2,
@@ -587,10 +750,14 @@ const exportScales = [
 const pagePresets = [
   { value: 'custom', label: 'Custom' },
   { value: '1920x1080', label: 'HD 1920 x 1080' },
+  { value: '3840x2160', label: '4K 3840 x 2160' },
   { value: '1080x1080', label: 'Square 1080 x 1080' },
+  { value: '1080x1350', label: 'Post 1080 x 1350' },
   { value: '1080x1920', label: 'Story 1080 x 1920' },
   { value: '595x842', label: 'A4 595 x 842' },
+  { value: '842x1191', label: 'A3 842 x 1191' },
   { value: '612x792', label: 'Letter 612 x 792' },
+  { value: '792x1224', label: 'Tabloid 792 x 1224' },
 ]
 
 /** Preset value matching W/H, or custom when nothing matches. */
@@ -1109,6 +1276,9 @@ function onEditCmd(cmd: string) {
     case 'invertSelection':
       e.invertSelection()
       break
+    case 'findReplace':
+      openFind()
+      break
   }
 }
 
@@ -1430,6 +1600,12 @@ function onViewCmd(cmd: string) {
     case 'navigator':
       store.setShowNavigator(!store.ui.showNavigator)
       break
+    case 'presentation':
+      store.setZenMode(!store.ui.zenMode)
+      break
+    case 'preflight':
+      openPreflight()
+      break
     case 'controlBar':
       store.setShowControlBar(!store.ui.showControlBar)
       break
@@ -1590,7 +1766,7 @@ function onNudgeStepChange(val: number | undefined) {
 }
 
 function onHelp() {
-  store.setStatusMessage('Shortcuts: V Select | A Direct | Q Lasso | Y Wand | P Pen | N Pencil | Shift+E Eraser | Shift+B Blob | B Brush | G Gradient | C Scissors | Shift+M Builder | Shift+W Width | Shift+R Rotate | Shift+S Scale | Shift+O Mirror | Shift+F FreeTf | +/- & Shift+C Anchors | Space Pan | Ctrl+0 Fit | Arrows Nudge | Ctrl+A Select | Ctrl+G Group | Ctrl+2 Lock | Ctrl+3 Hide | Ctrl+C/X/V Clipb | Ctrl+Shift+C PNG | Ctrl+F/B Paste | Ctrl+[ Order | Ctrl+S Save | Ctrl+Shift+I Invert | Esc Cancel')
+  store.setStatusMessage('Shortcuts: V Select | A Direct | Q Lasso | Y Wand | P Pen | N Pencil | Shift+E Eraser | Shift+B Blob | B Brush | G Gradient | C Scissors | Shift+M Builder | Shift+W Width | Shift+R Rotate | Shift+S Scale | Shift+O Mirror | Shift+F FreeTf | +/- & Shift+C Anchors | [ ] Brush Size | Tab Present | Space Pan | Ctrl+0 Fit | Arrows Nudge | Ctrl+A Select | Ctrl+G Group | Ctrl+2 Lock | Ctrl+3 Hide | Ctrl+C/X/V Clipb | Ctrl+Shift+C PNG | Ctrl+F/B Paste | Ctrl+[ Order | Ctrl+S Save | Ctrl+Shift+I Invert | Esc Cancel')
 }
 </script>
 
@@ -1726,6 +1902,22 @@ function onHelp() {
   font-size: 11px;
   color: #8a8a8a;
   margin-top: 2px;
+}
+
+.preflight-row {
+  align-items: flex-start;
+  gap: 8px;
+}
+.preflight-row.clickable {
+  cursor: pointer;
+}
+.preflight-row.clickable:hover .setting-desc {
+  color: #d5d5d5;
+}
+.preflight-row .setting-desc {
+  flex: 1;
+  margin-top: 0;
+  line-height: 1.5;
 }
 
 /* Dark form controls inside AppDialog bodies */

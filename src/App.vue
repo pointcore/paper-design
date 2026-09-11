@@ -1,16 +1,17 @@
 <template>
   <div class="editor-root">
-    <TopBar />
-    <ControlBar />
+    <TopBar v-if="!store.ui.zenMode" />
+    <ControlBar v-if="!store.ui.zenMode" />
     
     <div class="editor-main">
-      <ToolRail />
+      <ToolRail v-if="!store.ui.zenMode" />
       
       <div class="canvas-area">
-        <DocTabs />
+        <DocTabs v-if="!store.ui.zenMode" />
         <CanvasHost />
-        <ColorBar />
-        <div class="status-bar">
+        <ColorBar v-if="!store.ui.zenMode" />
+        <el-button v-if="store.ui.zenMode" class="zen-exit" size="small" title="Exit presentation (Tab)" @click="store.setZenMode(false)">Exit ⤢</el-button>
+        <div v-if="!store.ui.zenMode" class="status-bar">
           <div class="status-left">
             <span class="status-item status-click" :title="'Ruler unit (click to cycle)'" @click="cycleUnit">{{ cursorReadout }}</span>
             <span v-if="selectionLabel" class="status-item">{{ selectionLabel }}</span>
@@ -235,6 +236,15 @@ html, body, #app { height: 100%; width: 100%; overflow: hidden; }
   color: #9ab8dd;
 }
 .status-click:hover { color: #fff; }
+
+.zen-exit {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 30;
+  opacity: 0.7;
+}
+.zen-exit:hover { opacity: 1; }
 
 .zoom-display {
   cursor: pointer;

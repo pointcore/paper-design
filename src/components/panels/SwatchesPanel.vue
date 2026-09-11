@@ -2,6 +2,9 @@
   <div class="swatches-panel ai-panel">
     <div class="panel-section">
       <div class="sec-title">Swatches <span class="sec-hint">click = fill · Alt-click = stroke</span></div>
+      <el-select v-model="library" size="small" class="lib-select">
+        <el-option v-for="l in libraries" :key="l.name" :label="l.name" :value="l.name" />
+      </el-select>
       <div class="sw-grid">
         <div v-for="c in presets" :key="c" class="sw" :style="{ background: c }" :title="c" @click="apply(c, $event)" />
         <div class="sw sw-none" title="No fill" @click="clearFill">×</div>
@@ -19,7 +22,7 @@
 </template>
 
 <script setup lang="ts">
-import { inject, type Ref } from 'vue'
+import { computed, ref, inject, type Ref } from 'vue'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
 
@@ -27,12 +30,33 @@ const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
 const getEngine = () => engineRef?.value ?? null
 
-const presets = [
-  '#000000', '#ffffff', '#ff0000', '#ff8000', '#ffff00', '#80ff00',
-  '#00ff00', '#00ff80', '#00ffff', '#0080ff', '#0000ff', '#8000ff',
-  '#ff00ff', '#ff0080', '#808080', '#c0c0c0', '#804000', '#008040',
-  '#004080', '#400080', '#4a90d9', '#2f6fbf',
+const libraries = [
+  { name: 'Default', colors: [
+    '#000000', '#ffffff', '#ff0000', '#ff8000', '#ffff00', '#80ff00',
+    '#00ff00', '#00ff80', '#00ffff', '#0080ff', '#0000ff', '#8000ff',
+    '#ff00ff', '#ff0080', '#808080', '#c0c0c0', '#804000', '#008040',
+    '#004080', '#400080', '#4a90d9', '#2f6fbf',
+  ] },
+  { name: 'Flat UI', colors: [
+    '#1abc9c', '#2ecc71', '#3498db', '#9b59b6', '#34495e', '#16a085',
+    '#27ae60', '#2980b9', '#8e44ad', '#2c3e50', '#f1c40f', '#e67e22',
+    '#e74c3c', '#ecf0f1', '#95a5a6', '#f39c12', '#d35400', '#c0392b',
+    '#bdc3c7', '#7f8c8d', '#ffffff', '#000000',
+  ] },
+  { name: 'Material', colors: [
+    '#f44336', '#e91e63', '#9c27b0', '#673ab7', '#3f51b5', '#2196f3',
+    '#03a9f4', '#00bcd4', '#009688', '#4caf50', '#8bc34a', '#cddc39',
+    '#ffeb3b', '#ffc107', '#ff9800', '#ff5722', '#795548', '#9e9e9e',
+    '#607d8b', '#000000', '#ffffff', '#eeeeee',
+  ] },
+  { name: 'Grays', colors: [
+    '#000000', '#111111', '#222222', '#333333', '#444444', '#555555',
+    '#666666', '#777777', '#888888', '#999999', '#aaaaaa', '#bbbbbb',
+    '#cccccc', '#dddddd', '#eeeeee', '#f5f5f5', '#ffffff', '#4a90d9',
+  ] },
 ]
+const library = ref('Default')
+const presets = computed(() => libraries.find((l) => l.name === library.value)?.colors ?? libraries[0].colors)
 
 function apply(color: string, e: MouseEvent) {
   const engine = getEngine()
@@ -70,6 +94,7 @@ function clearFill() {
 .panel-section { border-bottom: 1px solid #1e1e1e; padding-bottom: 10px; display: flex; flex-direction: column; gap: 6px; }
 .sec-title { font-size: 11px; color: #dcdcdc; font-weight: 600; letter-spacing: 0.5px; }
 .sec-hint { color: #8a8a8a; font-weight: 400; }
+.lib-select { width: 100%; }
 .sw-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; }
 .sw { aspect-ratio: 1; border-radius: 3px; border: 1px solid #000; cursor: pointer; min-height: 20px; }
 .sw:hover { outline: 1px solid #fff; }
