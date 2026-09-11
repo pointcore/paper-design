@@ -19,7 +19,7 @@
             <span v-if="store.keyObjectId" class="status-item status-click" title="Clear key object" @click="clearKey">Key ●</span>
           </div>
           <div class="status-right">
-            <span class="status-item">{{ artboardLabel }}</span>
+            <span class="status-item status-click" :title="'Artboards (click to cycle)'" @click="cycleBoard">{{ artboardLabel }}</span>
             <span class="status-item status-click" :title="'Proof mode (click to toggle RGB/CMYK)'" @click="toggleProof">{{ proofLabel }}</span>
             <span class="status-item">{{ currentToolName }}</span>
             <span v-if="store.statusMessage" class="status-item status-msg">{{ store.statusMessage }}</span>
@@ -125,6 +125,18 @@ function cycleUnit() {
   const next = order[(order.indexOf(store.rulerUnit) + 1) % order.length]
   store.setRulerUnit(next)
 }
+/** Cycle to the next artboard (wraps), like the unit cycler. */
+function cycleBoard() {
+  const e = engineRef.value
+  const boards = store.artboards
+  if (!e || boards.length === 0) return
+  const idx = boards.findIndex((b) => b.id === store.activeArtboardId)
+  const next = boards[(idx + 1) % boards.length]
+  store.setActiveArtboard(next.id)
+  e.refreshArtboards()
+  e.panViewTo(new e.scope.Point(next.x + next.width / 2, next.y + next.height / 2))
+}
+
 function clearKey() {
   store.setKeyObject('')
   store.setAlignTarget('selection')
