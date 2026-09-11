@@ -707,7 +707,17 @@ async function onDropFiles(e: DragEvent) {
   let imported = 0
   for (const file of files) {
     try {
-      if (/\.svg$/i.test(file.name) || file.type === 'image/svg+xml') {
+      if (/\.vec\.json$/i.test(file.name) || (/\.json$/i.test(file.name) && file.type === 'application/json')) {
+        // A saved project dropped back in replaces the document — guard it
+        // like File > Open (which confirms on unsaved changes).
+        if (store.hasUnsavedChanges && !window.confirm('Replace the current document with the dropped project? Unsaved changes will be lost.')) {
+          continue
+        }
+        const text = await file.text()
+        engine.importProjectFile(text)
+        imported++
+        store.setDocumentName(file.name.replace(/\.vec\.json$/i, '').replace(/\.json$/i, ''))
+      } else if (/\.svg$/i.test(file.name) || file.type === 'image/svg+xml') {
         const text = await file.text()
         if (engine.importSVGText(text, 'Import SVG')) imported++
       } else if (/^image\/(png|jpeg|webp|gif)$/.test(file.type)) {
