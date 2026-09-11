@@ -5,6 +5,7 @@
  * including gradients and patterns, stroke, dash, opacity and blend; font
  * styling for text). When a selection exists the picked appearance is also
  * painted onto every unlocked non-group member in one history entry.
+ * Alt-click samples into the defaults without touching the selection.
  * Locked and hidden artwork is never hit, like every other tool.
  */
 import { EditorEngine } from '../engine'
@@ -40,7 +41,7 @@ export class EyedropperController {
       if (!native || native.button !== 0) return
       const picked = this.pickTarget(event.point)
       if (!picked) return
-      this.applyEyedropper(picked)
+      this.applyEyedropper(picked, !!native.altKey)
     }
 
     scope.tool.onMouseMove = (event: paper.ToolEvent) => {
@@ -79,13 +80,17 @@ export class EyedropperController {
   }
 
   /** Load the picked appearance into the defaults and the selection. */
-  private applyEyedropper(picked: paper.Item) {
+  private applyEyedropper(picked: paper.Item, sampleOnly = false) {
     const engine = this.engine
     if (!engine) return
     // Pattern fills copy as patterns (not as the tile motif color).
     const pickedPattern = engine.getPatternFromItem(picked)
     if (pickedPattern) {
       engine.store.updateStyle({ pattern: { ...pickedPattern }, fillColor: null, gradient: null })
+      if (sampleOnly) {
+        engine.showStatus('Pattern sampled')
+        return
+      }
       const targets = engine.getSelection().filter((i) => !i.locked && i.parent)
       if (targets.length > 0) {
         engine.applyPatternFill({ ...pickedPattern })
@@ -117,6 +122,10 @@ export class EyedropperController {
     }
 
     const scope = engine.scope
+    if (sampleOnly) {
+      engine.showStatus('Appearance sampled')
+      return
+    }
     // The engine selection is top-most (a selected group counts as one
     // unit), so descend into groups to reach the paintable leaves, exactly
     // as before when descendants arrived in the raw selection. Pattern

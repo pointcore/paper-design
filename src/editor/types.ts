@@ -369,6 +369,8 @@ export interface RasterExportOptions {
   scale: number
   /** Which artwork fills the output frame. */
   area: RasterExportArea
+  /** JPEG/WebP quality 0.1-1 (default 0.92, ignored for PNG). */
+  quality?: number
 }
 
 /** Versioned project file envelope used by Save/Open. */

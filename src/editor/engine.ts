@@ -2825,6 +2825,28 @@ export class EditorEngine {
     return true
   }
 
+  /**
+   * Select all unlocked visible top-level artwork on a user layer (AI
+   * target-circle parity). Returns how many were selected; no history
+   * (selection-only, like marquee).
+   */
+  selectLayerArtwork(layerId: string): number {
+    const layer = this.project.layers.find(
+      (l) => (l.data as any)?.isUserLayer && (l.data as any)?.layerId === layerId
+    )
+    if (!layer || !layer.visible || layer.locked) return 0
+    const tops = (layer.children as unknown as paper.Item[]).filter(
+      (child) => child.visible && !(child as any).locked && !(child as any).data?.isPreview
+    )
+    this.clearSelection()
+    tops.forEach((item) => {
+      item.selected = true
+    })
+    this.syncSelectionToStore()
+    this.scope.view.update()
+    return tops.length
+  }
+
   /** Owning user-layer id of one tree entry (follows parents up). */
   getItemLayerId(id: string): string {
     const item = this.getItemById(id)
@@ -3625,6 +3647,9 @@ export class EditorEngine {
     const mime =
       options.format === 'jpeg' ? 'image/jpeg' :
       options.format === 'webp' ? 'image/webp' : 'image/png'
+    const quality = Number.isFinite(options.quality)
+      ? Math.min(1, Math.max(0.1, Number(options.quality)))
+      : 0.92
     return this.withCapturedView(bounds, scale, false, (canvas, width, height) => {
       if (options.format === 'png') {
         return canvas.toDataURL('image/png')
@@ -3639,7 +3664,7 @@ export class EditorEngine {
         ctx.fillRect(0, 0, width, height)
       }
       ctx.drawImage(canvas, 0, 0)
-      return output.toDataURL(mime, 0.92)
+      return output.toDataURL(mime, quality)
     })
   }
 
@@ -5404,6 +5429,7 @@ export class EditorEngine {
       }
       this.refreshItemGradient(item)
     }
+    this.reflowTextsForItems(targets)
     this.pushHistory('Reverse Path')
     this.scope.view.update()
     return targets.length
