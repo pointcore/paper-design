@@ -17,7 +17,7 @@
            @click="activateBoard(board.id)">
         <span class="artboard-name" @dblclick="startRename(board)">
           <template v-if="renamingId === board.id">
-            <el-input v-model="renameValue" size="small" @blur="finishRename" @keyup.enter="finishRename" />
+            <el-input v-model="renameValue" size="small" @blur="finishRename" @keyup.enter="finishRename" @keyup.esc="cancelRename" />
           </template>
           <template v-else>{{ board.name }}</template>
         </span>
@@ -178,6 +178,10 @@ function activateBoard(id: string) {
 function startRename(board: any) {
   renamingId.value = board.id
   renameValue.value = board.name
+}
+
+function cancelRename() {
+  renamingId.value = ''
 }
 
 function finishRename() {
