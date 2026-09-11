@@ -8,7 +8,7 @@ import { createDefaultStyle } from './store'
 import { cursorForTool } from './cursors'
 import { gradientAngleFromVector, linearGradientEndpoints, normalizeAngleDeg } from './geometry'
 import { changeCaseText } from './text/text-case'
-import { shiftCssColor } from './color'
+import { isOutOfCmykGamut, shiftCssColor } from './color'
 import { parseProjectFile } from './project-file'
 import type { EditorStore } from './store-types'
 
@@ -4842,6 +4842,8 @@ export class EditorEngine {
 
   /** Detached clones of the most recent copy / cut selection. */
   private clipboardItems: paper.Item[] = []
+  /** Owning user-layer id per clipboard entry (AI paste-remembers-layer). */
+  private clipboardLayerIds: string[] = []
   /** How many pastes have been made from the current clipboard content. */
   private pasteCount = 0
 
@@ -4854,6 +4856,7 @@ export class EditorEngine {
   copySelectedToClipboard(): number {
     const items = this.getSelection().filter((item) => (item.data as any)?.isUserItem)
     this.clipboardItems = items.map((item) => item.clone({ insert: false }))
+    this.clipboardLayerIds = items.map((item) => this.getItemLayerId((item.data as any)?.id ?? ''))
     this.pasteCount = 0
     return this.clipboardItems.length
   }
@@ -4865,14 +4868,28 @@ export class EditorEngine {
   }
 
   /**
+   * Resolve the paste target for a clipboard entry: its source layer when
+   * that layer still exists, is visible and unlocked (AI remembers layers),
+   * else the active layer.
+   */
+  private pasteTargetLayer(layerId: string): paper.Layer {
+    const found = this.project.layers.find(
+      (l) => (l.data as any)?.isUserLayer && (l.data as any)?.layerId === layerId
+    ) as paper.Layer | undefined
+    if (found && found.visible && !found.locked) return found
+    return this.getActiveLayer()
+  }
+
+  /**
    * Paste the internal clipboard in place (no offset), stacked at the very
-   * front or back of the active layer. Returns false when it is empty.
+   * front or back of each entry's layer. Returns false when it is empty.
    */
   pasteInPlace(where: 'front' | 'back'): boolean {
     if (this.clipboardItems.length === 0) return false
-    const layer = this.getActiveLayer()
     const pasted: paper.Item[] = []
-    for (const source of this.clipboardItems) {
+    for (let i = 0; i < this.clipboardItems.length; i++) {
+      const source = this.clipboardItems[i]
+      const layer = this.pasteTargetLayer(this.clipboardLayerIds[i] ?? '')
       const clone = source.clone({ insert: false })
       layer.addChild(clone)
       this.restampCloneTree(clone)
@@ -4891,18 +4908,19 @@ export class EditorEngine {
   }
 
   /**
-   * Paste the clipboard clones into the active layer. Each paste is offset
-   * by a small step so repeated pastes do not stack exactly on top of the
-   * source, and the pasted items become the new selection.
+   * Paste the clipboard clones into their source layers. Each paste is
+   * offset by a small step so repeated pastes do not stack exactly on top
+   * of the source, and the pasted items become the new selection.
    */
   pasteClipboard(): void {
     if (this.clipboardItems.length === 0) return
-    const layer = this.getActiveLayer()
     // Each paste steps one increment further from the source position.
     this.pasteCount++
     const offset = new this.scope.Point(10 * this.pasteCount, 10 * this.pasteCount)
     const pasted: paper.Item[] = []
-    for (const source of this.clipboardItems) {
+    for (let i = 0; i < this.clipboardItems.length; i++) {
+      const source = this.clipboardItems[i]
+      const layer = this.pasteTargetLayer(this.clipboardLayerIds[i] ?? '')
       const clone = source.clone({ insert: false })
       layer.addChild(clone)
       this.restampCloneTree(clone)
@@ -5366,6 +5384,165 @@ export class EditorEngine {
       this.scope.view.update()
     }
     return changed
+  }
+
+  /** Every text run in the document (annotation labels excluded). */
+  private allTextRuns(): paper.PointText[] {
+    const scope = this.scope
+    const out: paper.PointText[] = []
+    const walk = (node: paper.Item) => {
+      const data = (node as any).data ?? {}
+      if (data.isChrome || data.isPreview || data.isGuide || data.isArtboard || data.annotation) return
+      if (node instanceof scope.PointText) {
+        out.push(node)
+        return
+      }
+      const children = (node as any).children as paper.Item[] | undefined
+      if (children) for (const child of children) walk(child)
+    }
+    for (const layer of this.project.layers) {
+      if (!(layer.data as any)?.isUserLayer) continue
+      for (const child of layer.children) walk(child as paper.Item)
+    }
+    return out
+  }
+
+  /**
+   * Text runs whose content contains the query (AI Find parity).
+   * Empty queries match nothing; matching is case-sensitive on demand.
+   */
+  findText(query: string, matchCase = false): paper.PointText[] {
+    if (!query) return []
+    const needle = matchCase ? query : query.toLowerCase()
+    return this.allTextRuns().filter((item) => {
+      const content = String((item as any).content ?? '')
+      return matchCase ? content.includes(needle) : content.toLowerCase().includes(needle)
+    })
+  }
+
+  /**
+   * Replace the query across selected text runs (AI Change/Change All
+   * parity). Returns runs changed; one history entry.
+   */
+  replaceText(find: string, replace: string, matchCase = false): number {
+    if (!find) return 0
+    const scope = this.scope
+    let changed = 0
+    for (const item of this.getSelection()) {
+      if ((item as any).locked || !(item instanceof scope.PointText)) continue
+      if ((item as any).data?.annotation) continue
+      const before = String((item as any).content ?? '')
+      const after = matchCase
+        ? before.split(find).join(replace)
+        : before.replace(new RegExp(find.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), replace)
+      if (after !== before) {
+        ;(item as any).content = after
+        changed++
+      }
+    }
+    if (changed > 0) {
+      this.pushHistory('Replace Text')
+      this.scope.view.update()
+    }
+    return changed
+  }
+
+  /** Word/character totals over the selection (else the document). */
+  textStats(): { words: number; chars: number; runs: number } {
+    const scope = this.scope
+    const sel = this.getSelection().filter(
+      (item) => !(item as any).locked && item instanceof scope.PointText && !(item as any).data?.annotation
+    ) as paper.PointText[]
+    const runs = sel.length > 0 ? sel : this.allTextRuns()
+    let words = 0
+    let chars = 0
+    for (const item of runs) {
+      const content = String((item as any).content ?? '')
+      chars += content.length
+      words += content.trim().split(/\s+/).filter(Boolean).length
+    }
+    return { words, chars, runs: runs.length }
+  }
+
+  /** One preflight finding (print-readiness check). */
+  preflight(): Array<{ kind: 'overflow' | 'gamut' | 'dpi' | 'empty-layer'; message: string; itemId: string }> {
+    const scope = this.scope
+    const out: Array<{ kind: 'overflow' | 'gamut' | 'dpi' | 'empty-layer'; message: string; itemId: string }> = []
+    const labelOf = (item: paper.Item): string => {
+      const data = (item as any).data ?? {}
+      const raw = (item as any).name ?? data.name
+      const name = typeof raw === 'string' && raw.trim() ? raw.trim() : ''
+      if (name) return name
+      const cls = String((item as any).className ?? 'Object')
+      return `${cls} ${(data.id ?? '').toString().slice(0, 6)}`
+    }
+    const tc = this.getController('type') as {
+      areaOverflow?: (item: any) => { lines: number; fits: number; overflowChars: number }
+    } | null
+    const walk = (node: paper.Item) => {
+      const data = (node as any).data ?? {}
+      if (data.isChrome || data.isPreview || data.isGuide || data.isArtboard || data.annotation) return
+      if (data.isPatternTile || (node as any).clipMask) return
+      if (node instanceof scope.PointText) {
+        if ((data as any).textMode === 'area' && tc?.areaOverflow) {
+          try {
+            const over = tc.areaOverflow(node as paper.PointText)
+            if (over.overflowChars > 0) {
+              out.push({
+                kind: 'overflow',
+                message: `"${labelOf(node)}" overflows by ${over.overflowChars} chars`,
+                itemId: String(data.id ?? ''),
+              })
+            }
+          } catch { /* unreadable frames are not findings */ }
+        }
+        return
+      }
+      if (node instanceof scope.Raster) {
+        try {
+          const px = Number((node as any).width) || 0
+          const w = Number((node as any).bounds?.width) || 0
+          if (px > 0 && w > 0) {
+            const dpi = (px / w) * 96
+            if (dpi < 150) {
+              out.push({
+                kind: 'dpi',
+                message: `"${labelOf(node)}" is ${Math.round(dpi)} dpi (under 150)`,
+                itemId: String(data.id ?? ''),
+              })
+            }
+          }
+        } catch { /* unreadable rasters are not findings */ }
+        return
+      }
+      if (node instanceof scope.Path || node instanceof scope.CompoundPath) {
+        for (const key of ['fillColor', 'strokeColor'] as const) {
+          const paint = (node as any)[key]
+          if (!paint || paint.gradient) continue
+          const css = this.colorToCSS(paint)
+          if (css && isOutOfCmykGamut(css)) {
+            out.push({
+              kind: 'gamut',
+              message: `"${labelOf(node)}" uses out-of-gamut ${key === 'fillColor' ? 'fill' : 'stroke'} ${css}`,
+              itemId: String(data.id ?? ''),
+            })
+            break
+          }
+        }
+        return
+      }
+      const children = (node as any).children as paper.Item[] | undefined
+      if (children) for (const child of children) walk(child)
+    }
+    for (const layer of this.project.layers) {
+      if (!(layer.data as any)?.isUserLayer) continue
+      if (layer.children.length === 0) {
+        out.push({ kind: 'empty-layer', message: `Layer "${(layer as any).name ?? 'Layer'}" is empty`, itemId: '' })
+        continue
+      }
+      for (const child of layer.children) walk(child as paper.Item)
+    }
+    return out.slice(0, 50)
   }
 
   /**

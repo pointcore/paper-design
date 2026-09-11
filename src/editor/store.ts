@@ -193,6 +193,7 @@ export const useEditorStore = defineStore('editor', {
       rightTab: 'property' as RightPanelTab,
       settingsOpen: false,
       showNavigator: true,
+      zenMode: false,
       showControlBar: true,
       toolRailDensity: 'single' as ToolRailDensity,
       workspace: 'essentials' as WorkspacePreset,
@@ -359,6 +360,11 @@ export const useEditorStore = defineStore('editor', {
     /** Show or hide the navigator minimap */
     setShowNavigator(val: boolean) {
       this.ui.showNavigator = val
+    },
+
+    /** Presentation mode: canvas only (Tab toggles, button exits) */
+    setZenMode(val: boolean) {
+      this.ui.zenMode = val
     },
 
     /** Show or hide the contextual control bar (AI Control / CDR Property bar) */

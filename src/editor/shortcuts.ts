@@ -323,6 +323,13 @@ export function handleGlobalKeydown(
 
   if (e.repeat) return
 
+  // Presentation mode: Tab hides every panel and bar (AI Tab parity).
+  if (e.key === 'Tab') {
+    store.setZenMode(!store.ui.zenMode)
+    e.preventDefault()
+    return
+  }
+
   // Hold Space to pan with the hand tool from any other tool.
   if (e.key === ' ' && !spacePanPreviousTool && store.tool !== 'view-hand') {
     spacePanPreviousTool = store.tool
