@@ -1,6 +1,6 @@
 <template>
   <div class="doc-tabs" title="Artboards (pages)">
-    <div class="tabs-scroll">
+    <div ref="tabsScrollRef" class="tabs-scroll" @wheel.prevent="onTabsWheel">
       <button v-for="(b, i) in store.artboards" :key="b.id" class="doc-tab"
               :class="{ active: b.id === store.activeArtboardId }"
               @click="activate(b.id)" @dblclick="startRename(b)"
@@ -97,6 +97,13 @@ onUnmounted(() => {
   document.removeEventListener('click', onDocClick)
   document.removeEventListener('keydown', onCtxKeydown)
 })
+const tabsScrollRef = ref<HTMLElement | null>(null)
+function onTabsWheel(e: WheelEvent) {
+  const el = tabsScrollRef.value
+  if (!el) return
+  el.scrollLeft += e.deltaY
+}
+
 const renamingId = ref('')
 const renameValue = ref('')
 

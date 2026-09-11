@@ -1,5 +1,5 @@
 <template>
-  <div class="color-bar" title="Click = apply to target · X toggles target · Shift+X swaps">
+  <div class="color-bar" title="Click = apply to target · X toggles target · Shift+X swaps" @wheel.prevent="onBarWheel">
     <div class="fillstroke">
       <div class="fs-chip fs-stroke" :style="{ borderColor: '#555', background: strokePreview }" title="Stroke (double-click = custom color)" @dblclick="pickCustom(true)">
         <span>S</span>
@@ -94,6 +94,12 @@ function clear() {
     if (store.hasSelection) engine?.pushHistory('Clear Fill')
   }
   engine?.scope.view.update()
+}
+
+/** Wheel over the palette scrolls the overflowing strip horizontally. */
+function onBarWheel(e: WheelEvent) {
+  const el = e.currentTarget as HTMLElement | null
+  if (el) el.scrollLeft += e.deltaY
 }
 
 function swap() {
