@@ -101,6 +101,12 @@ export class ReshapeController {
       if ((node as any).locked || (node as any).visible === false) return
       const data = (node as any).data ?? {}
       if (data.isChrome || data.isPreview || data.isGuide || data.isArtboard || data.annotation) return
+      // Generated appearance/typography internals are off limits: reshaping
+      // them would deform pattern tiles, pattern clip masks and the glyph
+      // outlines of path text. Same exclusion list the other tools use
+      // (select-controller.hitTest, eyedropper, snap-service, anchor tool).
+      if (data.isPatternTile || data.isPatternFill || data.textMode) return
+      if ((node as any).clipMask) return
       if (node instanceof scope.Path) {
         const bounds = (node as any).bounds as paper.Rectangle | undefined
         if (bounds && !bounds.intersects(area)) return

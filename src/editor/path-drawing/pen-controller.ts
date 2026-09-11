@@ -42,6 +42,8 @@ export class PenController {
   private currentPath: paper.Path | null = null
   private currentIsResumed = false // the path already existed before this stroke
   private resumeStartSegments = 0  // segment count when a resumed stroke began
+  /** Segment geometry captured at resume time, to detect in-place edits. */
+  private resumeGeometry = ''
   private pressSegment = -1
   private pressAction: PressAction = 'none'
   private grabIsIn = false         // which side of a handle is grabbed
@@ -237,6 +239,7 @@ export class PenController {
     this.currentPath = path
     this.currentIsResumed = true
     this.resumeStartSegments = path.segments.length
+    this.resumeGeometry = this.geometrySignature(path)
     this.isDrawing = true
     this.chrome.clear()
     scope.view.update()
@@ -555,8 +558,12 @@ export class PenController {
         ? path.segments.length - this.resumeStartSegments
         : path.segments.length
       if (this.currentIsResumed) {
-        if (added > 0) {
-          engine.pushHistory('Extend Path')
+        // Resuming also lets the pen drag an existing end anchor or its
+        // handles in place; that leaves the segment count untouched, so
+        // counting new anchors alone recorded no history at all.
+        const edited = this.geometrySignature(path) !== this.resumeGeometry
+        if (added > 0 || edited) {
+          engine.pushHistory(added > 0 ? 'Extend Path' : 'Edit Path')
           this.afterCommit(path)
         }
       } else if (added >= 2) {
@@ -626,10 +633,20 @@ export class PenController {
     engine.selectItem(path)
   }
 
+  /** Cheap rounded signature of every segment point + control handle. */
+  private geometrySignature(path: paper.Path): string {
+    const f = (n: number) => Math.round(n * 1000) / 1000
+    const pt = (p: paper.Point | null) => (p ? `${f(p.x)},${f(p.y)}` : '')
+    return path.segments
+      .map((seg) => `${pt(seg.point)}|${pt(seg.handleIn as paper.Point)}|${pt(seg.handleOut as paper.Point)}`)
+      .join(';')
+  }
+
   private reset() {
     this.currentPath = null
     this.currentIsResumed = false
     this.resumeStartSegments = 0
+    this.resumeGeometry = ''
     this.isDrawing = false
     this.pressSegment = -1
     this.pressAction = 'none'

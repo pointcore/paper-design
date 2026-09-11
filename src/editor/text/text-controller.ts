@@ -262,7 +262,11 @@ export class TextController {
       kind,
       editingItem: node,
       anchor: node.point.clone(),
-      frame: info.frame ? { ...info.frame } : this.frameFromBounds(node),
+      // Only area text is pinned to a frame. Passing one for point/vertical
+      // made the overlay take the fixed-size area branch (no autoSize), so
+      // re-editing a point text clipped anything wider than the old bounds.
+      frame:
+        kind === 'area' ? (info.frame ? { ...info.frame } : this.frameFromBounds(node)) : null,
       raw: info.raw ?? (kind === 'vertical' ? node.content.split('\n').join('') : node.content),
     })
   }

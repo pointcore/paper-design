@@ -319,6 +319,14 @@ export class WidthController {
     engine.scope.view.update()
   }
 
+  /**
+   * Tool switch: the gesture's mouse-up never arrives, so drop it and put
+   * the hidden target back instead of leaving an invisible, uncommitted path.
+   */
+  deactivate() {
+    this.cancelGesture()
+  }
+
   /** Drop the gesture and restore the untouched target. */
   private cancelGesture() {
     if (this.preview) {

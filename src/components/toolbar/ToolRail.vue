@@ -220,7 +220,19 @@ function persistGroupMemory() {
 function restoreGroupMemory() {
   try {
     const raw = localStorage.getItem('vve.toolGroups')
-    if (raw) groupCurrent.value = JSON.parse(raw)
+    if (!raw) return
+    const parsed = JSON.parse(raw) as unknown
+    // Stored JSON is hand-editable and survives across builds, so a bare
+    // JSON.parse used to be able to assign null/array here — currentOf()
+    // then threw on groupCurrent.value[key] and the whole rail failed to
+    // render. Only keep known tool names.
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return
+    const known = new Set<string>(groups.flatMap((g) => g.members.map((m) => m.name)))
+    const next: Record<string, ToolName> = {}
+    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof value === 'string' && known.has(value)) next[key] = value as ToolName
+    }
+    groupCurrent.value = next
   } catch { /* ignore */ }
 }
 

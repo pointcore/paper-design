@@ -172,19 +172,18 @@ function startRename(board: any) {
 }
 
 function finishRename() {
-  if (renamingId.value) {
-    const id = renamingId.value
-    const newName = renameValue.value.trim() || 'Artboard'
-    const e = getEngine()
-    if (e && e.renameArtboard(id, newName)) {
-      renamingId.value = ''
-    } else if (!e) {
-      store.updateArtboard(id, { name: newName })
-      renamingId.value = ''
-    }
-  } else {
+  if (!renamingId.value) {
     renamingId.value = ''
+    return
   }
+  const id = renamingId.value
+  const newName = renameValue.value.trim() || 'Artboard'
+  const e = getEngine()
+  // renameArtboard() returns false for a no-op (unchanged name, unknown id),
+  // which is not a reason to leave the row stuck in edit mode.
+  if (e) e.renameArtboard(id, newName)
+  else store.updateArtboard(id, { name: newName })
+  renamingId.value = ''
 }
 
 function syncPositionFromStore() {

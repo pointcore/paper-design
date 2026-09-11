@@ -37,6 +37,16 @@ export class ViewController {
     this.setupTool()
   }
 
+  /**
+   * Tool switch: a zoom drag interrupted here never reaches its mouse-up, so
+   * drop the rubber band and the mode instead of leaving both behind.
+   */
+  deactivate() {
+    this.removeZoomRect()
+    this.zoomStart = null
+    this.mode = 'none'
+  }
+
   private setupTool() {
     const engine = this.engine
     if (!engine) return

@@ -2716,11 +2716,16 @@ export class SelectController {
     if (!engine) return
     const scope = engine.scope
 
-    if (!this.marqueeLayer) {
+    // Rebuild the container when a tool switch swept the previous one away
+    // (clearTransientChrome removes it, leaving this reference detached).
+    if (!this.marqueeLayer || !this.marqueeLayer.parent) {
       this.marqueeLayer = new scope.Layer()
       this.marqueeLayer.name = 'marquee-layer'
       this.marqueeLayer.locked = true
       this.marqueeLayer.data.isUserLayer = false
+      // Transient feedback: keeps it out of history/project snapshots and
+      // lets a tool switch mid-marquee sweep it away.
+      this.marqueeLayer.data.isPreview = true
     }
 
     this.marqueeRect = new scope.Path.Rectangle({

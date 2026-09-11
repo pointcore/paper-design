@@ -374,7 +374,8 @@
       </div>
     </AppDialog>
 
-    <!-- Guides Dialog (positions edit live; Clear All empties the guide layer) -->    <AppDialog
+    <!-- Guides Dialog (positions edit live; Clear All empties the guide layer) -->
+    <AppDialog
       v-model="guidesVisible"
       title="Guides"
       :width="380"
@@ -417,7 +418,8 @@
       </div>
     </AppDialog>
 
-    <!-- Offset Path Dialog (AI Offset Path parity) -->    <AppDialog
+    <!-- Offset Path Dialog (AI Offset Path parity) -->
+    <AppDialog
       v-model="offsetVisible"
       title="Offset Path"
       :width="360"
@@ -493,7 +495,8 @@
       </div>
     </AppDialog>
 
-    <!-- Radial Repeat Dialog (clock faces, badges, rosettes) -->    <AppDialog
+    <!-- Radial Repeat Dialog (clock faces, badges, rosettes) -->
+    <AppDialog
       v-model="radialVisible"
       title="Radial Repeat"
       :width="360"
@@ -633,7 +636,8 @@
       </div>
     </AppDialog>
 
-    <!-- Adjust Colors Dialog (Recolor-lite through HSL) -->    <AppDialog
+    <!-- Adjust Colors Dialog (Recolor-lite through HSL) -->
+    <AppDialog
       v-model="recolorVisible"
       title="Adjust Colors"
       :width="360"
@@ -667,7 +671,8 @@
       </div>
     </AppDialog>
 
-    <!-- Find & Replace Dialog (AI Find/Change parity + word count) -->    <AppDialog
+    <!-- Find & Replace Dialog (AI Find/Change parity + word count) -->
+    <AppDialog
       v-model="findVisible"
       title="Find & Replace"
       :width="400"
@@ -681,7 +686,7 @@
           <div class="setting-label">
             <span class="setting-name">Find</span>
           </div>
-          <el-input v-model="findForm.find" size="small" placeholder="Text to find" @input="findIndex = 0" />
+          <el-input v-model="findForm.find" size="small" placeholder="Text to find" @input="findIndex = -1" />
         </div>
         <div class="setting-row">
           <div class="setting-label">
@@ -706,7 +711,8 @@
       </div>
     </AppDialog>
 
-    <!-- Save As Dialog (custom project filename) -->    <AppDialog
+    <!-- Save As Dialog (custom project filename) -->
+    <AppDialog
       v-model="saveVisible"
       title="Save As"
       :width="360"
@@ -775,7 +781,8 @@
       </div>
     </AppDialog>
 
-    <!-- Adjust Image Dialog (bitmap-effects lite, destructive) -->    <AppDialog
+    <!-- Adjust Image Dialog (bitmap-effects lite, destructive) -->
+    <AppDialog
       v-model="imageVisible"
       title="Adjust Image"
       :width="360"
@@ -1037,7 +1044,9 @@ function onEachConfirm() {
     return
   }
   eachVisible.value = false
-}function onRadialConfirm() {
+}
+
+function onRadialConfirm() {
   const e = engineRef?.value
   if (!e) {
     radialVisible.value = false
@@ -1277,7 +1286,9 @@ function onDownsampleConfirm() {
 
 const findVisible = ref(false)
 const findForm = reactive({ find: '', replace: '', matchCase: false, wholeWord: false })
-const findIndex = ref(0)
+// -1 = nothing stepped to yet, so the first findNext() lands on matches[0]
+// instead of skipping it (the old 0 start made the first click select #1).
+const findIndex = ref(-1)
 const findTick = ref(0)
 const findMatches = computed(() => {
   void findTick.value
@@ -1312,7 +1323,7 @@ const wordCountText = computed(() => {
 })
 function openFind() {
   findTick.value++
-  findIndex.value = 0
+  findIndex.value = -1
   findVisible.value = true
 }
 
@@ -1389,7 +1400,9 @@ function onSavedSelLoad(id: string) {
 function onSavedSelDelete(id: string) {
   store.removeSavedSelection(id)
   persistSavedSelections()
-}function findNext() {
+}
+
+function findNext() {
   const e = engineRef?.value
   const matches = findMatches.value
   if (!e || matches.length === 0) return

@@ -194,7 +194,9 @@
         </div>
         <div v-show="open.fill" class="prop-body">
           <div class="prop-row">
-            <el-radio-group v-model="fillKind" size="small" class="seg-full" @change="onFillKindChange">
+            <!-- Read-only projection of store.style.gradient: bind the value
+                 one-way, the @change handler writes the store. -->
+            <el-radio-group :model-value="fillKind" size="small" class="seg-full" @change="onFillKindChange">
               <el-radio-button value="solid">Fill</el-radio-button>
               <el-radio-button value="gradient">Gradient</el-radio-button>
             </el-radio-group>

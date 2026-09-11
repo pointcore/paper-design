@@ -469,6 +469,18 @@ export class EditorEngine {
   }
 
   setTool(tool: ToolName) {
+    // Let the outgoing controller unwind an in-flight gesture first: its
+    // mouse-up will never arrive once the paper Tool is replaced, so a
+    // half-finished drag (Width tool hides its target while dragging) would
+    // otherwise leave the document in a state nothing ever commits.
+    if (this.toolName !== tool) {
+      const outgoing = this.controllers.get(this.toolName)
+      try {
+        outgoing?.deactivate?.()
+      } catch {
+        // Never block a tool switch on gesture cleanup.
+      }
+    }
     this.toolName = tool
     // Leaving the selection tools: hand paper.js back its native decoration
     // first, otherwise suppressed items would stay invisible (no native blue
@@ -496,8 +508,24 @@ export class EditorEngine {
 
   /** Remove temporary overlay layers used for editing feedback. */
   clearTransientChrome() {
+    // Preview items parked on the overlay layer belong to a gesture that was
+    // interrupted by the tool switch (its mouse-up never ran, so the
+    // controller never cleaned up): eraser/pencil/brush strokes, blob-brush
+    // footprints, zoom rubber bands, gradient / measure / reshape previews.
+    const overlay = this.overlayLayer
+    if (overlay) {
+      for (const child of (overlay as any).children.slice() as paper.Item[]) {
+        const data = (child as any).data ?? {}
+        if (data.isPreview || data.isChrome) {
+          try {
+            child.remove()
+          } catch { /* already gone */ }
+        }
+      }
+    }
     for (const layer of this.project.layers) {
-      if ((layer.data as any)?.isChromeRoot) {
+      const data = (layer.data as any) ?? {}
+      if (data.isChromeRoot || data.isPreview) {
         layer.remove()
       }
     }
@@ -2132,19 +2160,24 @@ export class EditorEngine {
       }
       throw new Error('Invalid project file: snapshot unreadable')
     }
-    const pageSize = parsed.pageSize
-    if (
-      pageSize &&
-      Number.isFinite(pageSize.width) &&
-      Number.isFinite(pageSize.height) &&
-      pageSize.width > 0 &&
-      pageSize.height > 0
-    ) {
+    const rawPage = parsed.pageSize
+    const pageSize =
+      rawPage &&
+      Number.isFinite(rawPage.width) &&
+      Number.isFinite(rawPage.height) &&
+      rawPage.width > 0 &&
+      rawPage.height > 0
+        ? { width: rawPage.width, height: rawPage.height }
+        : undefined
+    if (pageSize) {
       this.store.setPageSize(pageSize.width, pageSize.height)
+    } else {
+      // Files without a page size (v1 has no field) must not inherit the
+      // outgoing document's page; fall back to the same default New uses.
+      this.store.setPageSize(1920, 1080)
     }
-    if (Number.isFinite(parsed.bleed)) {
-      this.store.setBleed(Number(parsed.bleed))
-    }
+    // Same for bleed: absent means "none", not "whatever was open before".
+    this.store.setBleed(Number.isFinite(parsed.bleed) ? Math.max(0, Number(parsed.bleed)) : 0)
     this.restoreArtboards(parsed.artboards, parsed.activeArtboardId, pageSize)
     this.pointActiveLayerAtRestoredStack()
     this.clearSelection()
@@ -3461,7 +3494,12 @@ export class EditorEngine {
   pushCoalescedHistory(name: string, windowMs = 1200) {
     const now = Date.now()
     const last = this.history[this.historyIndex]
-    if (last && last.name === name && now - last.timestamp < windowMs) {
+    // Only coalesce with the top of the stack. After an undo the cursor sits
+    // mid-stack, and merging into that past entry overwrote its snapshot
+    // while the redo branch behind it stayed — redo then jumped to a state
+    // that no longer matched its own baseline.
+    const atTop = this.historyIndex === this.history.length - 1
+    if (atTop && last && last.name === name && now - last.timestamp < windowMs) {
       this.historySnapshots[this.historyIndex] = this.snapshotProject()
       this.historyMeta[this.historyIndex] = this.captureDocMeta()
       last.timestamp = now
@@ -5427,7 +5465,8 @@ export class EditorEngine {
    * slot, opacity and selection carry over. Tainted/empty files fail
    * gracefully. Returns false when nothing was queued.
    */
-  replaceSelectedImage(dataUrl: string): boolean {    const scope = this.scope
+  replaceSelectedImage(dataUrl: string): boolean {
+    const scope = this.scope
     if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) return false
     const find = (node: paper.Item): paper.Raster | null => {
       if ((node as any).locked || !node.parent) return null
