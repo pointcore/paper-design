@@ -478,6 +478,9 @@
             <el-button size="small" class="grid-btn" :disabled="!store.hasSelection" title="Add a midpoint anchor to every curve" @click="onAddAnchors">Add Anchors</el-button>
             <el-button size="small" class="grid-btn" :disabled="!store.hasSelection" title="Reverse path direction" @click="onReverse">Reverse</el-button>
           </div>
+          <div class="prop-row">
+            <el-button size="small" plain class="wide-btn" title="Split paths at sub-selected anchors (Direct Select)" @click="onSplitAnchors">Split at Anchors</el-button>
+          </div>
         </div>
       </div>
     </div>
@@ -1653,6 +1656,17 @@ function onReverse() {
   if (e.reversePaths() === 0) {
     store.setStatusMessage('Reverse needs a path selection')
   }
+}
+
+function onSplitAnchors() {
+  const e = getEngine()
+  if (!e) return
+  const sc = e.getController('direct-select') as {
+    splitAtSelectedAnchors?: () => boolean | null
+  } | null
+  const sub = sc?.splitAtSelectedAnchors?.() ?? null
+  if (sub === true) return
+  store.setStatusMessage('Split needs sub-selected anchors (Direct Select)')
 }
 
 /** Read the selection bounds (united for multi-selections) into the fields. */

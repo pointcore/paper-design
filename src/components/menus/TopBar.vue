@@ -40,6 +40,8 @@
               <el-dropdown-item command="delete" divided :disabled="!store.hasSelection">Delete</el-dropdown-item>
               <el-dropdown-item command="selectAll" divided>Select All</el-dropdown-item>
               <el-dropdown-item command="invertSelection">Invert Selection</el-dropdown-item>
+              <el-dropdown-item command="reselect" :disabled="store.lastSelection.length === 0">Reselect</el-dropdown-item>
+              <el-dropdown-item command="saveSelection" :disabled="!store.hasSelection">Save Selection...</el-dropdown-item>
               <el-dropdown-item command="findReplace" divided>Find &amp; Replace...</el-dropdown-item>
             </el-dropdown-menu>
           </template>
@@ -506,8 +508,7 @@
       </div>
     </AppDialog>
 
-    <!-- Find & Replace Dialog (AI Find/Change parity + word count) -->
-    <AppDialog
+    <!-- Find & Replace Dialog (AI Find/Change parity + word count) -->    <AppDialog
       v-model="findVisible"
       title="Find & Replace"
       :width="400"
@@ -545,6 +546,33 @@
       </div>
     </AppDialog>
 
+    <!-- Save Selection Dialog (named id-list selections, persisted) -->
+    <AppDialog
+      v-model="savedSelVisible"
+      title="Saved Selections"
+      :width="400"
+      :show-footer="false"
+    >
+      <template #footer>
+        <el-button size="small" @click="savedSelVisible = false">Close</el-button>
+      </template>
+      <div class="settings-body app-settings">
+        <div class="setting-row">
+          <el-input v-model="savedSelName" size="small" placeholder="Selection name" @keyup.enter="onSavedSelSave" />
+          <el-button size="small" :disabled="!store.hasSelection" @click="onSavedSelSave">Save Current</el-button>
+        </div>
+        <div v-if="store.savedSelections.length === 0" class="setting-desc">No saved selections yet.</div>
+        <div v-for="s in store.savedSelections" :key="s.id" class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">{{ s.name }}</span>
+            <span class="setting-desc">{{ s.ids.length }} objects</span>
+          </div>
+          <el-button size="small" @click="onSavedSelLoad(s.id)">Load</el-button>
+          <el-button size="small" title="Delete" @click="onSavedSelDelete(s.id)">×</el-button>
+        </div>
+      </div>
+    </AppDialog>
+
     <!-- Preflight Dialog (print-readiness: overflow / gamut / dpi / layers) -->
     <AppDialog
       v-model="preflightVisible"
@@ -570,6 +598,7 @@
 import { ref, reactive, computed, inject, type Ref } from 'vue'
 import { QuestionFilled, Check } from '@element-plus/icons-vue'
 import AppDialog from '../ui/AppDialog.vue'
+import { uniqueSelectionName, pruneSelectionIds } from '../../editor/selection/saved-selection'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
 import type { RulerUnit, RasterExportFormat, RasterExportArea } from '../../editor/types'
@@ -740,7 +769,81 @@ function openFind() {
   findIndex.value = 0
   findVisible.value = true
 }
-function findNext() {
+
+const savedSelVisible = ref(false)
+const savedSelName = ref('')
+
+function persistSavedSelections() {
+  try {
+    localStorage.setItem('vve.selections', JSON.stringify(store.savedSelections))
+  } catch { /* private mode */ }
+}
+
+function restoreSavedSelections() {
+  try {
+    const raw = localStorage.getItem('vve.selections')
+    if (!raw) return
+    const list = JSON.parse(raw) as Array<{ id?: unknown; name?: unknown; ids?: unknown }>
+    if (!Array.isArray(list)) return
+    store.setSavedSelections(
+      list
+        .filter((s) => s && typeof s === 'object')
+        .map((s) => ({
+          id: typeof s.id === 'string' ? s.id : '',
+          name: typeof s.name === 'string' ? s.name : '',
+          ids: Array.isArray(s.ids) ? s.ids.filter((i: unknown): i is string => typeof i === 'string') : [],
+        }))
+    )
+  } catch { /* corrupt storage: start empty */ }
+}
+let savedSelRestored = false
+
+function openSavedSelections() {
+  if (!savedSelRestored) {
+    savedSelRestored = true
+    restoreSavedSelections()
+  }
+  savedSelName.value = ''
+  savedSelVisible.value = true
+}
+
+function onSavedSelSave() {
+  if (!store.hasSelection) {
+    store.setStatusMessage('Select objects first')
+    return
+  }
+  const base = uniqueSelectionName(
+    store.savedSelections.map((s) => s.name),
+    (savedSelName.value || '').trim() || 'Selection'
+  )
+  store.addSavedSelection(base, [...store.selectedItemIds])
+  savedSelName.value = ''
+  persistSavedSelections()
+  store.setStatusMessage(`Selection saved as "${base}"`)
+}
+
+function onSavedSelLoad(id: string) {
+  const e = engineRef?.value
+  if (!e) return
+  const entry = store.savedSelections.find((s) => s.id === id)
+  if (!entry) return
+  const existing = new Set<string>()
+  for (const itemId of entry.ids) {
+    if ((e as any).getItemById?.(itemId)) existing.add(itemId)
+  }
+  const pruned = pruneSelectionIds(entry.ids, existing)
+  if (pruned.length === 0) {
+    store.setStatusMessage('Nothing left of that selection')
+    return
+  }
+  const n = e.selectByIds(pruned)
+  store.setStatusMessage(`Loaded "${entry.name}" (${n} objects)`)
+}
+
+function onSavedSelDelete(id: string) {
+  store.removeSavedSelection(id)
+  persistSavedSelections()
+}function findNext() {
   const e = engineRef?.value
   const matches = findMatches.value
   if (!e || matches.length === 0) return
@@ -1367,6 +1470,14 @@ function onEditCmd(cmd: string) {
     case 'invertSelection':
       e.invertSelection()
       break
+    case 'reselect': {
+      const n = e.reselect()
+      store.setStatusMessage(n > 0 ? `Reselected ${n} object${n === 1 ? '' : 's'}` : 'Nothing to reselect')
+      break
+    }
+    case 'saveSelection':
+      openSavedSelections()
+      break
     case 'findReplace':
       openFind()
       break
@@ -1876,7 +1987,7 @@ function onNudgeStepChange(val: number | undefined) {
 }
 
 function onHelp() {
-  store.setStatusMessage('Shortcuts: V Select | A Direct | Q Lasso | Y Wand | P Pen | N Pencil | Shift+E Eraser | Shift+B Blob | B Brush | G Gradient | C Scissors | Shift+M Builder | Shift+W Width | Shift+R Rotate | Shift+S Scale | Shift+O Mirror | Shift+F FreeTf | +/- & Shift+C Anchors | [ ] Brush Size | Tab Present | Space Pan | Ctrl+0 Fit | Arrows Nudge | Ctrl+A Select | Ctrl+G Group | Ctrl+2 Lock | Ctrl+3 Hide | Ctrl+C/X/V Clipb | Ctrl+Shift+C PNG | Ctrl+F/B Paste | Ctrl+[ Order | Ctrl+S Save | Ctrl+Shift+I Invert | Esc Cancel')
+  store.setStatusMessage('Shortcuts: V Select | A Direct | Q Lasso | Y Wand | P Pen | N Pencil | Shift+E Eraser | Shift+B Blob | B Brush | G Gradient | C Scissors | Shift+M Builder | Shift+W Width | Shift+R Rotate | Shift+S Scale | Shift+O Mirror | Shift+F FreeTf | +/- & Shift+C Anchors | [ ] Brush Size | Tab Present | Space Pan | Ctrl+0 Fit | Arrows Nudge | Ctrl+A Select | Ctrl+Shift+A Reselect | Ctrl+G Group | Ctrl+2 Lock | Ctrl+3 Hide | Ctrl+C/X/V Clipb | Ctrl+Shift+C PNG | Ctrl+F/B Paste | Ctrl+[ Order | Ctrl+S Save | Ctrl+Shift+I Invert | Esc Cancel')
 }
 </script>
 

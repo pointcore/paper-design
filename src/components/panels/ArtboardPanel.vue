@@ -30,6 +30,10 @@
         <span class="pos-label">Y</span>
         <el-input-number v-model="posY" size="small" @change="onPositionChange" />
       </div>
+
+      <div v-if="store.activeArtboard" class="artboard-follow">
+        <el-checkbox v-model="moveArt" size="small">Move artwork with board</el-checkbox>
+      </div>
     </div>
   </div>
 </template>
@@ -47,6 +51,17 @@ const renamingId = ref('')
 const renameValue = ref('')
 const posX = ref(0)
 const posY = ref(0)
+const moveArt = ref(false)
+
+try {
+  moveArt.value = localStorage.getItem('vve.moveArt') === '1'
+} catch { /* private mode */ }
+
+watch(moveArt, (v) => {
+  try {
+    localStorage.setItem('vve.moveArt', v ? '1' : '0')
+  } catch { /* private mode */ }
+})
 
 function getEngine() { return engineRef?.value || null }
 
@@ -188,7 +203,7 @@ function onPositionChange() {
   }
   const e = getEngine()
   if (e) {
-    if (e.moveArtboard(board.id, posX.value, posY.value)) syncPositionFromStore()
+    if (e.moveArtboard(board.id, posX.value, posY.value, { withArtwork: moveArt.value })) syncPositionFromStore()
   } else {
     store.updateArtboard(board.id, { x: posX.value, y: posY.value })
   }
@@ -317,6 +332,13 @@ watch(() => store.activeArtboardId, syncPositionFromStore, { immediate: true })
 }
 
 .pos-label {
+  font-size: 11px;
+  color: #9a9a9a;
+}
+
+.artboard-follow {
+  padding: 0 10px 8px;
+  background: #1e1e1e;
   font-size: 11px;
   color: #9a9a9a;
 }
