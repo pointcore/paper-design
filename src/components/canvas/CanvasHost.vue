@@ -33,35 +33,35 @@
     <div v-if="contextMenu.visible" class="context-menu"
          :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
          @click.stop>
-      <div class="menu-item" @click="ctxCopy">Copy</div>
-      <div class="menu-item" @click="ctxCut">Cut</div>
+      <div class="menu-item" :class="{ disabled: !hasSel }" @click="ctxCopy">Copy</div>
+      <div class="menu-item" :class="{ disabled: !hasSel }" @click="ctxCut">Cut</div>
       <div class="menu-item" @click="ctxPaste">Paste</div>
-      <div class="menu-item" @click="ctxDelete">Delete</div>
+      <div class="menu-item" :class="{ disabled: !hasSel }" @click="ctxDelete">Delete</div>
       <div class="menu-divider"></div>
-      <div class="menu-item" @click="ctxGroup">Group</div>
-      <div class="menu-item" @click="ctxUngroup">Ungroup</div>
-      <div class="menu-item" @click="ctxIsolate">Isolate</div>
-      <div class="menu-item" @click="ctxJoin">Join Paths</div>
-      <div class="menu-item" @click="ctxCompound">Make Compound Path</div>
+      <div class="menu-item" :class="{ disabled: !hasSel }" @click="ctxGroup">Group</div>
+      <div class="menu-item" :class="{ disabled: !hasSel }" @click="ctxUngroup">Ungroup</div>
+      <div class="menu-item" :class="{ disabled: !hasSel }" @click="ctxIsolate">Isolate</div>
+      <div class="menu-item" :class="{ disabled: !hasSel }" @click="ctxJoin">Join Paths</div>
+      <div class="menu-item" :class="{ disabled: !hasSel }" @click="ctxCompound">Make Compound Path</div>
       <div class="menu-divider"></div>
-      <div class="menu-item" @click="ctxBringToFront">Bring to Front</div>
-      <div class="menu-item" @click="ctxBringForward">Bring Forward</div>
-      <div class="menu-item" @click="ctxSendBackward">Send Backward</div>
-      <div class="menu-item" @click="ctxSendToBack">Send to Back</div>
+      <div class="menu-item" :class="{ disabled: !hasSel }" @click="ctxBringToFront">Bring to Front</div>
+      <div class="menu-item" :class="{ disabled: !hasSel }" @click="ctxBringForward">Bring Forward</div>
+      <div class="menu-item" :class="{ disabled: !hasSel }" @click="ctxSendBackward">Send Backward</div>
+      <div class="menu-item" :class="{ disabled: !hasSel }" @click="ctxSendToBack">Send to Back</div>
       <div class="menu-divider"></div>
-      <div class="menu-item" @click="ctxMakeMask">Make Clipping Mask</div>
-      <div class="menu-item" @click="ctxSetKey">Set as Key Object</div>
+      <div class="menu-item" :class="{ disabled: !hasSel }" @click="ctxMakeMask">Make Clipping Mask</div>
+      <div class="menu-item" :class="{ disabled: !hasSel }" @click="ctxSetKey">Set as Key Object</div>
       <div class="menu-divider"></div>
-      <div class="menu-item" @click="ctxLock">Lock</div>
-      <div class="menu-item" @click="ctxHide">Hide</div>
-      <div class="menu-item" @click="ctxSameFill">Select Same Fill</div>
-      <div class="menu-item" @click="ctxSameStroke">Select Same Stroke</div>
+      <div class="menu-item" :class="{ disabled: !hasSel }" @click="ctxLock">Lock</div>
+      <div class="menu-item" :class="{ disabled: !hasSel }" @click="ctxHide">Hide</div>
+      <div class="menu-item" :class="{ disabled: !hasSel }" @click="ctxSameFill">Select Same Fill</div>
+      <div class="menu-item" :class="{ disabled: !hasSel }" @click="ctxSameStroke">Select Same Stroke</div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, onBeforeUnmount, watch, inject, type Ref } from 'vue'
+import { ref, computed, onMounted, onUnmounted, onBeforeUnmount, watch, inject, type Ref } from 'vue'
 import { useEditorStore } from '../../editor/store'
 import { EditorEngine } from '../../editor/engine'
 import { registerAllControllers } from '../../editor/register-controllers'
@@ -85,6 +85,8 @@ const rulerVRef = ref<HTMLDivElement>()
 const rulerHCanvasRef = ref<HTMLCanvasElement>()
 const rulerVCanvasRef = ref<HTMLCanvasElement>()
 const contextMenu = ref({ visible: false, x: 0, y: 0 })
+/** Selection-dependent menu entries disable while nothing is selected. */
+const hasSel = computed(() => store.hasSelection)
 
 const RULER_SIZE = 20 // px height/width of rulers
 
@@ -1016,6 +1018,11 @@ function removeGuideGhost() {
 .menu-item:hover {
   background: #4a90d9;
   color: #fff;
+}
+
+.menu-item.disabled {
+  opacity: 0.4;
+  pointer-events: none;
 }
 
 .menu-divider {
