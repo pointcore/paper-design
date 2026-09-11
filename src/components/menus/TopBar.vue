@@ -1916,20 +1916,31 @@ async function onFileCmd(cmd: string) {
     }
     case 'place': {
       if (!e) break
+      // SVG joins bitmaps here (matching canvas drag-drop); the separate
+      // Import SVG menu item stays for discoverability.
       const input = document.createElement('input')
       input.type = 'file'
-      input.accept = 'image/png,image/jpeg,image/webp,image/gif'
+      input.accept = '.svg,image/png,image/jpeg,image/webp,image/gif'
       input.onchange = async () => {
         const file = input.files?.[0]
         if (!file || !e) return
         if (file.size > 15 * 1024 * 1024) {
-          store.setStatusMessage('Image too large (15 MB max)')
+          store.setStatusMessage('File too large (15 MB max)')
           return
         }
         try {
-          e.placeImage(await readFileAsDataURL(file))
+          if (/\.svg$/i.test(file.name) || file.type === 'image/svg+xml') {
+            if (e.importSVGText(await file.text(), 'Place SVG')) {
+              store.setStatusMessage('SVG placed')
+            } else {
+              store.setStatusMessage('SVG placement failed')
+            }
+          } else {
+            e.placeImage(await readFileAsDataURL(file))
+            store.setStatusMessage('Image placed')
+          }
         } catch (err) {
-          store.setStatusMessage('Image placement failed')
+          store.setStatusMessage('File placement failed')
         }
       }
       input.click()
