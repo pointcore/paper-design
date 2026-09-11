@@ -73,12 +73,16 @@
               <el-dropdown-item command="arrowheads" :disabled="!store.hasSelection">Add Arrowheads...</el-dropdown-item>
               <el-dropdown-item command="adjustColors" :disabled="!store.hasSelection">Adjust Colors...</el-dropdown-item>
               <el-dropdown-item command="rasterize" :disabled="!store.hasSelection">Rasterize Selection (2x)</el-dropdown-item>
+              <el-dropdown-item command="extractImage" :disabled="!store.hasSelection">Extract Image...</el-dropdown-item>
               <el-dropdown-item command="closePath" :disabled="!store.hasSelection">Close Path</el-dropdown-item>
               <el-dropdown-item command="openPath" :disabled="!store.hasSelection">Open Path</el-dropdown-item>
               <el-dropdown-item command="envArcUpper" divided :disabled="!store.hasSelection">Envelope: Arc Upper</el-dropdown-item>
               <el-dropdown-item command="envArcLower" :disabled="!store.hasSelection">Envelope: Arc Lower</el-dropdown-item>
               <el-dropdown-item command="envBulge" :disabled="!store.hasSelection">Envelope: Bulge</el-dropdown-item>
               <el-dropdown-item command="envWave" :disabled="!store.hasSelection">Envelope: Wave</el-dropdown-item>
+              <el-dropdown-item command="envFlag" :disabled="!store.hasSelection">Envelope: Flag</el-dropdown-item>
+              <el-dropdown-item command="envFisheye" :disabled="!store.hasSelection">Envelope: Fisheye</el-dropdown-item>
+              <el-dropdown-item command="envSqueeze" :disabled="!store.hasSelection">Envelope: Squeeze</el-dropdown-item>
               <el-dropdown-item command="makeMask" divided :disabled="!store.hasSelection">Make Clipping Mask</el-dropdown-item>
               <el-dropdown-item command="releaseMask" :disabled="!store.hasSelection">Release Clipping Mask</el-dropdown-item>
               <el-dropdown-item command="applyPattern" divided :disabled="!store.hasSelection">Apply Pattern Fill</el-dropdown-item>
@@ -1481,6 +1485,16 @@ function onObjectCmd(cmd: string) {
         store.setStatusMessage('Rasterize needs unlocked artwork')
       }
       break
+    case 'extractImage': {
+      const hit = e.extractSelectedImage()
+      if (!hit) {
+        store.setStatusMessage('Extract needs a selected image')
+        break
+      }
+      downloadHref(hit.url, hit.filename)
+      store.setStatusMessage(`Extracted ${hit.filename}`)
+      break
+    }
     case 'adjustColors':
       recolorVisible.value = true
       break
@@ -1497,12 +1511,18 @@ function onObjectCmd(cmd: string) {
     case 'envArcUpper':
     case 'envArcLower':
     case 'envBulge':
-    case 'envWave': {
+    case 'envWave':
+    case 'envFlag':
+    case 'envFisheye':
+    case 'envSqueeze': {
       const preset = (
         cmd === 'envArcUpper' ? 'arc-upper' :
         cmd === 'envArcLower' ? 'arc-lower' :
-        cmd === 'envBulge' ? 'bulge' : 'wave'
-      ) as 'arc-upper' | 'arc-lower' | 'bulge' | 'wave'
+        cmd === 'envBulge' ? 'bulge' :
+        cmd === 'envWave' ? 'wave' :
+        cmd === 'envFlag' ? 'flag' :
+        cmd === 'envFisheye' ? 'fisheye' : 'squeeze'
+      ) as 'arc-upper' | 'arc-lower' | 'bulge' | 'wave' | 'flag' | 'fisheye' | 'squeeze'
       if (e.envelopeDistort(preset) === 0) {
         store.setStatusMessage('Envelope needs a path selection')
       }

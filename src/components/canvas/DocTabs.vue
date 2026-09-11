@@ -11,7 +11,7 @@
       </button>
       <button class="doc-tab doc-add" title="New Artboard" @click="addBoard">+</button>
     </div>
-    <span class="doc-count">{{ store.artboards.length }} boards</span>
+    <span class="doc-count" :class="{ dirty: store.hasUnsavedChanges }" :title="store.hasUnsavedChanges ? 'Unsaved changes (Ctrl+S)' : 'Saved'">{{ store.hasUnsavedChanges ? '• ' : '' }}{{ store.artboards.length }} boards</span>
   </div>
 </template>
 
@@ -90,5 +90,6 @@ function finishRename() {
 .doc-tab.active { background: #2f6fbf; border-color: #2f6fbf; color: #fff; }
 .doc-add { font-weight: 700; }
 .doc-count { color: #666; font-size: 11px; white-space: nowrap; }
+.doc-count.dirty { color: #e5a13d; }
 .rename-input { background: #111; border: 1px solid #4a90d9; color: #fff; font-size: 11px; width: 110px; border-radius: 2px; }
 </style>

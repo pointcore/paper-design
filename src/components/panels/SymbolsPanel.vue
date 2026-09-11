@@ -8,7 +8,9 @@
     </div>
 
     <div class="panel-body">
-      <div v-for="entry in symbols" :key="entry.id" class="symbol-item">
+      <div v-for="entry in symbols" :key="entry.id" class="symbol-item"
+           :class="{ active: pickedId === entry.id }"
+           @click="pickedId = entry.id">
         <span class="symbol-name" @dblclick="startRename(entry)">
           <template v-if="renamingId === entry.id">
             <el-input v-model="renameValue" size="small" @blur="finishRename" @keyup.enter="finishRename" />
@@ -16,8 +18,8 @@
           <template v-else>{{ entry.name }}</template>
         </span>
         <span class="symbol-count" :title="`${entry.instances} placed`">x{{ entry.instances }}</span>
-        <el-button size="small" @click="placeSymbol(entry.id)">Place</el-button>
-        <el-button size="small" type="danger" plain @click="deleteSymbol(entry.id)">×</el-button>
+        <el-button size="small" @click.stop="placeSymbol(entry.id)">Place</el-button>
+        <el-button size="small" type="danger" plain @click.stop="deleteSymbol(entry.id)">×</el-button>
       </div>
       <div v-if="symbols.length === 0" class="symbols-empty">No symbols yet</div>
 
@@ -25,6 +27,10 @@
         <el-button size="small" :disabled="!store.hasSelection" @click="makeSymbol">New Symbol</el-button>
         <el-button size="small" :disabled="!hasSymbolSelection" @click="breakLinks">Break Link</el-button>
       </div>
+      <div class="symbols-actions">
+        <el-button size="small" :disabled="!pickedId || !hasSymbolSelection" title="Replace selected instances with the picked symbol" @click="swapInstances">Swap to Picked</el-button>
+      </div>
+      <div v-if="pickedId" class="symbols-hint">Picked: {{ pickedName }} — select placed instances, then Swap.</div>
     </div>
   </div>
 </template>
@@ -87,6 +93,20 @@ function breakLinks() {
   if (!e) return
   if (!e.breakSymbolLinks()) {
     store.setStatusMessage('Select placed symbols to break')
+  }
+}
+
+const pickedId = ref('')
+const pickedName = computed(() => symbols.value.find((s) => s.id === pickedId.value)?.name ?? '')
+
+function swapInstances() {
+  const e = getEngine()
+  if (!e || !pickedId.value) return
+  const n = e.swapSymbolInstances(pickedId.value)
+  if (n === 0) {
+    store.setStatusMessage('Select placed instances to swap')
+  } else {
+    store.setStatusMessage(`Swapped ${n} instance${n === 1 ? '' : 's'}`)
   }
 }
 
@@ -157,6 +177,16 @@ function finishRename() {
   font-size: 12px;
   color: #ccc;
   border-bottom: 1px solid #2e2e2e;
+  cursor: pointer;
+}
+
+.symbol-item.active {
+  background: #2f6fbf;
+  color: #fff;
+}
+
+.symbol-item.active .symbol-count {
+  color: #dce9fa;
 }
 
 .symbol-name {
@@ -182,6 +212,13 @@ function finishRename() {
 .symbols-actions {
   display: flex;
   gap: 6px;
-  padding: 8px 10px;
+  padding: 8px 10px 0;
+}
+
+.symbols-hint {
+  padding: 6px 10px 0;
+  font-size: 11px;
+  color: #8a8a8a;
+  line-height: 1.5;
 }
 </style>

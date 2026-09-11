@@ -247,10 +247,18 @@
               <el-select v-model="dashPreset" size="small" class="flex-ctl" placeholder="Preset" @change="onDashPreset">
                 <el-option v-for="d in dashPresets" :key="d.value" :label="d.label" :value="d.value" />
               </el-select>
+              <el-input-number v-model="dashOffset" size="small" controls-position="right" title="Dash offset" style="max-width: 76px" @change="onDashOffsetChange" />
             </div>
             <div class="prop-row">
               <span class="prop-label-sm" />
               <el-input v-model="dashPattern" size="small" placeholder="e.g. 4 2" @change="onDashChange" />
+            </div>
+            <div class="prop-row">
+              <span class="prop-label-sm">Rule</span>
+              <el-select v-model="fillRule" size="small" class="flex-ctl" title="Fill rule" @change="onFillRuleChange">
+                <el-option value="nonzero" label="Nonzero" />
+                <el-option value="evenodd" label="Even-Odd" />
+              </el-select>
             </div>
           </template>
           <template v-else>
@@ -259,10 +267,18 @@
               <el-select v-model="dashPreset" size="small" class="flex-ctl" placeholder="Preset" @change="onDashPreset">
                 <el-option v-for="d in dashPresets" :key="d.value" :label="d.label" :value="d.value" />
               </el-select>
+              <el-input-number v-model="dashOffset" size="small" controls-position="right" title="Dash offset" style="max-width: 76px" @change="onDashOffsetChange" />
             </div>
             <div class="prop-row">
               <span class="prop-label-sm" />
               <el-input v-model="dashPattern" size="small" placeholder="e.g. 4 2" @change="onDashChange" />
+            </div>
+            <div class="prop-row">
+              <span class="prop-label-sm">Rule</span>
+              <el-select v-model="fillRule" size="small" class="flex-ctl" title="Fill rule" @change="onFillRuleChange">
+                <el-option value="nonzero" label="Nonzero" />
+                <el-option value="evenodd" label="Even-Odd" />
+              </el-select>
             </div>
           </template>
           <div class="op-row">
@@ -476,7 +492,7 @@ import {
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
 import { cssToCmykString, isOutOfCmykGamut } from '../../editor/color'
-import type { AlignMode, BooleanOperation, DistributeAxis, GradientState, LineCap, LineJoin, PatternFillState, ReferencePoint, RulerUnit, TextAlign } from '../../editor/types'
+import type { AlignMode, BooleanOperation, DistributeAxis, FillRule, GradientState, LineCap, LineJoin, PatternFillState, ReferencePoint, RulerUnit, TextAlign } from '../../editor/types'
 
 const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
@@ -617,6 +633,8 @@ function syncStyleFromSelection() {
   lineJoin.value = style.lineJoin
   miterLimit.value = style.miterLimit
   dashPattern.value = (style.dashArray ?? []).join(' ')
+  dashOffset.value = style.dashOffset ?? 0
+  fillRule.value = style.fillRule ?? 'nonzero'
   blendMode.value = style.blendMode
   opacityValue.value = Math.round((style.opacity ?? 1) * 100)
 }
@@ -726,6 +744,8 @@ const lineCap = ref<LineCap>(store.style.lineCap)
 const lineJoin = ref<LineJoin>(store.style.lineJoin)
 const miterLimit = ref(store.style.miterLimit)
 const dashPattern = ref(store.style.dashArray.join(' '))
+const dashOffset = ref(store.style.dashOffset ?? 0)
+const fillRule = ref<FillRule>(store.style.fillRule ?? 'nonzero')
 const blendMode = ref(store.style.blendMode)
 
 // CMYK proof readouts follow the current fill/stroke paints.
@@ -1349,6 +1369,31 @@ const dashPreset = ref('')
 function onDashPreset(val: string) {
   dashPattern.value = val || ''
   onDashChange()
+}
+
+function onDashOffsetChange() {
+  const e = getEngine()
+  if (!e) return
+  const offset = Number(dashOffset.value) || 0
+  dashOffset.value = offset
+  store.updateStyle({ dashOffset: offset })
+  e.getSelection().forEach((item: any) => {
+    if (item.dashOffset !== undefined) item.dashOffset = offset
+  })
+  e.scope.view.update()
+  e.pushHistory('Change Dash Offset')
+}
+
+function onFillRuleChange(val: FillRule) {
+  const e = getEngine()
+  if (!e) return
+  fillRule.value = val
+  store.updateStyle({ fillRule: val })
+  e.getSelection().forEach((item: any) => {
+    if ('fillRule' in item) item.fillRule = val
+  })
+  e.scope.view.update()
+  e.pushHistory(val === 'evenodd' ? 'Even-Odd Fill' : 'Nonzero Fill')
 }
 
 function onBlendChange() {
