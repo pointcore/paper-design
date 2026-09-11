@@ -6,7 +6,7 @@
         <el-option v-for="l in libraries" :key="l.name" :label="l.name" :value="l.name" />
       </el-select>
       <div class="sw-grid">
-        <div v-for="c in presets" :key="c" class="sw" :style="{ background: c }" :title="c" @click="apply(c, $event)" />
+        <div v-for="c in presets" :key="c" class="sw" :class="{ active: c.toLowerCase() === activeColor }" :style="{ background: c }" :title="c" @click="apply(c, $event)" />
         <div class="sw sw-none" title="No fill" @click="clearFill">×</div>
       </div>
     </div>
@@ -14,7 +14,7 @@
       <div class="sec-title">Recent</div>
       <div class="sw-grid">
         <div v-if="store.recentColors.length === 0" class="hint">Paint something to build recents.</div>
-        <div v-for="c in store.recentColors" :key="c" class="sw" :style="{ background: c }" :title="c" @click="apply(c, $event)" />
+        <div v-for="c in store.recentColors" :key="c" class="sw" :class="{ active: c.toLowerCase() === activeColor }" :style="{ background: c }" :title="c" @click="apply(c, $event)" />
       </div>
     </div>
     <div class="panel-section">
@@ -44,6 +44,12 @@ import type { StyleState } from '../../editor/types'
 const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
 const getEngine = () => engineRef?.value ?? null
+
+/** Current color of the active paint target, for highlighting chips. */
+const activeColor = computed(() => {
+  const c = store.paintTarget === 'fill' ? store.style.fillColor : store.style.strokeColor
+  return typeof c === 'string' ? c.toLowerCase() : ''
+})
 
 const libraries = [
   { name: 'Default', colors: [
@@ -189,6 +195,10 @@ watch(
 .sw-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; }
 .sw { aspect-ratio: 1; border-radius: 3px; border: 1px solid #000; cursor: pointer; min-height: 20px; }
 .sw:hover { outline: 1px solid #fff; }
+.sw.active {
+  outline: 2px solid #ffd75e;
+  outline-offset: 1px;
+}
 .sw-none { display: flex; align-items: center; justify-content: center; background: #fff; color: #c00; font-weight: 700; }
 .hint { font-size: 11px; color: #8a8a8a; line-height: 1.5; }
 .row { display: flex; gap: 4px; }
