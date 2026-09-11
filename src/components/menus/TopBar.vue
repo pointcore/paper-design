@@ -37,6 +37,7 @@
               <el-dropdown-item command="paste">Paste</el-dropdown-item>
               <el-dropdown-item command="pasteFront">Paste in Front</el-dropdown-item>
               <el-dropdown-item command="pasteBack">Paste in Back</el-dropdown-item>
+              <el-dropdown-item command="duplicate">Duplicate In Place</el-dropdown-item>
               <el-dropdown-item command="delete" divided :disabled="!store.hasSelection">Delete</el-dropdown-item>
               <el-dropdown-item command="selectAll" divided>Select All</el-dropdown-item>
               <el-dropdown-item command="invertSelection">Invert Selection</el-dropdown-item>
@@ -68,6 +69,7 @@
               <el-dropdown-item command="joinPaths" :disabled="!store.hasSelection">Join Paths</el-dropdown-item>
               <el-dropdown-item command="outlineStroke" :disabled="!store.hasSelection">Outline Stroke</el-dropdown-item>
               <el-dropdown-item command="offsetPath" :disabled="!store.hasSelection">Offset Path...</el-dropdown-item>
+              <el-dropdown-item command="stepRepeat" :disabled="!store.hasSelection">Step and Repeat...</el-dropdown-item>
               <el-dropdown-item command="simplifyPath" :disabled="!store.hasSelection">Simplify Path</el-dropdown-item>
               <el-dropdown-item command="addAnchors" :disabled="!store.hasSelection">Add Anchor Points</el-dropdown-item>
               <el-dropdown-item command="roughen" :disabled="!store.hasSelection">Roughen / Zig Zag...</el-dropdown-item>
@@ -75,6 +77,8 @@
               <el-dropdown-item command="cleanUp">Clean Up...</el-dropdown-item>
               <el-dropdown-item command="arrowheads" :disabled="!store.hasSelection">Add Arrowheads...</el-dropdown-item>
               <el-dropdown-item command="adjustColors" :disabled="!store.hasSelection">Adjust Colors...</el-dropdown-item>
+              <el-dropdown-item command="setDefaults" :disabled="!store.hasSelection">Set Style Defaults</el-dropdown-item>
+              <el-dropdown-item command="clearAppearance" :disabled="!store.hasSelection">Clear Appearance</el-dropdown-item>
               <el-dropdown-item command="rasterize" :disabled="!store.hasSelection">Rasterize Selection (2x)</el-dropdown-item>
               <el-dropdown-item command="extractImage" :disabled="!store.hasSelection">Extract Image...</el-dropdown-item>
               <el-dropdown-item command="closePath" :disabled="!store.hasSelection">Close Path</el-dropdown-item>
@@ -409,6 +413,41 @@
             <el-option value="bevel" label="Bevel" />
           </el-select>
         </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Steps</span>
+            <span class="setting-desc">Concentric copies (contour)</span>
+          </div>
+          <el-input-number v-model="offsetForm.steps" :min="1" :max="20" size="small" style="width: 130px" />
+        </div>
+      </div>
+    </AppDialog>
+
+    <!-- Step and Repeat Dialog (layout staple) -->
+    <AppDialog
+      v-model="repeatVisible"
+      title="Step and Repeat"
+      :width="360"
+      confirm-text="Apply"
+      cancel-text="Close"
+      @confirm="onRepeatConfirm"
+      @cancel="repeatVisible = false"
+    >
+      <div class="settings-body app-settings">
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Copies</span>
+          </div>
+          <el-input-number v-model="repeatForm.count" :min="1" :max="100" size="small" style="width: 130px" />
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Step X / Y</span>
+            <span class="setting-desc">Offset per copy in px</span>
+          </div>
+          <el-input-number v-model="repeatForm.dx" size="small" style="width: 100px" />
+          <el-input-number v-model="repeatForm.dy" size="small" style="width: 100px" />
+        </div>
       </div>
     </AppDialog>
 
@@ -657,6 +696,7 @@ const offsetVisible = ref(false)
 const offsetForm = reactive({
   distance: 10,
   join: 'miter' as 'miter' | 'round' | 'bevel',
+  steps: 1,
 })
 function onOffsetConfirm() {
   const e = engineRef?.value
@@ -669,11 +709,26 @@ function onOffsetConfirm() {
     store.setStatusMessage('Offset needs a non-zero distance')
     return
   }
-  if (e.offsetPaths(d, offsetForm.join) === 0) {
+  if (e.offsetPaths(d, offsetForm.join, Number(offsetForm.steps) || 1) === 0) {
     store.setStatusMessage('Offset needs a path selection')
     return
   }
   offsetVisible.value = false
+}
+
+const repeatVisible = ref(false)
+const repeatForm = reactive({ count: 3, dx: 20, dy: 20 })
+function onRepeatConfirm() {
+  const e = engineRef?.value
+  if (!e) {
+    repeatVisible.value = false
+    return
+  }
+  if (e.stepRepeat(Number(repeatForm.count), Number(repeatForm.dx), Number(repeatForm.dy)) === 0) {
+    store.setStatusMessage('Step and Repeat needs artwork and a non-zero step')
+    return
+  }
+  repeatVisible.value = false
 }
 
 const roughenVisible = ref(false)
@@ -1449,6 +1504,9 @@ function onEditCmd(cmd: string) {
     case 'pasteBack':
       if (!e.pasteInPlace('back')) store.setStatusMessage('Clipboard is empty')
       break
+    case 'duplicate':
+      if (!e.duplicateInPlace()) store.setStatusMessage('Nothing to duplicate')
+      break
     case 'delete': {
       // Direct-select sub-selections delete anchors/curves (keyboard
       // parity); otherwise whole objects go.
@@ -1660,6 +1718,9 @@ function onObjectCmd(cmd: string) {
     case 'offsetPath':
       offsetVisible.value = true
       break
+    case 'stepRepeat':
+      repeatVisible.value = true
+      break
     case 'addAnchors':
       if (e.addAnchorPoints() === 0) {
         store.setStatusMessage('Add Anchors needs a path selection')
@@ -1680,6 +1741,12 @@ function onObjectCmd(cmd: string) {
     }
     case 'arrowheads':
       arrowVisible.value = true
+      break
+    case 'setDefaults':
+      if (!e.setDefaultsFromSelection()) store.setStatusMessage('Nothing selected')
+      break
+    case 'clearAppearance':
+      if (e.clearAppearance() === 0) store.setStatusMessage('Nothing to reset')
       break
     case 'rasterize':
       if (e && !e.rasterizeSelection()) {
@@ -1987,7 +2054,7 @@ function onNudgeStepChange(val: number | undefined) {
 }
 
 function onHelp() {
-  store.setStatusMessage('Shortcuts: V Select | A Direct | Q Lasso | Y Wand | P Pen | N Pencil | Shift+E Eraser | Shift+B Blob | B Brush | G Gradient | C Scissors | Shift+M Builder | Shift+W Width | Shift+R Rotate | Shift+S Scale | Shift+O Mirror | Shift+F FreeTf | +/- & Shift+C Anchors | [ ] Brush Size | Tab Present | Space Pan | Ctrl+0 Fit | Arrows Nudge | Ctrl+A Select | Ctrl+Shift+A Reselect | Ctrl+G Group | Ctrl+2 Lock | Ctrl+3 Hide | Ctrl+C/X/V Clipb | Ctrl+Shift+C PNG | Ctrl+F/B Paste | Ctrl+[ Order | Ctrl+S Save | Ctrl+Shift+I Invert | Esc Cancel')
+  store.setStatusMessage('Shortcuts: V Select | A Direct | Q Lasso | Y Wand | P Pen | N Pencil | Shift+E Eraser | Shift+B Blob | B Brush | G Gradient | C Scissors | Shift+M Builder | Shift+W Width | Shift+R Rotate | Shift+S Scale | Shift+O Mirror | Shift+F FreeTf | +/- & Shift+C Anchors | [ ] Brush Size | Tab Present | Space Pan | Ctrl+0 Fit | Arrows Nudge | Ctrl+A Select | Ctrl+Shift+A Reselect | Ctrl+D Duplicate | Ctrl+G Group | Ctrl+2 Lock | Ctrl+3 Hide | Ctrl+C/X/V Clipb | Ctrl+Shift+C PNG | Ctrl+F/B Paste | Ctrl+[ Order | Ctrl+S Save | Ctrl+Shift+I Invert | Esc Cancel')
 }
 </script>
 

@@ -481,6 +481,11 @@
           <div class="prop-row">
             <el-button size="small" plain class="wide-btn" title="Split paths at sub-selected anchors (Direct Select)" @click="onSplitAnchors">Split at Anchors</el-button>
           </div>
+          <div class="prop-row">
+            <span class="prop-label-sm">Fillet</span>
+            <el-input-number v-model="filletRadius" :min="0.5" :max="500" size="small" controls-position="right" title="Round sharp corners" />
+            <el-button size="small" class="grid-btn" :disabled="!store.hasSelection" @click="onFillet">Apply</el-button>
+          </div>
         </div>
       </div>
     </div>
@@ -1628,6 +1633,7 @@ function onBoolean(op: BooleanOperation) {
 
 const offsetDist = ref(10)
 const offsetJoin = ref<'miter' | 'round' | 'bevel'>('miter')
+const filletRadius = ref(8)
 
 function onOffset() {
   const e = getEngine()
@@ -1667,6 +1673,18 @@ function onSplitAnchors() {
   const sub = sc?.splitAtSelectedAnchors?.() ?? null
   if (sub === true) return
   store.setStatusMessage('Split needs sub-selected anchors (Direct Select)')
+}
+
+function onFillet() {
+  const e = getEngine()
+  if (!e) return
+  const sc = e.getController('direct-select') as {
+    roundSelectedCorners?: (radius: number) => number
+  } | null
+  const n = sc?.roundSelectedCorners?.(Number(filletRadius.value) || 0) ?? 0
+  if (n === 0) {
+    store.setStatusMessage('Fillet needs sharp corners selected')
+  }
 }
 
 /** Read the selection bounds (united for multi-selections) into the fields. */
