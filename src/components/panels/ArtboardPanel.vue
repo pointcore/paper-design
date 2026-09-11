@@ -31,6 +31,13 @@
         <el-input-number v-model="posY" size="small" @change="onPositionChange" />
       </div>
 
+      <div v-if="store.activeArtboard" class="artboard-position">
+        <span class="pos-label">W</span>
+        <el-input-number v-model="sizeW" :min="1" :max="16384" size="small" @change="onSizeChange" />
+        <span class="pos-label">H</span>
+        <el-input-number v-model="sizeH" :min="1" :max="16384" size="small" @change="onSizeChange" />
+      </div>
+
       <div v-if="store.activeArtboard" class="artboard-follow">
         <el-checkbox v-model="moveArt" size="small">Move artwork with board</el-checkbox>
       </div>
@@ -51,6 +58,8 @@ const renamingId = ref('')
 const renameValue = ref('')
 const posX = ref(0)
 const posY = ref(0)
+const sizeW = ref(0)
+const sizeH = ref(0)
 const moveArt = ref(false)
 
 try {
@@ -191,6 +200,8 @@ function syncPositionFromStore() {
   if (!board) return
   posX.value = Math.round(board.x)
   posY.value = Math.round(board.y)
+  sizeW.value = Math.round(board.width)
+  sizeH.value = Math.round(board.height)
 }
 
 function onPositionChange() {
@@ -205,6 +216,21 @@ function onPositionChange() {
     if (e.moveArtboard(board.id, posX.value, posY.value, { withArtwork: moveArt.value })) syncPositionFromStore()
   } else {
     store.updateArtboard(board.id, { x: posX.value, y: posY.value })
+  }
+}
+
+function onSizeChange() {
+  const board = store.activeArtboard
+  if (!board) return
+  if (!Number.isFinite(sizeW.value) || !Number.isFinite(sizeH.value)) {
+    syncPositionFromStore()
+    return
+  }
+  const e = getEngine()
+  if (e) {
+    if (e.resizeArtboard(board.id, sizeW.value, sizeH.value)) syncPositionFromStore()
+  } else {
+    store.updateArtboard(board.id, { width: sizeW.value, height: sizeH.value })
   }
 }
 
