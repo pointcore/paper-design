@@ -999,6 +999,13 @@ export class TextController {
         e.preventDefault()
         e.stopPropagation()
         this.commit()
+        return
+      }
+      // AI Ctrl+Shift+> / <: step the font size of the text being edited.
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && (e.code === 'Period' || e.code === 'Comma')) {
+        e.preventDefault()
+        e.stopPropagation()
+        this.stepSessionFontSize(e.code === 'Period' ? 2 : -2)
       }
     })
 
@@ -1010,6 +1017,26 @@ export class TextController {
     // Put the caret at the end so typing appends when re-editing.
     const len = overlay.value.length
     overlay.setSelectionRange(len, len)
+  }
+
+  /**
+   * Ctrl+Shift+> / < while editing: resize the live text (the hidden item
+   * plus its overlay mirror), then re-measure the overlay. Area frames
+   * re-wrap from the frame at commit, matching panel-driven size changes.
+   */
+  private stepSessionFontSize(delta: number) {
+    const item = this.editingItem
+    if (!item || (item as any).locked) return
+    const next = Math.min(400, Math.max(1, Math.round((Number(item.fontSize) || 12) + delta)))
+    if (next === (Number(item.fontSize) || 12)) return
+    item.fontSize = next
+    const overlay = this.overlay
+    if (overlay) {
+      const zoom = this.engine?.zoom || 1
+      overlay.style.fontSize = `${next * zoom}px`
+    }
+    this.syncOverlayPosition()
+    this.autoSize()
   }
 
   /** Recompute the overlay position / scale from the current view. */
