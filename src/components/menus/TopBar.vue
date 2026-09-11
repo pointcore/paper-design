@@ -11,6 +11,7 @@
               <el-dropdown-item command="open" divided>Open...</el-dropdown-item>
               <el-dropdown-item command="save">Save</el-dropdown-item>
               <el-dropdown-item command="export" divided>Export SVG</el-dropdown-item>
+              <el-dropdown-item command="exportSelection" :disabled="!store.hasSelection">Export Selection SVG</el-dropdown-item>
               <el-dropdown-item command="exportRaster">Export Raster...</el-dropdown-item>
               <el-dropdown-item command="exportPdf">Export PDF (Raster)</el-dropdown-item>
               <el-dropdown-item command="exportBoardsPdf">Export All Boards PDF (Raster)</el-dropdown-item>
@@ -31,6 +32,7 @@
               <el-dropdown-item command="cut" divided :disabled="!store.hasSelection">Cut</el-dropdown-item>
               <el-dropdown-item command="copy" :disabled="!store.hasSelection">Copy</el-dropdown-item>
               <el-dropdown-item command="copySVG" :disabled="!store.hasSelection">Copy as SVG</el-dropdown-item>
+              <el-dropdown-item command="copyPNG" :disabled="!store.hasSelection">Copy as PNG</el-dropdown-item>
               <el-dropdown-item command="paste">Paste</el-dropdown-item>
               <el-dropdown-item command="pasteFront">Paste in Front</el-dropdown-item>
               <el-dropdown-item command="pasteBack">Paste in Back</el-dropdown-item>
@@ -66,6 +68,8 @@
               <el-dropdown-item command="addAnchors" :disabled="!store.hasSelection">Add Anchor Points</el-dropdown-item>
               <el-dropdown-item command="reversePath" :disabled="!store.hasSelection">Reverse Path Direction</el-dropdown-item>
               <el-dropdown-item command="cleanUp">Clean Up...</el-dropdown-item>
+              <el-dropdown-item command="arrowheads" :disabled="!store.hasSelection">Add Arrowheads...</el-dropdown-item>
+              <el-dropdown-item command="adjustColors" :disabled="!store.hasSelection">Adjust Colors...</el-dropdown-item>
               <el-dropdown-item command="closePath" :disabled="!store.hasSelection">Close Path</el-dropdown-item>
               <el-dropdown-item command="openPath" :disabled="!store.hasSelection">Open Path</el-dropdown-item>
               <el-dropdown-item command="envArcUpper" divided :disabled="!store.hasSelection">Envelope: Arc Upper</el-dropdown-item>
@@ -86,6 +90,8 @@
               <el-dropdown-item command="sameWidth" :disabled="!store.hasSelection">Select Same Stroke Width</el-dropdown-item>
               <el-dropdown-item command="sameOpacity" :disabled="!store.hasSelection">Select Same Opacity</el-dropdown-item>
               <el-dropdown-item command="sameBlend" :disabled="!store.hasSelection">Select Same Blend Mode</el-dropdown-item>
+              <el-dropdown-item command="selectStrays">Select Stray Points</el-dropdown-item>
+              <el-dropdown-item command="selectTexts">Select Text Objects</el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
@@ -383,6 +389,66 @@
         </div>
       </div>
     </AppDialog>
+
+    <!-- Arrowheads Dialog (destructive v1: plain filled markers) -->
+    <AppDialog
+      v-model="arrowVisible"
+      title="Add Arrowheads"
+      :width="360"
+      confirm-text="Apply"
+      cancel-text="Close"
+      @confirm="onArrowConfirm"
+      @cancel="arrowVisible = false"
+    >
+      <div class="settings-body app-settings">
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Ends</span>
+          </div>
+          <el-checkbox v-model="arrowForm.start">Start</el-checkbox>
+          <el-checkbox v-model="arrowForm.end">End</el-checkbox>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Length</span>
+            <span class="setting-desc">Absolute document units</span>
+          </div>
+          <el-input-number v-model="arrowForm.length" :min="1" :max="200" size="small" style="width: 130px" />
+        </div>
+      </div>
+    </AppDialog>
+
+    <!-- Adjust Colors Dialog (Recolor-lite through HSL) -->
+    <AppDialog
+      v-model="recolorVisible"
+      title="Adjust Colors"
+      :width="360"
+      confirm-text="Apply"
+      cancel-text="Close"
+      @confirm="onRecolorConfirm"
+      @cancel="recolorVisible = false"
+    >
+      <div class="settings-body app-settings">
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Hue shift</span>
+          </div>
+          <el-input-number v-model="recolorForm.hue" :min="-180" :max="180" size="small" style="width: 130px" />
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Saturation</span>
+          </div>
+          <el-input-number v-model="recolorForm.sat" :min="-100" :max="100" size="small" style="width: 130px" />
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Lightness</span>
+          </div>
+          <el-input-number v-model="recolorForm.light" :min="-100" :max="100" size="small" style="width: 130px" />
+        </div>
+      </div>
+    </AppDialog>
   </div>
 </template>
 
@@ -465,6 +531,40 @@ function onOffsetConfirm() {
     return
   }
   offsetVisible.value = false
+}
+
+const arrowVisible = ref(false)
+const arrowForm = reactive({ start: false, end: true, length: 12 })
+function onArrowConfirm() {
+  const e = engineRef?.value
+  if (!e) {
+    arrowVisible.value = false
+    return
+  }
+  const n = e.addArrowheads(arrowForm.start, arrowForm.end, Number(arrowForm.length))
+  if (n === 0) {
+    store.setStatusMessage('Arrowheads need an open path selection')
+    return
+  }
+  store.setStatusMessage(`Added ${n} arrowhead${n === 1 ? '' : 's'}`)
+  arrowVisible.value = false
+}
+
+const recolorVisible = ref(false)
+const recolorForm = reactive({ hue: 0, sat: 0, light: 0 })
+function onRecolorConfirm() {
+  const e = engineRef?.value
+  if (!e) {
+    recolorVisible.value = false
+    return
+  }
+  const n = e.adjustColors(Number(recolorForm.hue) || 0, Number(recolorForm.sat) || 0, Number(recolorForm.light) || 0)
+  if (n === 0) {
+    store.setStatusMessage('Adjust Colors needs painted artwork selected')
+    return
+  }
+  store.setStatusMessage(`Recolored ${n} object${n === 1 ? '' : 's'}`)
+  recolorVisible.value = false
 }
 const exportForm = reactive({
   format: 'png' as RasterExportFormat,
@@ -629,6 +729,19 @@ function onFileCmd(cmd: string) {
         }
       }
       break
+    case 'exportSelection': {
+      if (!e) break
+      const svg = e.exportSelectionSVG()
+      if (!svg) {
+        store.setStatusMessage('Nothing selected to export')
+        break
+      }
+      const blob = new Blob([svg], { type: 'image/svg+xml' })
+      const url = URL.createObjectURL(blob)
+      downloadHref(url, 'selection.svg')
+      store.setStatusMessage('Selection exported')
+      break
+    }
     case 'import': {
       const input = document.createElement('input')
       input.type = 'file'
@@ -939,6 +1052,9 @@ function onEditCmd(cmd: string) {
     case 'copySVG':
       void onCopySVG()
       break
+    case 'copyPNG':
+      void onCopyPNG()
+      break
     case 'paste':
       e.pasteWithSystemFallback().catch(() => undefined)
       break
@@ -990,6 +1106,21 @@ async function onCopySVG() {
     store.setStatusMessage('SVG copied to clipboard')
   } catch (err) {
     store.setStatusMessage('Copy failed')
+  }
+}
+
+/** Copy the selection (else all artwork) as PNG pixels. */
+async function onCopyPNG() {
+  const e = engineRef?.value
+  if (!e) return
+  try {
+    if (await e.copyRasterToClipboard(2)) {
+      store.setStatusMessage('PNG copied to clipboard')
+    } else {
+      store.setStatusMessage('Copy as PNG failed')
+    }
+  } catch {
+    store.setStatusMessage('Copy as PNG failed')
   }
 }
 
@@ -1083,6 +1214,16 @@ function onObjectCmd(cmd: string) {
       store.setStatusMessage(`Selected ${count} items with the same blend mode`)
       break
     }
+    case 'selectStrays': {
+      const count = e.selectStrays()
+      store.setStatusMessage(count > 0 ? `Selected ${count} stray point${count === 1 ? '' : 's'}` : 'No stray points found')
+      break
+    }
+    case 'selectTexts': {
+      const count = e.selectTextObjects()
+      store.setStatusMessage(count > 0 ? `Selected ${count} text object${count === 1 ? '' : 's'}` : 'No text objects found')
+      break
+    }
     case 'makeCompound':
       if (!e.makeCompoundPath()) {
         store.setStatusMessage('Compound needs at least two unlocked paths')
@@ -1138,6 +1279,12 @@ function onObjectCmd(cmd: string) {
       store.setStatusMessage(n > 0 ? `Cleaned up ${n} stray item${n === 1 ? '' : 's'}` : 'Nothing to clean')
       break
     }
+    case 'arrowheads':
+      arrowVisible.value = true
+      break
+    case 'adjustColors':
+      recolorVisible.value = true
+      break
     case 'closePath':
       if (e.setPathsClosed(true) === 0) {
         store.setStatusMessage('No open paths to close')
@@ -1414,7 +1561,7 @@ function onNudgeStepChange(val: number | undefined) {
 }
 
 function onHelp() {
-  store.setStatusMessage('Shortcuts: V Select | A Direct | Q Lasso | Y Wand | P Pen | N Pencil | Shift+E Eraser | Shift+B Blob | B Brush | G Gradient | C Scissors | Shift+M Builder | Shift+W Width | Shift+R Rotate | Shift+S Scale | Shift+O Mirror | Shift+F FreeTf | +/- & Shift+C Anchors | Space Pan | Ctrl+0 Fit | Arrows Nudge | Ctrl+A Select | Ctrl+G Group | Ctrl+2 Lock | Ctrl+3 Hide | Ctrl+F/B Paste | Ctrl+[ Order | Ctrl+S Save | Ctrl+Shift+I Invert | Esc Cancel')
+  store.setStatusMessage('Shortcuts: V Select | A Direct | Q Lasso | Y Wand | P Pen | N Pencil | Shift+E Eraser | Shift+B Blob | B Brush | G Gradient | C Scissors | Shift+M Builder | Shift+W Width | Shift+R Rotate | Shift+S Scale | Shift+O Mirror | Shift+F FreeTf | +/- & Shift+C Anchors | Space Pan | Ctrl+0 Fit | Arrows Nudge | Ctrl+A Select | Ctrl+G Group | Ctrl+2 Lock | Ctrl+3 Hide | Ctrl+C/X/V Clipb | Ctrl+Shift+C PNG | Ctrl+F/B Paste | Ctrl+[ Order | Ctrl+S Save | Ctrl+Shift+I Invert | Esc Cancel')
 }
 </script>
 
