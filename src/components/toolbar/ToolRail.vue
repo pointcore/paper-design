@@ -25,9 +25,10 @@
           <div class="tool-grid">
             <div class="tool-item group-main"
                  :class="{ active: isGroupActive(g) }"
-                 :title="currentOf(g).tip + ' (click = use, ▸ = more, double-click = cycle)'"
+                 :title="currentOf(g).tip + ' (click = use, ▸ or right-click = more, double-click = cycle)'"
                  @click="selectTool(currentOf(g).name)"
-                 @dblclick="cycleGroup(g)">
+                 @dblclick="cycleGroup(g)"
+                 @contextmenu.prevent="toggleFlyout(g.key, $event)">
               <el-icon v-if="currentOf(g).icon" :size="16"><component :is="currentOf(g).icon" /></el-icon>
               <span v-else class="glyph">{{ currentOf(g).glyph }}</span>
               <span v-if="g.members.length > 1" class="flyout-mark" @click.stop="toggleFlyout(g.key, $event)">▸</span>
