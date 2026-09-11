@@ -130,6 +130,24 @@ describe('handleGlobalKeydown', () => {
     expect(store.setStatusMessage).toHaveBeenCalledWith('No transform to repeat')
   })
 
+  it('navigates artboards on plain PgUp/PgDn (CDR page parity)', () => {
+    const engine = { navigateArtboards: vi.fn(() => true) } as any
+    handleGlobalKeydown(
+      key({ key: 'PageDown', code: 'PageDown', target: null }) as KeyboardEvent,
+      {} as any,
+      engine
+    )
+    expect(engine.navigateArtboards).toHaveBeenCalledWith(1)
+    const atEnd = { setStatusMessage: vi.fn() } as any
+    const failing = { navigateArtboards: vi.fn(() => false) } as any
+    handleGlobalKeydown(
+      key({ key: 'PageDown', code: 'PageDown', target: null }) as KeyboardEvent,
+      atEnd,
+      failing
+    )
+    expect(atEnd.setStatusMessage).toHaveBeenCalledWith('Already on the last artboard')
+  })
+
   it('never switches tools on Ctrl-modified letters (command layer owns chords)', () => {
     const engine = { setTool: vi.fn() } as any
     const store = { setTool: vi.fn(), tool: 'select' as any, updateView: vi.fn() } as any

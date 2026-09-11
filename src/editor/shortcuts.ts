@@ -441,6 +441,23 @@ export function handleGlobalKeydown(
     return
   }
   if (e.altKey) return
+  // CDR page navigation: plain PgUp/PgDn move between artboards (the Ctrl
+  // variants above own z-order; the canvas never scrolls, so consuming the
+  // browser default loses nothing).
+  if (e.key === 'PageUp' && !e.shiftKey) {
+    if (!engine?.navigateArtboards(-1)) {
+      store.setStatusMessage('Already on the first artboard')
+    }
+    e.preventDefault()
+    return
+  }
+  if (e.key === 'PageDown' && !e.shiftKey) {
+    if (!engine?.navigateArtboards(1)) {
+      store.setStatusMessage('Already on the last artboard')
+    }
+    e.preventDefault()
+    return
+  }
   if (e.key.startsWith('Arrow')) {
     applyNudge(e, store, engine, 1)
     return

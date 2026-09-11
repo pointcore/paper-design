@@ -1366,6 +1366,24 @@ export class EditorEngine {
   }
 
   /** Fit the view to the current selection bounds (View menu). */
+  /**
+   * CDR page navigation: activate the previous (-1) or next (+1) artboard
+   * and pan its sheet to the center of the view. Returns false at the end
+   * of the board list.
+   */
+  navigateArtboards(step: number): boolean {
+    const boards = this.store.artboards
+    if (boards.length === 0) return false
+    const idx = boards.findIndex((b) => b.id === this.store.activeArtboardId)
+    const next = (idx < 0 ? 0 : idx + step)
+    if (next < 0 || next >= boards.length) return false
+    const board = boards[next]
+    this.store.setActiveArtboard(board.id)
+    this.refreshArtboards()
+    this.panViewTo(new this.scope.Point(board.x + board.width / 2, board.y + board.height / 2))
+    return true
+  }
+
   zoomToSelection(): void {
     this.fitBounds(this.getSelectionBounds())
   }
