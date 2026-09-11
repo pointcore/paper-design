@@ -557,7 +557,7 @@ export class SelectController {
 
       // ---- Guide interaction (skipped while guides are locked) ----
       if (engine.store.view.showGuides && !engine.store.view.guidesLocked) {
-        const guideHit = this.guides.hitTest(event.point)
+        let guideHit = this.guides.hitTest(event.point)
         if (guideHit) {
           this.clearAnchorSelection()
           this.clearCurveSelection()
@@ -583,6 +583,18 @@ export class SelectController {
           } else {
             // was already selected, keep the group
             this.guides.selectGuide(guideHit, false)
+          }
+
+          // AI Alt+drag: duplicate the guide and drag the copy, leaving the
+          // original in place. Its own history entry keeps it undoable.
+          if (event.modifiers.alt && !event.modifiers.shift) {
+            const orientation = engine.getGuideOrientation(guideHit)
+            const position = engine.getGuidePosition(guideHit)
+            const copy = orientation ? engine.createGuide(position, orientation) : null
+            if (copy) {
+              guideHit = copy
+              engine.pushHistory('Add Guide')
+            }
           }
 
           // Clear regular artwork selection.
