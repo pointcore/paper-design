@@ -121,6 +121,27 @@ async function writeList(list: RecentFileMeta[]): Promise<void> {
   }
 }
 
+/** Drop the whole recent list (File > Clear Recent). */
+export async function clearRecentProjects(): Promise<void> {
+  try {
+    localStorage.removeItem(LS_KEY)
+  } catch { /* ignore */ }
+  try {
+    const db = await openDb()
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite')
+        tx.objectStore(STORE_NAME).delete(LIST_KEY)
+        tx.oncomplete = () => resolve()
+        tx.onerror = () => reject(tx.error ?? new Error('recent clear failed'))
+        tx.onabort = () => reject(tx.error ?? new Error('recent clear aborted'))
+      })
+    } finally {
+      db.close()
+    }
+  } catch { /* nothing to clear then */ }
+}
+
 /** Record a just-saved document under its file name (newest wins). */
 export async function recordRecentProject(name: string, fileText: string): Promise<void> {
   const clean = (name || '').trim().slice(0, MAX_NAME_CHARS) || 'Untitled'

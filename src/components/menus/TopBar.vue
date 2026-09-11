@@ -17,6 +17,7 @@
                 :command="'recent:' + rf.id"
                 :divided="i === 0"
               >{{ rf.name }}</el-dropdown-item>
+              <el-dropdown-item v-if="recentFiles.length > 0" command="clearRecent" divided>Clear Recent</el-dropdown-item>
               <el-dropdown-item command="export" divided>Export SVG</el-dropdown-item>
               <el-dropdown-item command="exportSelection" :disabled="!store.hasSelection">Export Selection SVG</el-dropdown-item>
               <el-dropdown-item command="exportBoardsSvg">Export Boards SVG</el-dropdown-item>
@@ -971,7 +972,7 @@ import { ref, reactive, computed, inject, watch, onMounted, type Ref } from 'vue
 import { QuestionFilled, Check } from '@element-plus/icons-vue'
 import AppDialog from '../ui/AppDialog.vue'
 import { uniqueSelectionName, pruneSelectionIds } from '../../editor/selection/saved-selection'
-import { listRecentProjects, loadRecentProjectText } from '../../editor/recent-files'
+import { clearRecentProjects, listRecentProjects, loadRecentProjectText } from '../../editor/recent-files'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
 import type { RulerUnit, RasterExportFormat, RasterExportArea } from '../../editor/types'
@@ -1719,6 +1720,12 @@ onMounted(() => {
 async function onFileCmd(cmd: string) {
   blurMenuFocus()
   const e = engineRef?.value
+  if (cmd === 'clearRecent') {
+    await clearRecentProjects()
+    recentFiles.value = []
+    store.setStatusMessage('Recent files cleared')
+    return
+  }
   if (cmd.startsWith('recent:')) {
     if (!confirmDiscard()) return
     if (!e) return
@@ -1761,6 +1768,13 @@ async function onFileCmd(cmd: string) {
       break
     }
     case 'saveAs':
+      // Seed the pristine default from the active board (desktop editors
+      // name the file after the document); keep a user-chosen name.
+      if (saveName.value === 'project' || !saveName.value.trim()) {
+        saveName.value = (store.activeArtboard?.name ?? 'project')
+          .replace(/[\/:*?"<>|]+/g, '-')
+          .slice(0, 80) || 'project'
+      }
       saveVisible.value = true
       break
     case 'open': {
