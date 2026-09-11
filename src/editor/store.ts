@@ -148,6 +148,8 @@ export const useEditorStore = defineStore('editor', {
     history: [] as HistoryEntry[],
     /** History index (-1 means empty) */
     historyIndex: -1,
+    /** Saved revision (matches history index/length right after save/open/new) */
+    savedRevision: { index: -1, length: 0 },
     /** History stack size limit */
     historyLimit: 100,
     /** Callout style */
@@ -226,6 +228,13 @@ export const useEditorStore = defineStore('editor', {
     /** Whether redo is available */
     canRedo(state): boolean {
       return state.historyIndex < state.history.length - 1
+    },
+    /** Whether the document differs from the last save/open/new */
+    hasUnsavedChanges(state): boolean {
+      return (
+        state.historyIndex !== state.savedRevision.index ||
+        state.history.length !== state.savedRevision.length
+      )
     },
   },
 
@@ -331,6 +340,11 @@ export const useEditorStore = defineStore('editor', {
     /** Set history index */
     setHistoryIndex(index: number) {
       this.historyIndex = index
+    },
+
+    /** Mark the current history position as saved (clean) */
+    setSavedRevision(index: number, length: number) {
+      this.savedRevision = { index, length }
     },
 
     /**

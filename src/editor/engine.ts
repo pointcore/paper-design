@@ -1276,6 +1276,7 @@ export class EditorEngine {
     if (gradientFill) paperStyle.fillColor = gradientFill
     else if (style.fillColor) paperStyle.fillColor = style.fillColor
     else paperStyle.fillColor = null
+    if (style.fillRule) paperStyle.fillRule = style.fillRule
     if (style.strokeColor) paperStyle.strokeColor = style.strokeColor
     else paperStyle.strokeColor = null
     paperStyle.strokeWidth = style.strokeWidth
@@ -1283,6 +1284,8 @@ export class EditorEngine {
     paperStyle.strokeJoin = style.lineJoin
     paperStyle.miterLimit = style.miterLimit
     if (style.dashArray && style.dashArray.length > 0) paperStyle.dashArray = style.dashArray
+    else paperStyle.dashArray = []
+    paperStyle.dashOffset = Number.isFinite(style.dashOffset) ? style.dashOffset : 0
     paperStyle.opacity = style.opacity
     paperStyle.blendMode = style.blendMode
     item.set(paperStyle)
@@ -1392,6 +1395,8 @@ export class EditorEngine {
     style.lineJoin = (s.strokeJoin as any) ?? style.lineJoin
     style.miterLimit = s.miterLimit ?? style.miterLimit
     style.dashArray = Array.isArray(s.dashArray) ? [...s.dashArray] : style.dashArray
+    style.dashOffset = Number.isFinite(s.dashOffset) ? s.dashOffset : style.dashOffset
+    style.fillRule = s.fillRule === 'evenodd' ? 'evenodd' : 'nonzero'
     style.blendMode = (s.blendMode as any) ?? style.blendMode
     style.opacity = s.opacity ?? style.opacity
     return style
@@ -1910,9 +1915,15 @@ export class EditorEngine {
     this.historyMeta = []
     this.historyIndex = -1
     this.store.setHistory([], -1)
+    this.markSaved()
     this.clearSelection()
     this.clearIsolationState()
     this.thumbCache?.clear?.()
+  }
+
+  /** Mark the current history position as the saved (clean) revision. */
+  markSaved(): void {
+    this.store.setSavedRevision(this.store.historyIndex, this.store.history.length)
   }
 
   // ===== Document (Save/Open/New) =====
@@ -1948,6 +1959,7 @@ export class EditorEngine {
     a.click()
     a.remove()
     setTimeout(() => URL.revokeObjectURL(url), 4000)
+    this.markSaved()
     this.showStatus('Project saved')
   }
 
@@ -2111,6 +2123,7 @@ export class EditorEngine {
     this.historyIndex = -1
     this.store.setHistory([], -1)
     this.pushHistory(name)
+    this.markSaved()
   }
 
   /**
@@ -4571,8 +4584,43 @@ export class EditorEngine {
     }
   }
 
-  // ===== Symbols =====
+  /**
+   * First selected raster as a downloadable PNG (AI asset extraction
+   * parity). Reads back the raster canvas, so cross-origin-tainted
+   * images resolve null instead of throwing. No history (read-only).
+   */
+  extractSelectedImage(): { url: string; filename: string } | null {
+    const scope = this.scope
+    const find = (node: paper.Item): paper.Raster | null => {
+      if ((node as any).locked) return null
+      if (node instanceof scope.Raster) return node
+      const children = (node as any).children as paper.Item[] | undefined
+      if (children) {
+        for (const child of children) {
+          const hit = find(child)
+          if (hit) return hit
+        }
+      }
+      return null
+    }
+    for (const item of this.getSelection()) {
+      const raster = find(item)
+      if (!raster) continue
+      try {
+        const url = (raster as any).canvas?.toDataURL?.('image/png') as string | undefined
+        if (!url || typeof url !== 'string' || !url.startsWith('data:')) continue
+        const data = (raster as any).data ?? {}
+        const raw = (raster as any).name ?? data.name
+        const stem = typeof raw === 'string' && raw.trim() ? raw.trim().replace(/[\\/:*?"<>|]+/g, '-') : 'image'
+        return { url, filename: `${stem}.png` }
+      } catch {
+        continue
+      }
+    }
+    return null
+  }
 
+  // ===== Symbols =====
   /**
    * Symbol definitions live behind hidden keeper instances (one invisible
    * SymbolItem per definition on a locked non-user layer). Keepers keep
@@ -4742,6 +4790,49 @@ export class EditorEngine {
     this.pushHistory('Break Symbol Link')
     this.scope.view.update()
     return true
+  }
+
+  /**
+   * Swap selected symbol instances to another definition (AI Replace
+   * Symbol parity): position, rotation, scaling and opacity carry over,
+   * slot and stacking stay. Returns instances swapped; one history entry.
+   */
+  swapSymbolInstances(symbolId: string): number {
+    const scope = this.scope
+    const keeper = this.getKeepers().find((k) => (k.data as any)?.symbolId === symbolId)
+    if (!keeper) return 0
+    const definition = (keeper as any)._definition ?? (keeper as any).definition
+    if (!definition) return 0
+    const instances = this.getSelection().filter(
+      (item) => !item.locked && item.parent && item instanceof scope.SymbolItem && !(item.data as any)?.isKeeper
+    ) as paper.SymbolItem[]
+    if (instances.length === 0) return 0
+    const swapped: paper.Item[] = []
+    for (const instance of instances) {
+      const next = definition.place((instance.position as paper.Point).clone()) as paper.SymbolItem
+      try {
+        next.rotation = (instance as any).rotation ?? 0
+        const scaling = (instance as any).scaling as paper.Point | undefined
+        if (scaling) next.scaling = scaling.clone()
+        if ((instance as any).opacity !== undefined) next.opacity = (instance as any).opacity
+      } catch { /* transforms are best-effort; the swap still lands */ }
+      const parent = instance.parent ?? this.getActiveLayer()
+      const rawAt = parent.children.indexOf(instance)
+      parent.insertChild(Math.min(Math.max(rawAt, 0), parent.children.length), next as any)
+      next.data.id = this.genId()
+      next.data.isUserItem = true
+      instance.remove()
+      swapped.push(next as paper.Item)
+    }
+    if (swapped.length === 0) return 0
+    this.clearSelection()
+    swapped.forEach((item) => {
+      item.selected = true
+    })
+    this.syncSelectionToStore()
+    this.pushHistory('Swap Symbol')
+    this.scope.view.update()
+    return swapped.length
   }
 
   // ===== Isolation mode =====
@@ -5803,7 +5894,10 @@ export class EditorEngine {
       const label =
         preset === 'arc-upper' ? 'Envelope Arc Upper' :
         preset === 'arc-lower' ? 'Envelope Arc Lower' :
-        preset === 'bulge' ? 'Envelope Bulge' : 'Envelope Wave'
+        preset === 'bulge' ? 'Envelope Bulge' :
+        preset === 'wave' ? 'Envelope Wave' :
+        preset === 'flag' ? 'Envelope Flag' :
+        preset === 'fisheye' ? 'Envelope Fisheye' : 'Envelope Squeeze'
       this.reflowTextsForItems(this.getSelection())
       this.pushHistory(label)
       this.scope.view.update()
@@ -5854,6 +5948,21 @@ export class EditorEngine {
       }
       case 'wave':
         return new scope.Point(p.x, p.y + Math.sin(2 * Math.PI * nx) * 0.08 * b.height)
+      case 'flag':
+        // One-sided wave growing toward the right edge.
+        return new scope.Point(p.x, p.y + Math.sin(Math.PI * nx) * nx * 0.3 * b.height)
+      case 'fisheye': {
+        // Magnify toward the center, compress toward the corners.
+        const cx = b.x + b.width / 2
+        const cy = b.y + b.height / 2
+        const rx = (nx - 0.5) * 2
+        const ry = (ny - 0.5) * 2
+        const f = 1 + 0.4 * Math.max(0, 1 - (rx * rx + ry * ry) / 2)
+        return new scope.Point(cx + (p.x - cx) * f, cy + (p.y - cy) * f)
+      }
+      case 'squeeze':
+        // Pinch the middle horizontally (inverse bulge).
+        return new scope.Point(b.x + b.width / 2 + (p.x - (b.x + b.width / 2)) * (1 - 0.3 * Math.sin(Math.PI * ny)), p.y)
     }
   }
 
