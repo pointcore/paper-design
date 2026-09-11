@@ -64,6 +64,12 @@ import { registerAllControllers } from '../../editor/register-controllers'
 import { handleGlobalKeydown, handleGlobalKeyUp } from '../../editor/shortcuts'
 import { cursorForTool } from '../../editor/cursors'
 import { rulerUnitFactor } from '../../editor/geometry'
+import {
+  clearRecoverySnapshot,
+  loadRecoverySnapshot,
+  saveRecoverySnapshot,
+  type RecoveryPayload,
+} from '../../editor/recovery'
 import NavigatorPanel from './NavigatorPanel.vue'
 
 const store = useEditorStore()
@@ -91,6 +97,10 @@ let guideDragGhostLayer: paper.Layer | null = null
 let middlePanActive = false
 let middlePanLast: { x: number; y: number } | null = null
 let middlePanPrevCursor = ''
+
+// Crash-recovery autosave state (debounced mirror of the dirty document)
+let recoveryTimer: ReturnType<typeof setTimeout> | undefined
+let recoveryBusy = false
 
 onMounted(() => {
   if (!canvasRef.value || !containerRef.value) return
@@ -174,6 +184,25 @@ onMounted(() => {
 
   // Ensure guide visibility matches the store on startup.
   engine?.refreshGuides()
+
+  // Crash-recovery: mirror the dirty document after edits and offer the
+  // mirror back on startup.
+  watch(
+    () => store.revision,
+    () => {
+      if (store.hasUnsavedChanges) scheduleRecoverySave()
+    }
+  )
+  watch(
+    () => store.hasUnsavedChanges,
+    (dirty) => {
+      // Clean again (saved / opened / new) — drop the recovery mirror.
+      if (!dirty) void clearRecoverySnapshot()
+    }
+  )
+  document.addEventListener('visibilitychange', onVisibilityFlush)
+  window.addEventListener('beforeunload', onVisibilityFlush)
+  void maybeOfferRecovery()
 })
 
 onBeforeUnmount(() => {
@@ -192,6 +221,12 @@ onUnmounted(() => {
   window.removeEventListener('mouseup', onGuideDragEnd)
   window.removeEventListener('mousemove', onMiddlePanMove)
   window.removeEventListener('mouseup', onMiddlePanEnd)
+  document.removeEventListener('visibilitychange', onVisibilityFlush)
+  window.removeEventListener('beforeunload', onVisibilityFlush)
+  if (recoveryTimer) {
+    clearTimeout(recoveryTimer)
+    recoveryTimer = undefined
+  }
   guideDragActive = false
   middlePanActive = false
   if (engine) {
@@ -202,6 +237,56 @@ onUnmounted(() => {
     engine = null
   }
 })
+
+// ------------------------------------------------------------------
+// Crash-recovery autosave
+// ------------------------------------------------------------------
+
+/** Debounce the mirror write so bursts of edits cost one serialization. */
+function scheduleRecoverySave() {
+  if (recoveryTimer) clearTimeout(recoveryTimer)
+  recoveryTimer = setTimeout(flushRecoverySave, 2500)
+}
+
+async function flushRecoverySave() {
+  if (recoveryTimer) {
+    clearTimeout(recoveryTimer)
+    recoveryTimer = undefined
+  }
+  const e = engine
+  if (!e || recoveryBusy || !store.hasUnsavedChanges) return
+  recoveryBusy = true
+  try {
+    await saveRecoverySnapshot(e.exportProjectFile())
+  } catch { /* recovery is best effort */ }
+  recoveryBusy = false
+}
+
+/** The page may be killed while hidden — write the pending mirror now. */
+function onVisibilityFlush() {
+  if (document.visibilityState === 'hidden') void flushRecoverySave()
+}
+
+/** Offer the last mirror back when the previous session ended dirty. */
+async function maybeOfferRecovery() {
+  let payload: RecoveryPayload | null = null
+  try {
+    payload = await loadRecoverySnapshot()
+  } catch {
+    return
+  }
+  if (!payload || !engine) return
+  const when = new Date(payload.savedAt).toLocaleString()
+  if (window.confirm(`Restore unsaved work from ${when}? Cancel discards it.`)) {
+    try {
+      engine.importProjectFile(payload.fileText)
+      store.setStatusMessage('Recovered unsaved work from the previous session')
+    } catch { /* unreadable slot: discard below */ }
+  }
+  try {
+    await clearRecoverySnapshot()
+  } catch { /* ignore */ }
+}
 
 function setupRulerCanvases() {
   const container = containerRef.value
