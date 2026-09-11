@@ -949,7 +949,7 @@ function syncTextFromSelection() {
   isStrikethrough.value = !!(item as any).strikethrough || !!store.charStyle.strikethrough
   baselineValue.value = Number((item as any).baselineShift ?? store.charStyle.baselineShift) || 0
   hScaleValue.value = Number((item as any).horizontalScale ?? store.charStyle.horizontalScale) || 100
-  pathOffsetValue.value = Number((store as any).textPathOffset) || 0
+  pathOffsetValue.value = Number(store.textPathOffset) || 0
   const j = (item as any).justification as string
   const storedAlign = store.paragraphStyle.align
   textAlign.value = j === 'center' || j === 'right' ? j : (storedAlign === 'justify' ? 'justify' : 'left')
@@ -1098,11 +1098,11 @@ function onScaleChange(val: number | undefined) {
 
 function onPathOffsetChange(val: number | undefined) {
   if (val === undefined || !Number.isFinite(val)) {
-    pathOffsetValue.value = Number((store as any).textPathOffset) || 0
+    pathOffsetValue.value = Number(store.textPathOffset) || 0
     return
   }
   pathOffsetValue.value = val
-  ;(store as any).setTextPathOffset?.(val)
+  ;store.setTextPathOffset(val)
   const e = getEngine()
   e?.getSelection().forEach((item) => { (item as any).data = { ...((item as any).data ?? {}), pathOffset: val } })
   e?.scope.view.update()
