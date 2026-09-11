@@ -309,6 +309,11 @@ export function handleGlobalKeydown(
       if (e.shiftKey) engine?.sendSelectionToBack()
       else engine?.sendBackward()
       e.preventDefault()
+    } else if (e.code === 'Semicolon' && !e.altKey) {
+      // AI Ctrl+; : toggle guides (the grid lives on Ctrl+"). CanvasHost
+      // watches the flag and refreshes the guide layer.
+      store.updateView({ showGuides: !store.view.showGuides })
+      e.preventDefault()
     } else if (e.code === 'Quote' && !e.altKey) {
       // AI-style grid toggle (Ctrl+" / Ctrl+': physical key, any shift).
       store.updateView({ showGrid: !store.view.showGrid })
@@ -363,6 +368,14 @@ export function handleGlobalKeydown(
   if (e.key === 'F2' && e.shiftKey && !e.altKey) {
     if (store.hasSelection) engine?.zoomToSelection()
     else store.setStatusMessage('Nothing selected to zoom to')
+    e.preventDefault()
+    return
+  }
+
+  // CDR zoom keys: F4 frames all artwork, Shift+F4 frames the active page.
+  if (e.key === 'F4' && !e.altKey) {
+    if (e.shiftKey) engine?.zoomToArtboard()
+    else engine?.fitToContent()
     e.preventDefault()
     return
   }

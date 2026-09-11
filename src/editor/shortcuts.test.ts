@@ -130,6 +130,29 @@ describe('handleGlobalKeydown', () => {
     expect(store.setStatusMessage).toHaveBeenCalledWith('No transform to repeat')
   })
 
+  it('fits all artwork on F4 and frames the page on Shift+F4', () => {
+    const engine = { fitToContent: vi.fn(), zoomToArtboard: vi.fn() } as any
+    handleGlobalKeydown(key({ key: 'F4', code: 'F4', target: null }) as KeyboardEvent, {} as any, engine)
+    expect(engine.fitToContent).toHaveBeenCalledTimes(1)
+    handleGlobalKeydown(
+      key({ key: 'F4', code: 'F4', shiftKey: true, target: null }) as KeyboardEvent,
+      {} as any,
+      engine
+    )
+    expect(engine.zoomToArtboard).toHaveBeenCalledTimes(1)
+    expect(engine.fitToContent).toHaveBeenCalledTimes(1)
+  })
+
+  it('toggles guides on Ctrl+Semicolon', () => {
+    const store = { view: { showGuides: false }, updateView: vi.fn() } as any
+    handleGlobalKeydown(
+      key({ key: ';', code: 'Semicolon', ctrlKey: true, target: null }) as KeyboardEvent,
+      store,
+      null
+    )
+    expect(store.updateView).toHaveBeenCalledWith({ showGuides: true })
+  })
+
   it('toggles rulers on Ctrl+R and leaves Ctrl+Shift+R to the browser', () => {
     const store = { view: { rulersVisible: false }, updateView: vi.fn() } as any
     handleGlobalKeydown(
