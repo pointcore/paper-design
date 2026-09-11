@@ -1391,6 +1391,39 @@ export class EditorEngine {
 
   /** Fit the view to the current selection bounds (View menu). */
   /**
+   * AI Arrange > Send to Current Layer: move every selected item's
+   * top-level ancestor into the active layer, stacked on top in their
+   * original order. Returns the moved count (0 when nothing can move).
+   */
+  moveSelectionToActiveLayer(): number {
+    const active = this.getActiveLayer()
+    const picked: paper.Item[] = []
+    const seen = new Set<paper.Item>()
+    for (const item of this.getSelection()) {
+      if ((item as any).locked) continue
+      let top: paper.Item | null = item
+      while (top && !(top.parent instanceof this.scope.Layer)) {
+        top = top.parent as paper.Item | null
+      }
+      if (!top || top === active || seen.has(top)) continue
+      seen.add(top)
+      picked.push(top)
+    }
+    if (picked.length === 0) return 0
+    for (const item of picked) {
+      item.remove()
+      active.addChild(item)
+    }
+    this.syncLayersToStore()
+    this.syncSelectionToStore()
+    // Cross-layer moves leave the oriented frame's layer bookkeeping stale.
+    this.bumpGeometryVersion()
+    this.pushHistory('Send to Current Layer')
+    this.scope.view.update()
+    return picked.length
+  }
+
+  /**
    * CDR page navigation: activate the previous (-1) or next (+1) artboard
    * and pan its sheet to the center of the view. Returns false at the end
    * of the board list.

@@ -83,6 +83,7 @@
               <el-dropdown-item command="newSublayer">New Sublayer</el-dropdown-item>
               <el-dropdown-item command="collect" :disabled="!store.hasSelection">Collect in New Layer</el-dropdown-item>
               <el-dropdown-item command="releaseLayers" :disabled="!store.hasSelection">Release to Layers</el-dropdown-item>
+              <el-dropdown-item command="sendToLayer" :disabled="!store.hasSelection">Send to Current Layer</el-dropdown-item>
               <el-dropdown-item command="isolate" :disabled="!store.hasSelection">Isolate</el-dropdown-item>
               <el-dropdown-item command="exitIsolation" :disabled="!store.isolationActive">Exit Isolation</el-dropdown-item>
               <el-dropdown-item command="makeCompound" divided :disabled="!store.hasSelection">Make Compound Path</el-dropdown-item>
@@ -2348,6 +2349,15 @@ function onObjectCmd(cmd: string) {
     case 'reflect':
       reflectVisible.value = true
       break
+    case 'sendToLayer': {
+      const n = e.moveSelectionToActiveLayer()
+      store.setStatusMessage(
+        n === 0
+          ? 'Nothing to move to the active layer'
+          : `Moved ${n} item${n === 1 ? '' : 's'} to the active layer`
+      )
+      break
+    }
     case 'rotate90cw':
     case 'rotate90ccw': {
       const pivot = e.selectionReferencePivot() ?? e.getSelectionBounds()?.center
