@@ -1,10 +1,10 @@
 <template>
   <div class="color-bar" title="Click = apply to target · X toggles target · Shift+X swaps">
     <div class="fillstroke">
-      <div class="fs-chip fs-stroke" :style="{ borderColor: '#555', background: strokePreview }" title="Stroke (Alt-click palette applies here)">
+      <div class="fs-chip fs-stroke" :style="{ borderColor: '#555', background: strokePreview }" title="Stroke (double-click = custom color)" @dblclick="pickCustom(true)">
         <span>S</span>
       </div>
-      <div class="fs-chip fs-fill" :style="{ background: fillPreview }" title="Fill (click palette applies here)">
+      <div class="fs-chip fs-fill" :style="{ background: fillPreview }" title="Fill (double-click = custom color)" @dblclick="pickCustom(false)">
         <span>F</span>
       </div>
       <el-button size="small" class="swap-btn" title="Swap fill and stroke (Shift+X)" @click="swap">⇄</el-button>
@@ -20,11 +20,12 @@
     <div class="recent">
       <div v-for="c in store.recentColors.slice(0, 8)" :key="'r' + c" class="chip chip-sm" :style="{ background: c }" :title="c" @click="apply(c, false)" />
     </div>
+    <input ref="colorInput" type="color" class="color-input" @change="onCustomPicked" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, inject, type Ref } from 'vue'
+import { computed, inject, ref, type Ref } from 'vue'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
 
@@ -39,6 +40,23 @@ const palette = [
   '#00ff00', '#00ffff', '#0080ff', '#0000ff', '#8000ff', '#ff00ff',
   '#808080', '#c0c0c0', '#804000', '#4a90d9',
 ]
+
+// Hidden native picker behind the fill/stroke chips (double-click).
+const colorInput = ref<HTMLInputElement | null>(null)
+let pickTarget: 'fill' | 'stroke' = 'fill'
+function pickCustom(toStroke: boolean) {
+  pickTarget = toStroke ? 'stroke' : 'fill'
+  const input = colorInput.value
+  if (!input) return
+  const current = toStroke ? store.style.strokeColor : store.style.fillColor
+  input.value = typeof current === 'string' && /^#[0-9a-fA-F]{6}$/.test(current) ? current : '#ffffff'
+  input.click()
+}
+function onCustomPicked() {
+  const input = colorInput.value
+  if (!input || !/^#[0-9a-fA-F]{6}$/.test(input.value)) return
+  apply(input.value, pickTarget === 'stroke')
+}
 
 const fillPreview = computed(() => store.style.gradient ? 'linear-gradient(135deg,#000,#fff)' : (store.style.fillColor ?? 'repeating-conic-gradient(#c9c9c9 0% 25%, #fff 0% 50%) 0 0 / 8px 8px'))
 const strokePreview = computed(() => store.style.strokeColor ?? 'repeating-conic-gradient(#c9c9c9 0% 25%, #fff 0% 50%) 0 0 / 8px 8px')
@@ -112,6 +130,13 @@ function swap() {
 .chip-sm { width: 14px; height: 14px; }
 .chip:hover { outline: 1px solid #fff; }
 .chip-none { display: flex; align-items: center; justify-content: center; background: #fff; color: #c00; font-weight: 700; font-size: 12px; }
+.color-input {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
 .color-bar :deep(.el-button--small) { background: #333; border: 1px solid #4a4a4a; color: #d5d5d5; height: 22px; padding: 0 8px; font-size: 11px; }
 .color-bar :deep(.el-button--small.el-button--primary) { background: #2f6fbf; border-color: #2f6fbf; color: #fff; }
 .color-bar::-webkit-scrollbar { height: 4px; }
