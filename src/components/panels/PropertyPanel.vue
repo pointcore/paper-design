@@ -1597,6 +1597,7 @@ function onSkewChange() {
   if (!pivot) return
   e.skewSelection(skewX, skewY, pivot)
   e.pushHistory('Skew')
+  e.stampSelectionFrame()
 }
 
 function onFlipH() {

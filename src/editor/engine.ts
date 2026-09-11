@@ -3518,6 +3518,9 @@ export class EditorEngine {
     }
     this.reflowTextsForItems(items)
     this.scope.view.update()
+    // Skew is non-rigid: the oriented selection frame cannot track it, so
+    // invalidate the frame like any other untracked geometry change.
+    this.bumpGeometryVersion()
   }
 
   /**
