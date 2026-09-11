@@ -4865,11 +4865,11 @@ export class EditorEngine {
    * history and save/reload round-trips. Selection and history land once
    * the pixels load.
    */
-  placeImage(dataUrl: string): void {
+  placeImage(dataUrl: string, at?: paper.Point): void {
     const raster = new this.scope.Raster({ source: dataUrl }) as paper.Raster
     this.getActiveLayer().addChild(raster)
     raster.onLoad = () => {
-      raster.position = this.scope.view.center.clone()
+      raster.position = (at ?? this.scope.view.center).clone()
       raster.data.id = this.genId()
       raster.data.isUserItem = true
       this.selectItem(raster)
@@ -6209,6 +6209,76 @@ export class EditorEngine {
       this.scope.view.update()
     }
     return changed
+  }
+
+  /**
+   * Thread selected area frames left-to-right (AI thread-text parity):
+   * each frame links to the next, replacing existing links on the chain.
+   * Needs 2+ unlocked area frames. One history entry.
+   */
+  threadSelectedFrames(): number {
+    const scope = this.scope
+    const frames = this.getSelection().filter(
+      (item) =>
+        !(item as any).locked &&
+        item.parent &&
+        item instanceof scope.PointText &&
+        (item as any).data?.textMode === 'area' &&
+        !(item as any).data?.annotation
+    ) as paper.PointText[]
+    if (frames.length < 2) return 0
+    const ordered = frames.slice().sort((a, b) => {
+      const fa = (a as any).data?.frame
+      const fb = (b as any).data?.frame
+      const ax = Number(fa?.x) || 0
+      const bx = Number(fb?.x) || 0
+      if (ax !== bx) return ax - bx
+      return (Number(fa?.y) || 0) - (Number(fb?.y) || 0)
+    })
+    // Detach the chain members first so no stale cross-links survive.
+    for (const frame of ordered) {
+      const data = (frame as any).data ?? ((frame as any).data = {})
+      if (typeof data.id !== 'string' || !data.id) data.id = this.genId()
+      for (const id of [data.threadNext, data.threadPrev]) {
+        if (typeof id !== 'string' || !id) continue
+        const other = this.getItemById(id) as any
+        if (!other?.data) continue
+        if (other.data.threadNext === data.id) delete other.data.threadNext
+        if (other.data.threadPrev === data.id) delete other.data.threadPrev
+      }
+      delete data.threadNext
+      delete data.threadPrev
+    }
+    for (let i = 0; i + 1 < ordered.length; i++) {
+      const a = (ordered[i] as any).data
+      const b = (ordered[i + 1] as any).data
+      a.threadNext = b.id
+      b.threadPrev = a.id
+    }
+    this.pushHistory('Thread Text')
+    this.scope.view.update()
+    return ordered.length
+  }
+
+  /**
+   * Jump the selection along a thread chain (prev/next frame). Needs a
+   * single selected area frame with that link. No history (selection).
+   */
+  selectThreadNeighbor(direction: 'next' | 'prev'): boolean {
+    const scope = this.scope
+    const items = this.getSelection()
+    if (items.length !== 1) return false
+    const item = items[0]
+    if (!(item instanceof scope.PointText) || (item as any).data?.textMode !== 'area') return false
+    const id = (item as any).data?.[direction === 'next' ? 'threadNext' : 'threadPrev']
+    if (typeof id !== 'string' || !id) return false
+    const other = this.getItemById(id)
+    if (!other) return false
+    this.clearSelection()
+    other.selected = true
+    this.syncSelectionToStore()
+    this.scope.view.update()
+    return true
   }
 
   /**

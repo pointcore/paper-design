@@ -1156,6 +1156,27 @@ const exportForm = reactive({
   area: 'artwork' as RasterExportArea,
   quality: 0.92,
 })
+try {
+  const raw = localStorage.getItem('vve.export')
+  if (raw) {
+    const saved = JSON.parse(raw) as Partial<typeof exportForm>
+    if (saved.format === 'png' || saved.format === 'jpeg' || saved.format === 'webp') {
+      exportForm.format = saved.format
+    }
+    if (saved.scale === 1 || saved.scale === 2 || saved.scale === 3) exportForm.scale = saved.scale
+    if (saved.area === 'artwork' || saved.area === 'selection' || saved.area === 'page') {
+      exportForm.area = saved.area
+    }
+    if (saved.quality === 0.92 || saved.quality === 0.75 || saved.quality === 0.55) {
+      exportForm.quality = saved.quality
+    }
+  }
+} catch { /* private mode: defaults stand */ }
+function persistExportForm() {
+  try {
+    localStorage.setItem('vve.export', JSON.stringify(exportForm))
+  } catch { /* private mode */ }
+}
 const exportQualities = [
   { value: 0.92, label: 'High' },
   { value: 0.75, label: 'Medium' },
@@ -1475,6 +1496,7 @@ function onExportRasterConfirm() {
     }
     downloadHref(dataUrl, `export.${exportForm.format}`)
     exportVisible.value = false
+    persistExportForm()
     store.setStatusMessage(`Raster exported (${exportForm.format.toUpperCase()} ${exportForm.scale}x)`)
   } catch (err) {
     store.setStatusMessage('Raster export failed')

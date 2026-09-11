@@ -353,7 +353,7 @@
         </div>
         <div v-show="open.text" class="prop-body">
           <div class="prop-row">
-            <el-select v-model="fontFamily" size="small" class="flex-ctl" @change="onFontFamilyChange">
+            <el-select v-model="fontFamily" size="small" class="flex-ctl" filterable allow-create default-first-option placeholder="Font family" @change="onFontFamilyChange">
               <el-option v-for="f in fontFamilies" :key="f" :label="f" :value="f" />
             </el-select>
           </div>
@@ -415,6 +415,11 @@
               <el-button size="small" plain class="wide-btn" @click="onFlowOverflow">Flow Overflow to New Frame</el-button>
             </div>
             <div v-if="threadHint" class="ai-desc">{{ threadHint }}</div>
+            <div class="prop-row">
+              <el-button size="small" class="grid-btn" title="Thread the selected area frames left-to-right" @click="onThreadFrames">Thread</el-button>
+              <el-button size="small" class="icon-btn" title="Select previous frame" @click="onThreadNav('prev')">←</el-button>
+              <el-button size="small" class="icon-btn" title="Select next frame" @click="onThreadNav('next')">→</el-button>
+            </div>
           </div>
         </div>
       </div>
@@ -1209,6 +1214,25 @@ function onFlowOverflow() {
   }
   store.setStatusMessage('Overflow flowed to a new linked frame')
   syncAreaFromSelection()
+}
+
+function onThreadFrames() {
+  const e = getEngine()
+  if (!e) return
+  if (e.threadSelectedFrames() < 2) {
+    store.setStatusMessage('Thread needs 2+ selected area frames')
+    return
+  }
+  store.setStatusMessage('Frames threaded left-to-right')
+  syncAreaFromSelection()
+}
+
+function onThreadNav(dir: 'prev' | 'next') {
+  const e = getEngine()
+  if (!e) return
+  if (!e.selectThreadNeighbor(dir)) {
+    store.setStatusMessage('No linked frame that way')
+  }
 }
 
 function onFillChange(val: string) {

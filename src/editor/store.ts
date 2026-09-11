@@ -175,6 +175,8 @@ export const useEditorStore = defineStore('editor', {
     starRatio: 0.5,
     /** Brush/blob/eraser footprint in screen px ([ ] resize, ControlBar edits) */
     brushSize: 20,
+    /** Calligraphic nib angle in degrees (0-90, ControlBar edits) */
+    brushAngle: 45,
     /** Pencil simplify tolerance in document units at 100% zoom */
     pencilSmooth: 2.5,
     /** Magic-wand fill tolerance in RGB distance (0 = exact match) */
@@ -541,6 +543,9 @@ export const useEditorStore = defineStore('editor', {
     },
     setBrushSize(n: number) {
       if (Number.isFinite(n)) this.brushSize = Math.min(200, Math.max(1, Math.round(n)))
+    },
+    setBrushAngle(n: number) {
+      if (Number.isFinite(n)) this.brushAngle = Math.min(90, Math.max(0, Math.round(n)))
     },
     setPencilSmooth(n: number) {
       if (Number.isFinite(n)) this.pencilSmooth = Math.min(10, Math.max(0.5, Math.round(n * 10) / 10))

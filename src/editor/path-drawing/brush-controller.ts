@@ -15,7 +15,7 @@ import { ringCursor, setCanvasCursor } from '../cursors'
 
 /** Fallback nib width in screen pixels (store.brushSize wins). */
 const NIB_SCREEN_SIZE = 20
-/** Nib direction in degrees (flat nib resting angle). */
+/** Fallback nib direction in degrees (store.brushAngle wins). */
 const NIB_ANGLE = 45
 /** Hairline floor as a fraction of the full half-width. */
 const HAIRLINE_FLOOR = 0.15
@@ -187,9 +187,11 @@ export class BrushController {
     const engine = this.engine
     if (!engine || points.length < 2) return null
     const scope = engine.scope
+    const angle = Number((engine.store as any).brushAngle)
+    const nibDeg = Number.isFinite(angle) ? Math.min(90, Math.max(0, angle)) : NIB_ANGLE
     const nibDir = new scope.Point(
-      Math.cos((NIB_ANGLE * Math.PI) / 180),
-      Math.sin((NIB_ANGLE * Math.PI) / 180)
+      Math.cos((nibDeg * Math.PI) / 180),
+      Math.sin((nibDeg * Math.PI) / 180)
     )
     const left: paper.Point[] = []
     const right: paper.Point[] = []

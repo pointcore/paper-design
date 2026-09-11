@@ -27,7 +27,7 @@
       <div class="cb-group">
         <el-button v-for="m in textModes" :key="m.name" size="small" class="cb-btn" :type="store.tool === m.name ? 'primary' : ''" :title="m.tip" @click="setTool(m.name)">{{ m.text }}</el-button>
       </div>
-      <el-select v-model="fontFamily" size="small" class="cb-ctl" style="width: 130px" @change="onFontFamily">
+      <el-select v-model="fontFamily" size="small" class="cb-ctl" style="width: 130px" filterable allow-create default-first-option @change="onFontFamily">
         <el-option v-for="f in fonts" :key="f" :label="f" :value="f" />
       </el-select>
       <el-input-number v-model="fontSize" :min="1" :max="400" size="small" style="width: 84px" title="Font size" @change="onFontSize" />
@@ -110,6 +110,10 @@
       <template v-if="isBrushTool">
         <span class="cb-label">Size</span>
         <el-input-number v-model="brushSize" :min="1" :max="200" size="small" style="width: 76px" title="Brush footprint ([ ] resize)" @change="onBrushSize" />
+      </template>
+      <template v-if="store.tool === 'brush'">
+        <span class="cb-label">Nib</span>
+        <el-input-number v-model="brushAngle" :min="0" :max="90" size="small" style="width: 72px" title="Nib angle" @change="onBrushAngle" />
       </template>
       <template v-if="store.tool === 'pencil'">
         <span class="cb-label">Smooth</span>
@@ -231,6 +235,7 @@ const gridCols = ref((store as any).gridCols ?? 4)
 const strokeWidth = ref(store.style.strokeWidth)
 const opacityPct = ref(Math.round(store.style.opacity * 100))
 const brushSize = ref(Number((store as any).brushSize ?? 20))
+const brushAngle = ref(Number((store as any).brushAngle ?? 45))
 const pencilSmooth = ref(Number((store as any).pencilSmooth ?? 2.5))
 const wandTolerance = ref(Number((store as any).wandTolerance ?? 0))
 const gradientAngle = ref(Math.round(store.style.gradient?.angle ?? 0))
@@ -247,6 +252,7 @@ watch(() => store.charStyle.fontFamily, (v) => { fontFamily.value = v })
 watch(() => store.charStyle.fontSize, (v) => { fontSize.value = v })
 watch(() => store.style.strokeWidth, (v) => { strokeWidth.value = v })
 watch(() => (store as any).brushSize, (v) => { brushSize.value = Number(v) || 20 })
+watch(() => (store as any).brushAngle, (v) => { brushAngle.value = Number(v) ?? 45 })
 watch(() => (store as any).pencilSmooth, (v) => { pencilSmooth.value = Number(v) || 2.5 })
 watch(() => (store as any).wandTolerance, (v) => { wandTolerance.value = Number(v) || 0 })
 watch(() => store.style.gradient?.angle, (v) => { gradientAngle.value = Math.round(v ?? 0) })
@@ -351,6 +357,11 @@ function onBrushSize(v: number | undefined) {
   try {
     ctrl?.refreshCursor?.()
   } catch { /* cursor repaint must never break panel edits */ }
+}
+function onBrushAngle(v: number | undefined) {
+  if (v === undefined) return
+  ;(store as any).setBrushAngle?.(v)
+  brushAngle.value = Number((store as any).brushAngle ?? 45)
 }
 function onWandTolerance(v: number | undefined) {
   if (v === undefined) return

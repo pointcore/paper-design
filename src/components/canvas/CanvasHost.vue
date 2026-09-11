@@ -577,10 +577,26 @@ function onDragOver(e: DragEvent) {
   if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
 }
 
+/** Drop position in document coords (images land there; SVG keeps file coords). */
+function dropPoint(e: DragEvent): paper.Point | undefined {
+  if (!engine || !containerRef.value) return undefined
+  const rect = containerRef.value.getBoundingClientRect()
+  const offset = store.view.rulersVisible ? RULER_SIZE : 0
+  const x = e.clientX - rect.left - offset
+  const y = e.clientY - rect.top - offset
+  if (x < 0 || y < 0 || x > rect.width - offset || y > rect.height - offset) return undefined
+  try {
+    return engine.scope.view.viewToProject(new engine.scope.Point(x, y))
+  } catch {
+    return undefined
+  }
+}
+
 async function onDropFiles(e: DragEvent) {
   if (!engine) return
   const files = [...(e.dataTransfer?.files ?? [])]
   if (files.length === 0) return
+  const at = dropPoint(e)
   let imported = 0
   for (const file of files) {
     try {
@@ -592,7 +608,7 @@ async function onDropFiles(e: DragEvent) {
           store.setStatusMessage(`"${file.name}" too large (15 MB max)`)
           continue
         }
-        engine.placeImage(await readFileAsDataURL(file))
+        engine.placeImage(await readFileAsDataURL(file), at)
         imported++
       }
     } catch {
