@@ -26,6 +26,15 @@ export class LassoController {
     applyToolCursor(this.engine.canvas, 'lasso')
   }
 
+  /**
+   * Tool switch: the paper Tool is replaced so the loop's mouse-up never
+   * arrives — drop the loop instead of finishing it (replaying without the
+   * live Shift/Alt modifiers would lose the add/remove intent).
+   */
+  deactivate() {
+    if (this.isDrawing) this.cancelLoop()
+  }
+
   private setupTool() {
     const engine = this.engine
     if (!engine) return

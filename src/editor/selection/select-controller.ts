@@ -112,6 +112,10 @@ export class SelectController {
   // Direct-select anchor editing state.
   private mode: EditMode = 'select'
   private grab: 'none' | 'anchor' | 'anchor-group' | 'handle' | 'segment' | 'object' | 'guide' | 'transform' = 'none'
+  /** Mouse-up closure, replayed by deactivate when a drag is orphaned. */
+  private mouseUpRef: ((event: paper.ToolEvent) => void) | null = null
+  /** Last pointer position seen by a gesture (synthetic mouse-up anchor). */
+  private lastPoint: paper.Point | null = null
   private grabSegmentIndex = -1
   private grabIsIn = false
   private grabGuide: paper.Path | null = null
@@ -445,6 +449,22 @@ export class SelectController {
     return (event as any).event as MouseEvent
   }
 
+  /**
+   * Tool switch: the paper Tool is replaced so the drag's mouse-up never
+   * arrives — replay the recorded mouse-up so an orphaned object move /
+   * transform / marquee / guide drag still commits its history and resets
+   * its state. The last gesture point stands in for the live event (only
+   * guide finishing reads it).
+   */
+  deactivate() {
+    if (this.grab === 'none' && !this.isMarquee) return
+    const ref = this.mouseUpRef
+    this.mouseUpRef = null
+    if (!ref || !this.engine) return
+    const point = this.lastPoint ?? new this.engine.scope.Point(0, 0)
+    ref({ point } as unknown as paper.ToolEvent)
+  }
+
   private setupTool() {
     const engine = this.engine
     if (!engine) return
@@ -460,6 +480,7 @@ export class SelectController {
     scope.tool.onMouseDown = (event: paper.ToolEvent) => {
       const native = this.getNativeEvent(event)
       if (native.button === 1 || native.button === 2) return
+      this.lastPoint = event.point.clone()
 
       // Double-clicking a text item hands it over to the text tool for
       // in-place editing; double-clicking a group isolates it instead.
@@ -677,6 +698,7 @@ export class SelectController {
 
     scope.tool.onMouseDrag = (event: paper.ToolEvent) => {
       const store = engine.store
+      this.lastPoint = event.point.clone()
       if (this.grab === 'transform') {
         this.dragTransform(event.point, event.modifiers)
       } else if (this.grab === 'guide' && this.grabGuide) {
@@ -697,7 +719,7 @@ export class SelectController {
       scope.view.update()
     }
 
-    scope.tool.onMouseUp = (event: paper.ToolEvent) => {
+    const finishMouseUp = (event: paper.ToolEvent) => {
       if (this.grab === 'transform') {
         if (this.transformMoved) {
           engine.pushHistory(this.transformKind === 'rotate' ? 'Rotate' : 'Scale')
@@ -747,6 +769,8 @@ export class SelectController {
       engine.syncSelectionToStore()
       this.refreshChrome()
     }
+    this.mouseUpRef = finishMouseUp
+    scope.tool.onMouseUp = finishMouseUp
 
     scope.tool.onMouseMove = (event: paper.ToolEvent) => {
       engine.store.setCursorPos(event.point.x, event.point.y)
