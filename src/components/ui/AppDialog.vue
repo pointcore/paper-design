@@ -270,6 +270,16 @@ function onClose() {
 }
 
 function onKeydown(event: KeyboardEvent) {
+  // Enter confirms footer dialogs from any body input (desktop convention).
+  // Textareas keep newlines; el-select uses Enter for its own list.
+  if (
+    event.key === "Enter" &&
+    props.showFooter &&
+    !(event.target as HTMLElement | null)?.closest?.("textarea, .el-select")
+  ) {
+    event.preventDefault();
+    onConfirm();
+  }
   emit("keydown", event);
 }
 

@@ -804,7 +804,7 @@
             <span class="setting-name">Filename</span>
             <span class="setting-desc">Saved as .vec.json</span>
           </div>
-          <el-input v-model="saveName" size="small" placeholder="project" @keyup.enter="onSaveConfirm" />
+          <el-input v-model="saveName" size="small" placeholder="project" />
         </div>
       </div>
     </AppDialog>
