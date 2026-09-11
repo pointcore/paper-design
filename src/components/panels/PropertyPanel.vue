@@ -394,6 +394,8 @@
           <div class="prop-row">
             <span class="prop-label-sm">Base</span>
             <el-input-number v-model="baselineValue" :min="-100" :max="100" size="small" controls-position="right" @change="onBaselineChange" />
+            <el-button size="small" class="fmt-btn" title="Superscript (+33% size)" @click="onBaselineQuick(1)">↑</el-button>
+            <el-button size="small" class="fmt-btn" title="Subscript (−33% size)" @click="onBaselineQuick(-1)">↓</el-button>
             <span class="prop-label-sm">H%</span>
             <el-input-number v-model="hScaleValue" :min="10" :max="400" size="small" controls-position="right" @change="onScaleChange" />
           </div>
@@ -1059,6 +1061,12 @@ function onBaselineChange(val: number | undefined) {
   e?.getSelection().forEach((item) => { (item as any).data = { ...((item as any).data ?? {}), baselineShift: val } })
   e?.scope.view.update()
   if (store.hasSelection) e?.pushHistory('Baseline Shift')
+}
+
+function onBaselineQuick(dir: 1 | -1) {
+  const step = Math.round(((Number(store.charStyle.fontSize) || 12) / 3) * 10) / 10
+  baselineValue.value = Math.round((baselineValue.value + dir * step) * 10) / 10
+  onBaselineChange(baselineValue.value)
 }
 
 function onScaleChange(val: number | undefined) {

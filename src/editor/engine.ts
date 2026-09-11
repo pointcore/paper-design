@@ -8,7 +8,7 @@ import { createDefaultStyle } from './store'
 import { cursorForTool } from './cursors'
 import { gradientAngleFromVector, linearGradientEndpoints, normalizeAngleDeg } from './geometry'
 import { changeCaseText } from './text/text-case'
-import { colorDistanceRgb, isOutOfCmykGamut, parseCssColor, shiftCssColor } from './color'
+import { colorDistanceRgb, isOutOfCmykGamut, parseCssColor, rgbToCmyk, shiftCssColor } from './color'
 import { parseProjectFile } from './project-file'
 import type { EditorStore } from './store-types'
 
@@ -3181,6 +3181,44 @@ export class EditorEngine {
   }
 
   /**
+   * Radial repeat (clock faces, badges, rosettes): `count` rotated copies
+   * at `angleDeg` steps about the reference pivot. Copies become the new
+   * selection; one history entry. Returns copies made.
+   */
+  radialRepeat(count: number, angleDeg: number): number {
+    const n = Math.min(120, Math.max(1, Math.round(Number(count) || 0)))
+    if (!Number.isFinite(angleDeg) || Math.abs(angleDeg) < 1e-9 || n < 1) return 0
+    const angle = ((angleDeg % 360) + 360) % 360
+    if (angle < 1e-9) return 0
+    const sources = this.getSelection().filter((item) => !item.locked && item.parent)
+    if (sources.length === 0) return 0
+    const pivot = this.selectionReferencePivot() ?? this.getSelectionBounds()?.center
+    if (!pivot) return 0
+    const made: paper.Item[] = []
+    for (const item of sources) {
+      const parent = item.parent ?? this.getActiveLayer()
+      const at = parent.children.indexOf(item as any)
+      for (let i = 1; i <= n; i++) {
+        const clone = this.freshClone(item)
+        clone.rotate(angle * i, pivot)
+        parent.insertChild(Math.min(at + i, parent.children.length), clone as any)
+        this.refreshItemGradient(clone)
+        made.push(clone)
+      }
+    }
+    if (made.length === 0) return 0
+    this.clearSelection()
+    made.forEach((item) => {
+      item.selected = true
+    })
+    this.syncSelectionToStore()
+    this.reflowTextsForItems(made)
+    this.pushHistory('Radial Repeat')
+    this.scope.view.update()
+    return made.length
+  }
+
+  /**
    * Skew every unlocked selected item by degrees around a pivot (default:
    * united selection bounds center). Callers record history.
    */
@@ -6093,6 +6131,31 @@ export class EditorEngine {
   }
 
   /**
+   * Inset margin guides on a board (print-layout staple): two vertical +
+   * two horizontal guides at `margin` inside the sheet. Respects the
+   * guides lock. Returns guides created.
+   */
+  addMarginGuides(boardId: string, margin: number): number {
+    if (this.store.view.guidesLocked) return 0
+    const board = this.store.artboards.find((b) => b.id === boardId)
+    if (!board || !(board.width > 0) || !(board.height > 0)) return 0
+    const m = Number.isFinite(margin) ? Math.min(Math.min(board.width, board.height) / 2 - 1, Math.max(0, margin)) : 0
+    if (!(m > 0)) return 0
+    let made = 0
+    const specs: Array<[number, GuideOrientation]> = [
+      [board.x + m, 'vertical'],
+      [board.x + board.width - m, 'vertical'],
+      [board.y + m, 'horizontal'],
+      [board.y + board.height - m, 'horizontal'],
+    ]
+    for (const [pos, orientation] of specs) {
+      if (this.createGuide(pos, orientation)) made++
+    }
+    if (made > 0) this.pushHistory('Add Margin Guides')
+    return made
+  }
+
+  /**
    * UPPER / lower / Title Case selected point text (AI Change Case
    * parity, annotation labels excluded). Returns runs changed.
    */
@@ -6201,32 +6264,51 @@ export class EditorEngine {
 
   /**
    * Text runs whose content contains the query (AI Find parity).
-   * Empty queries match nothing; matching is case-sensitive on demand.
+   * Empty queries match nothing; matching is case-sensitive and
+   * whole-word on demand.
    */
-  findText(query: string, matchCase = false): paper.PointText[] {
+  findText(query: string, matchCase = false, wholeWord = false): paper.PointText[] {
     if (!query) return []
-    const needle = matchCase ? query : query.toLowerCase()
-    return this.allTextRuns().filter((item) => {
-      const content = String((item as any).content ?? '')
+    const test = (content: string): boolean => {
+      if (wholeWord) {
+        const flags = matchCase ? 'g' : 'gi'
+        try {
+          return new RegExp(`\\b${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, flags).test(content)
+        } catch {
+          return false
+        }
+      }
+      const needle = matchCase ? query : query.toLowerCase()
       return matchCase ? content.includes(needle) : content.toLowerCase().includes(needle)
-    })
+    }
+    return this.allTextRuns().filter((item) => test(String((item as any).content ?? '')))
   }
 
   /**
    * Replace the query across selected text runs (AI Change/Change All
    * parity). Returns runs changed; one history entry.
    */
-  replaceText(find: string, replace: string, matchCase = false): number {
+  replaceText(find: string, replace: string, matchCase = false, wholeWord = false): number {
     if (!find) return 0
     const scope = this.scope
+    const pattern = wholeWord
+      ? new RegExp(`\\b${find.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, matchCase ? 'g' : 'gi')
+      : null
     let changed = 0
     for (const item of this.getSelection()) {
       if ((item as any).locked || !(item instanceof scope.PointText)) continue
       if ((item as any).data?.annotation) continue
       const before = String((item as any).content ?? '')
-      const after = matchCase
-        ? before.split(find).join(replace)
-        : before.replace(new RegExp(find.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), replace)
+      let after = before
+      try {
+        after = pattern
+          ? before.replace(pattern, replace)
+          : matchCase
+            ? before.split(find).join(replace)
+            : before.replace(new RegExp(find.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), replace)
+      } catch {
+        continue
+      }
       if (after !== before) {
         ;(item as any).content = after
         changed++
@@ -6257,9 +6339,9 @@ export class EditorEngine {
   }
 
   /** One preflight finding (print-readiness check). */
-  preflight(): Array<{ kind: 'overflow' | 'gamut' | 'dpi' | 'empty-layer'; message: string; itemId: string }> {
+  preflight(): Array<{ kind: 'overflow' | 'gamut' | 'tac' | 'small' | 'hairline' | 'dpi' | 'empty-layer'; message: string; itemId: string }> {
     const scope = this.scope
-    const out: Array<{ kind: 'overflow' | 'gamut' | 'dpi' | 'empty-layer'; message: string; itemId: string }> = []
+    const out: Array<{ kind: 'overflow' | 'gamut' | 'tac' | 'small' | 'hairline' | 'dpi' | 'empty-layer'; message: string; itemId: string }> = []
     const labelOf = (item: paper.Item): string => {
       const data = (item as any).data ?? {}
       const raw = (item as any).name ?? data.name
@@ -6288,6 +6370,14 @@ export class EditorEngine {
             }
           } catch { /* unreadable frames are not findings */ }
         }
+        const pt = Number((node as any).fontSize) || 0
+        if (pt > 0 && pt < 6) {
+          out.push({
+            kind: 'small',
+            message: `"${labelOf(node)}" is ${Math.round(pt * 10) / 10}pt text (under 6pt)`,
+            itemId: String(data.id ?? ''),
+          })
+        }
         return
       }
       if (node instanceof scope.Raster) {
@@ -6308,10 +6398,32 @@ export class EditorEngine {
         return
       }
       if (node instanceof scope.Path || node instanceof scope.CompoundPath) {
+        const w = Number((node as any).strokeWidth) || 0
+        if ((node as any).strokeColor && w > 0 && w < 0.5) {
+          out.push({
+            kind: 'hairline',
+            message: `"${labelOf(node)}" has a ${w} hairline stroke (under 0.5)`,
+            itemId: String(data.id ?? ''),
+          })
+          return
+        }
         for (const key of ['fillColor', 'strokeColor'] as const) {
           const paint = (node as any)[key]
           if (!paint || paint.gradient) continue
           const css = this.colorToCSS(paint)
+          if (!css) continue
+          const rgba = parseCssColor(css)
+          if (rgba) {
+            const { c, m, y, k } = rgbToCmyk(rgba.r, rgba.g, rgba.b)
+            if (c + m + y + k > 280) {
+              out.push({
+                kind: 'tac',
+                message: `"${labelOf(node)}" totals ${c + m + y + k}% ink (over 280%)`,
+                itemId: String(data.id ?? ''),
+              })
+              return
+            }
+          }
           if (css && isOutOfCmykGamut(css)) {
             out.push({
               kind: 'gamut',

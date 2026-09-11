@@ -73,6 +73,7 @@
               <el-dropdown-item command="outlineStroke" :disabled="!store.hasSelection">Outline Stroke</el-dropdown-item>
               <el-dropdown-item command="offsetPath" :disabled="!store.hasSelection">Offset Path...</el-dropdown-item>
               <el-dropdown-item command="stepRepeat" :disabled="!store.hasSelection">Step and Repeat...</el-dropdown-item>
+              <el-dropdown-item command="radialRepeat" :disabled="!store.hasSelection">Radial Repeat...</el-dropdown-item>
               <el-dropdown-item command="simplifyPath" :disabled="!store.hasSelection">Simplify Path</el-dropdown-item>
               <el-dropdown-item command="addAnchors" :disabled="!store.hasSelection">Add Anchor Points</el-dropdown-item>
               <el-dropdown-item command="roughen" :disabled="!store.hasSelection">Roughen / Zig Zag...</el-dropdown-item>
@@ -398,6 +399,14 @@
           <el-button size="small" :disabled="!store.hasSelection" @click="onGuideAtSelection('horizontal')">H</el-button>
           <el-button size="small" :disabled="!store.hasSelection" @click="onGuideAtSelection('vertical')">V</el-button>
         </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Margins</span>
+            <span class="setting-desc">Inset rect on the active board</span>
+          </div>
+          <el-input-number v-model="marginValue" :min="0" :max="500" size="small" style="width: 100px" />
+          <el-button size="small" @click="onMarginGuides">Add</el-button>
+        </div>
       </div>
     </AppDialog>
 
@@ -462,6 +471,33 @@
           </div>
           <el-input-number v-model="repeatForm.dx" size="small" style="width: 100px" />
           <el-input-number v-model="repeatForm.dy" size="small" style="width: 100px" />
+        </div>
+      </div>
+    </AppDialog>
+
+    <!-- Radial Repeat Dialog (clock faces, badges, rosettes) -->
+    <AppDialog
+      v-model="radialVisible"
+      title="Radial Repeat"
+      :width="360"
+      confirm-text="Apply"
+      cancel-text="Close"
+      @confirm="onRadialConfirm"
+      @cancel="radialVisible = false"
+    >
+      <div class="settings-body app-settings">
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Copies</span>
+          </div>
+          <el-input-number v-model="radialForm.count" :min="1" :max="120" size="small" style="width: 130px" />
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Angle step</span>
+            <span class="setting-desc">Degrees about the reference point</span>
+          </div>
+          <el-input-number v-model="radialForm.angle" :min="-360" :max="360" size="small" style="width: 130px" />
         </div>
       </div>
     </AppDialog>
@@ -589,6 +625,7 @@
             <span class="setting-name">Match case</span>
           </div>
           <el-checkbox v-model="findForm.matchCase" />
+          <el-checkbox v-model="findForm.wholeWord">Whole word</el-checkbox>
           <span class="setting-desc">{{ findCountText }}</span>
         </div>
         <div class="setting-row">
@@ -692,6 +729,10 @@
       </template>
       <div class="settings-body app-settings">
         <div v-if="preflightRows.length === 0" class="setting-desc">No issues — overflow, gamut, image resolution and empty layers all pass.</div>
+        <div v-else class="setting-row">
+          <el-button size="small" @click="selectAllIssues">Select All Flagged</el-button>
+          <span class="setting-desc">{{ preflightRows.length }} finding(s), capped at 50</span>
+        </div>
         <div v-for="(row, i) in preflightRows" :key="i" class="setting-row preflight-row" :class="{ clickable: !!row.itemId }" @click="row.itemId && gotoIssue(row.itemId)">
           <el-tag size="small" :type="preflightTag(row.kind)">{{ preflightKind(row.kind) }}</el-tag>
           <span class="setting-desc">{{ row.message }}</span>
@@ -768,6 +809,18 @@ function onGuideAtSelection(orientation: 'horizontal' | 'vertical') {
   }
   guidesTick.value++
 }
+const marginValue = ref(36)
+function onMarginGuides() {
+  const e = engineRef?.value
+  const board = store.activeArtboard
+  if (!e || !board) return
+  const n = e.addMarginGuides(board.id, Number(marginValue.value) || 0)
+  if (n === 0) {
+    store.setStatusMessage(store.view.guidesLocked ? 'Guides are locked' : 'Margin must fit inside the board')
+    return
+  }
+  guidesTick.value++
+}
 
 const offsetVisible = ref(false)
 const offsetForm = reactive({
@@ -806,6 +859,21 @@ function onRepeatConfirm() {
     return
   }
   repeatVisible.value = false
+}
+
+const radialVisible = ref(false)
+const radialForm = reactive({ count: 5, angle: 60 })
+function onRadialConfirm() {
+  const e = engineRef?.value
+  if (!e) {
+    radialVisible.value = false
+    return
+  }
+  if (e.radialRepeat(Number(radialForm.count), Number(radialForm.angle)) === 0) {
+    store.setStatusMessage('Radial Repeat needs artwork and a non-zero angle')
+    return
+  }
+  radialVisible.value = false
 }
 
 const roughenVisible = ref(false)
@@ -896,7 +964,7 @@ function onImageConfirm() {
 }
 
 const findVisible = ref(false)
-const findForm = reactive({ find: '', replace: '', matchCase: false })
+const findForm = reactive({ find: '', replace: '', matchCase: false, wholeWord: false })
 const findIndex = ref(0)
 const findTick = ref(0)
 const findMatches = computed(() => {
@@ -906,7 +974,7 @@ const findMatches = computed(() => {
   const e = engineRef?.value
   if (!e || !findForm.find) return []
   try {
-    return e.findText(findForm.find, findForm.matchCase)
+    return e.findText(findForm.find, findForm.matchCase, findForm.wholeWord)
   } catch {
     return []
   }
@@ -1022,7 +1090,7 @@ function onSavedSelDelete(id: string) {
 function replaceOne() {
   const e = engineRef?.value
   if (!e || !findForm.find) return
-  const n = e.replaceText(findForm.find, findForm.replace, findForm.matchCase)
+  const n = e.replaceText(findForm.find, findForm.replace, findForm.matchCase, findForm.wholeWord)
   store.setStatusMessage(n > 0 ? `Replaced in ${n} run${n === 1 ? '' : 's'}` : 'No replacement in the selection')
   findTick.value++
 }
@@ -1034,7 +1102,7 @@ function replaceAll() {
     item.selected = true
   })
   e.syncSelectionToStore()
-  const n = e.replaceText(findForm.find, findForm.replace, findForm.matchCase)
+  const n = e.replaceText(findForm.find, findForm.replace, findForm.matchCase, findForm.wholeWord)
   store.setStatusMessage(n > 0 ? `Replaced in ${n} run${n === 1 ? '' : 's'}` : 'Nothing replaced')
   findTick.value++
 }
@@ -1059,12 +1127,25 @@ function preflightKind(kind: string): string {
   switch (kind) {
     case 'overflow': return 'Overflow'
     case 'gamut': return 'Gamut'
+    case 'tac': return 'Ink'
+    case 'small': return 'Type'
+    case 'hairline': return 'Stroke'
     case 'dpi': return 'DPI'
     default: return 'Layer'
   }
 }
 function preflightTag(kind: string): 'danger' | 'warning' | 'info' {
-  return kind === 'overflow' || kind === 'dpi' ? 'danger' : kind === 'gamut' ? 'warning' : 'info'
+  if (kind === 'overflow' || kind === 'dpi' || kind === 'tac') return 'danger'
+  if (kind === 'gamut' || kind === 'hairline' || kind === 'small') return 'warning'
+  return 'info'
+}
+function selectAllIssues() {
+  const e = engineRef?.value
+  if (!e) return
+  const ids = preflightRows.value.map((r) => r.itemId).filter(Boolean)
+  if (ids.length === 0) return
+  const n = e.selectByIds(ids)
+  store.setStatusMessage(`Selected ${n} flagged object${n === 1 ? '' : 's'}`)
 }
 function gotoIssue(id: string) {
   engineRef?.value?.selectItemById(id)
@@ -1885,6 +1966,9 @@ function onObjectCmd(cmd: string) {
       break
     case 'stepRepeat':
       repeatVisible.value = true
+      break
+    case 'radialRepeat':
+      radialVisible.value = true
       break
     case 'addAnchors':
       if (e.addAnchorPoints() === 0) {
