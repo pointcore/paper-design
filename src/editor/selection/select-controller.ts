@@ -584,6 +584,18 @@ export class SelectController {
       // Not clicking a guide -> clear guide selection.
       this.guides.clearSelection()
 
+      // Ctrl+click cycles the selection through the objects stacked under
+      // the cursor (AI select-behind parity; Alt stays duplicate, Shift
+      // stays add-to-selection).
+      if (
+        (event.modifiers.control || event.modifiers.command) &&
+        !event.modifiers.shift &&
+        !event.modifiers.alt
+      ) {
+        this.cycleSelectBehind(event.point)
+        return
+      }
+
       // In select mode, bounding-box transform handles take priority over
       // object hit testing so scale / rotate drags start reliably.
       if (this.mode === 'select' && this.tryGrabTransformHandle(event)) {
@@ -2666,6 +2678,42 @@ export class SelectController {
    * Topmost selectable artwork under a point. Editing chrome, guide lines
    * and locked items never block: the search continues underneath them.
    */
+  /**
+   * Ctrl+click (AI select-behind parity): walk the unlocked user items
+   * stacked under the point, top first, and select the entry after the
+   * currently selected one — clicking again cycles deeper, wrapping to the
+   * top. No-op when nothing is stacked here.
+   */
+  private cycleSelectBehind(point: paper.Point): void {
+    const engine = this.engine
+    if (!engine) return
+    const scope = engine.scope
+    const hits = engine.project.hitTestAll(point, {
+      fill: true,
+      stroke: true,
+      segments: false,
+      tolerance: 3 / scope.view.zoom,
+    })
+    const stack: paper.Item[] = []
+    for (const hit of hits) {
+      const item = hit.item
+      const data = (item.data as any) ?? {}
+      if (data.isChrome || data.isPreview || data.isGuide || data.isArtboard) continue
+      if ((item as any).locked) continue
+      stack.push(item)
+    }
+    if (stack.length === 0) return
+    const selectedIdx = stack.findIndex((item) => (item as any).selected)
+    const next = stack[(selectedIdx + 1) % stack.length]
+    this.clearAnchorSelection()
+    this.clearCurveSelection()
+    engine.clearSelection()
+    engine.selectItem(next, false)
+    engine.syncSelectionToStore()
+    this.refreshChrome()
+    engine.scope.view.update()
+  }
+
   private hitTest(point: paper.Point): paper.HitResult | null {
     const engine = this.engine
     if (!engine) return null
