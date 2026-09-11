@@ -22,7 +22,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, inject, onMounted, onUnmounted, type Ref } from 'vue'
+import { ref, inject, watch, nextTick, onMounted, onUnmounted, type Ref } from 'vue'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
 
@@ -75,6 +75,14 @@ function ctxDelete() {
     e.pushHistory('Delete Artboard')
   }
 }
+// Keep the active tab inside the strip: PgUp/PgDn navigation can activate
+// boards whose tab is scrolled out of view.
+watch(() => store.activeArtboardId, () => {
+  void nextTick(() => {
+    document.querySelector('.doc-tab.active')?.scrollIntoView({ inline: 'nearest', block: 'nearest' })
+  })
+})
+
 function onDocClick() {
   closeCtx()
 }
