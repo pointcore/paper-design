@@ -17,6 +17,8 @@ import { applyToolCursor } from '../cursors'
 export class TransformController {
   engine: EditorEngine | null = null
   private mode: 'rotate' | 'scale' | 'mirror' = 'rotate'
+  /** Mouse-up closure, replayed by deactivate when a drag is orphaned. */
+  private mouseUpRef: (() => void) | null = null
   private dragging = false
   private pivot: paper.Point | null = null
   private startAngle = 0
@@ -39,6 +41,15 @@ export class TransformController {
     this.accFactor = 1
     applyToolCursor(this.engine.canvas, tool)
     this.setupTool()
+  }
+
+  /**
+   * Tool switch: the paper Tool is replaced so the drag's mouse-up never
+   * arrives — replay the recorded mouse-up so the live rotate/scale still
+   * records its history and resets its flags (mirror is click-atomic).
+   */
+  deactivate() {
+    if (this.dragging) this.mouseUpRef?.()
   }
 
   private setupTool() {
@@ -100,7 +111,7 @@ export class TransformController {
       }
     }
 
-    scope.tool.onMouseUp = () => {
+    const finishDrag = () => {
       if (!this.dragging) return
       this.dragging = false
       if (this.moved) {
@@ -115,6 +126,8 @@ export class TransformController {
       }
       this.moved = false
     }
+    this.mouseUpRef = finishDrag
+    scope.tool.onMouseUp = finishDrag
 
     scope.tool.onMouseMove = (event: paper.ToolEvent) => {
       engine.store.setCursorPos(event.point.x, event.point.y)
