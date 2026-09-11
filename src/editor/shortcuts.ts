@@ -178,6 +178,13 @@ export function handleGlobalKeydown(
       engine?.copySelectedToClipboard()
       engine?.copyToSystemClipboard()?.catch(() => undefined)
       e.preventDefault()
+    } else if (key === 'd' && e.shiftKey) {
+      // AI Transform Again. Ctrl+D is duplicate-in-place here (CDR parity),
+      // so the repeat-transform lives on Ctrl+Shift+D.
+      if (engine && !engine.transformAgain()) {
+        store.setStatusMessage('No transform to repeat')
+      }
+      e.preventDefault()
     } else if (key === 'd') {
       // Duplicate in place claims Ctrl+D (CDR parity); the browser bookmark
       // shortcut never fires from the canvas, like the Ctrl+J download tab.

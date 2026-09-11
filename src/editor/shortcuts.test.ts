@@ -111,6 +111,25 @@ describe('handleGlobalKeydown', () => {
     expect(engine.zoomToSelection).toHaveBeenCalledTimes(1)
   })
 
+  it('repeats the last transform on Ctrl+Shift+D and keeps Ctrl+D as duplicate', () => {
+    const engine = { transformAgain: vi.fn(() => true), duplicateInPlace: vi.fn() } as any
+    handleGlobalKeydown(
+      key({ key: 'd', code: 'KeyD', ctrlKey: true, shiftKey: true, target: null }) as KeyboardEvent,
+      {} as any,
+      engine
+    )
+    expect(engine.transformAgain).toHaveBeenCalledTimes(1)
+    expect(engine.duplicateInPlace).not.toHaveBeenCalled()
+    const failing = { transformAgain: vi.fn(() => false) } as any
+    const store = { setStatusMessage: vi.fn() } as any
+    handleGlobalKeydown(
+      key({ key: 'd', code: 'KeyD', ctrlKey: true, shiftKey: true, target: null }) as KeyboardEvent,
+      store,
+      failing
+    )
+    expect(store.setStatusMessage).toHaveBeenCalledWith('No transform to repeat')
+  })
+
   it('toggles rulers on Ctrl+R and leaves Ctrl+Shift+R to the browser', () => {
     const store = { view: { rulersVisible: false }, updateView: vi.fn() } as any
     handleGlobalKeydown(

@@ -706,6 +706,13 @@ export class SelectController {
       } else if (this.isDragging && this.grab === 'object') {
         this.isDragging = false
         this.reflowEditedPaths()
+        // Total drag delta from the tracked start positions feeds
+        // Transform Again (AI repeats drag moves too).
+        const startPos = this.dragItemStartPositions[0]
+        const endPos = this.dragItems[0]?.position as paper.Point | undefined
+        if (startPos && endPos) {
+          engine.recordTransformMove(endPos.x - startPos.x, endPos.y - startPos.y)
+        }
         engine.pushHistory('Move')
         engine.stampSelectionFrame()
       } else if (this.grab === 'anchor' || this.grab === 'anchor-group' || this.grab === 'handle' || this.grab === 'segment') {

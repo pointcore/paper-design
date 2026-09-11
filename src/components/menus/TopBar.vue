@@ -42,6 +42,7 @@
               <el-dropdown-item command="pasteBack">Paste in Back</el-dropdown-item>
               <el-dropdown-item command="pasteBoards">Paste on All Artboards</el-dropdown-item>
               <el-dropdown-item command="duplicate">Duplicate In Place</el-dropdown-item>
+              <el-dropdown-item command="transformAgain" :disabled="!store.hasSelection">Transform Again</el-dropdown-item>
               <el-dropdown-item command="delete" divided :disabled="!store.hasSelection">Delete</el-dropdown-item>
               <el-dropdown-item command="selectAll" divided>Select All</el-dropdown-item>
               <el-dropdown-item command="invertSelection">Invert Selection</el-dropdown-item>
@@ -2097,6 +2098,9 @@ function onEditCmd(cmd: string) {
     }
     case 'duplicate':
       if (!e.duplicateInPlace()) store.setStatusMessage('Nothing to duplicate')
+      break
+    case 'transformAgain':
+      if (!e.transformAgain()) store.setStatusMessage('No transform to repeat')
       break
     case 'delete': {
       // Direct-select sub-selections delete anchors/curves (keyboard

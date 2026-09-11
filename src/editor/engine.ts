@@ -1980,6 +1980,17 @@ export class EditorEngine {
    */
   geometryVersion = 0
 
+  /**
+   * Last committed selection transform, replayed by transformAgain()
+   * (AI Transform Again parity). Pivots are recorded as explicit points so
+   * replaying against a changed selection keeps the original origin.
+   */
+  private lastTransform:
+    | { kind: 'move'; dx: number; dy: number }
+    | { kind: 'rotate'; angle: number; pivot: paper.Point }
+    | { kind: 'scale'; sx: number; sy: number; pivot: paper.Point }
+    | null = null
+
   /** History entries that provably preserve selection geometry (no reset). */
   private static readonly FRAME_SAFE_HISTORY = new Set([
     'Add Guide', 'Move Guide', 'Delete Guide',
@@ -3130,6 +3141,58 @@ export class EditorEngine {
     this.store.updateTransform({ rotation: (next + 360) % 360 })
     this.reflowTextsForItems(items)
     this.scope.view.update()
+    this.lastTransform = { kind: 'rotate', angle: angleDeg, pivot: center.clone() }
+  }
+
+  /**
+   * Replay the last committed selection transform on the current unlocked
+   * selection (AI Transform Again). Applies the transform and records one
+   * 'Transform Again' history entry. Returns false when nothing has been
+   * recorded or nothing can be transformed.
+   */
+  transformAgain(): boolean {
+    const t = this.lastTransform
+    if (!t) return false
+    const full = this.getSelection()
+    const items = full.filter((item) => !item.locked)
+    if (items.length === 0) return false
+    if (t.kind === 'rotate') {
+      this.rotateSelection(t.angle, t.pivot)
+    } else if (t.kind === 'scale') {
+      this.scaleSelection(t.sx, t.sy, t.pivot)
+    } else {
+      const delta = new this.scope.Point(t.dx, t.dy)
+      items.forEach((item) => {
+        item.position = item.position.add(delta)
+        this.refreshItemGradient(item)
+      })
+      // Same frame bookkeeping as nudgeSelection: pure translation slides
+      // the oriented frame, locked members behind force a rebuild.
+      const selectCtrl = this.controllers.get('select') as { frameTranslated?: (dx: number, dy: number) => void; frameStamped?: () => void; dropFrame?: () => void } | undefined
+      try {
+        if (items.length !== full.length) selectCtrl?.dropFrame?.()
+        else selectCtrl?.frameTranslated?.(t.dx, t.dy)
+      } catch {
+        // Frame bookkeeping must never break document ops.
+      }
+      this.scope.view.update()
+      this.reflowTextsForItems(items)
+      try {
+        selectCtrl?.frameStamped?.()
+      } catch {
+        // Frame bookkeeping must never break document ops.
+      }
+      this.syncSelectionToStore()
+    }
+    this.pushHistory('Transform Again')
+    return true
+  }
+
+  /** Remember a committed whole-selection move delta (drag commit path). */
+  recordTransformMove(dx: number, dy: number): void {
+    if (!Number.isFinite(dx) || !Number.isFinite(dy)) return
+    if (dx === 0 && dy === 0) return
+    this.lastTransform = { kind: 'move', dx, dy }
   }
 
   /**
@@ -3483,6 +3546,7 @@ export class EditorEngine {
     // Position changed with an unchanged id set: refresh the mirrored bounds
     // so the Properties panel does not edit against a pre-nudge anchor.
     this.syncSelectionToStore()
+    this.lastTransform = { kind: 'move', dx, dy }
     return true
   }
 
@@ -3732,6 +3796,7 @@ export class EditorEngine {
     }
     this.reflowTextsForItems(items)
     this.scope.view.update()
+    this.lastTransform = { kind: 'scale', sx, sy, pivot: center.clone() }
   }
 
   /**
