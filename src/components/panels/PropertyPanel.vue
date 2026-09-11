@@ -213,6 +213,7 @@
             <div v-if="gradientType === 'linear'" class="prop-row">
               <span class="prop-label-sm">Angle</span>
               <el-input-number v-model="gradientAngle" :min="0" :max="360" size="small" controls-position="right" @change="onGradientChange" />
+              <el-button size="small" class="icon-btn" title="Reverse gradient direction" @click="onGradientReverse">⇄</el-button>
               <span class="unit">deg</span>
             </div>
             <div class="prop-row" v-for="(stop, index) in gradientStops" :key="index">
@@ -1280,6 +1281,11 @@ function onFillKindChange(kind: 'solid' | 'gradient') {
 
 function onGradientChange() {
   applyGradientToSelection('Change Gradient')
+}
+
+function onGradientReverse() {
+  gradientAngle.value = (Math.round(Number(gradientAngle.value) || 0) + 180) % 360
+  applyGradientToSelection('Reverse Gradient')
 }
 
 function addGradientStop() {

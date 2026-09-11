@@ -40,11 +40,11 @@
              @dragleave="onLayerDragLeave($event)"
              @drop="onLayerDrop($event, layer, displayIndex)"
              @dragend="onDragEnd">
-          <span class="layer-vis" @click.stop="toggleVisibility(layer)">
+          <span class="layer-vis" title="Visibility (Alt-click solos)" @click.stop="toggleVisibility(layer, $event)">
             <el-icon v-if="layer.visible" size="12"><View /></el-icon>
             <el-icon v-else size="12"><Hide /></el-icon>
           </span>
-          <span class="layer-lock" :class="{ locked: layer.locked }" title="Lock layer" @click.stop="toggleLock(layer)">
+          <span class="layer-lock" :class="{ locked: layer.locked }" title="Lock layer (Alt-click locks the rest)" @click.stop="toggleLock(layer, $event)">
             <el-icon v-if="layer.locked" size="12"><Lock /></el-icon>
             <el-icon v-else size="12"><Unlock /></el-icon>
           </span>
@@ -325,11 +325,22 @@ function targetLayer(id: string) {
   )
 }
 
-function toggleVisibility(layer: any) {
+function toggleVisibility(layer: any, e?: MouseEvent) {
+  if (e?.altKey) {
+    getEngine()?.soloUserLayer(layer.id, 'visible')
+    return
+  }
   getEngine()?.setUserLayerVisible(layer.id, !layer.visible)
 }
 
-function toggleLock(layer: any) {
+function toggleLock(layer: any, e?: MouseEvent) {
+  if (e?.altKey) {
+    const engine = getEngine()
+    if (engine?.soloUserLayer(layer.id, 'locked')) {
+      store.setStatusMessage('Locked every other layer (Unlock All restores)')
+    }
+    return
+  }
   getEngine()?.setUserLayerLocked(layer.id, !layer.locked)
 }
 

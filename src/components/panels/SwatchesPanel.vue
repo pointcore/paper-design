@@ -27,6 +27,7 @@
       <div v-for="p in store.stylePresets" :key="p.id" class="style-row" :title="`Apply ${p.name}`" @click="applyStyle(p.id)">
         <span class="style-chip" :style="{ background: styleChip(p.style) }"></span>
         <span class="style-name">{{ p.name }}</span>
+        <el-button size="small" title="Redefine from the current appearance" @click.stop="redefineStyle(p.id)">↻</el-button>
         <el-button size="small" type="danger" plain @click.stop="removeStyle(p.id)">×</el-button>
       </div>
     </div>
@@ -137,6 +138,16 @@ function applyStyle(id: string) {
 function removeStyle(id: string) {
   store.removeStylePreset(id)
   persistStyles()
+}
+
+function redefineStyle(id: string) {
+  const preset = store.stylePresets.find((p) => p.id === id)
+  if (!preset) return
+  preset.style = JSON.parse(JSON.stringify(store.style)) as StyleState
+  // Replace the entry so watchers and the panel pick up the new snapshot.
+  store.setStylePresets(store.stylePresets.map((p) => (p.id === id ? { ...preset } : p)))
+  persistStyles()
+  store.setStatusMessage(`Style "${preset.name}" redefined`)
 }
 
 function persistStyles() {

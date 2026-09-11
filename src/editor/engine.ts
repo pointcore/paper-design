@@ -749,6 +749,59 @@ export class EditorEngine {
     return true
   }
 
+  /**
+   * Solo a user layer (AI Alt-click eye/lock parity): visibility solos
+   * toggle (hide the rest, or restore all when already solo); lock solos
+   * one-way (Unlock All restores). Returns false for unknown layers.
+   */
+  soloUserLayer(layerId: string, mode: 'visible' | 'locked'): boolean {
+    const users = this.project.layers.filter((l) => (l.data as any)?.isUserLayer)
+    const target = users.find((l) => (l.data as any)?.layerId === layerId)
+    if (!target) return false
+    if (mode === 'locked') {
+      let changed = false
+      for (const layer of users) {
+        const id = (layer.data as any)?.layerId as string
+        if (id === layerId || layer.locked) continue
+        layer.locked = true
+        this.store.updateLayer(id, { locked: true })
+        changed = true
+      }
+      if (!changed) return false
+      this.pushHistory('Lock Others')
+      this.scope.view.update()
+      return true
+    }
+    const others = users.filter((l) => (l.data as any)?.layerId !== layerId)
+    if (others.length > 0 && others.every((l) => !l.visible)) {
+      for (const layer of users) {
+        const id = (layer.data as any)?.layerId as string
+        if (layer.visible) continue
+        layer.visible = true
+        this.store.updateLayer(id, { visible: true })
+      }
+      if (!target.visible) {
+        target.visible = true
+        this.store.updateLayer(layerId, { visible: true })
+      }
+      this.pushHistory('Show All Layers')
+    } else {
+      for (const layer of others) {
+        const id = (layer.data as any)?.layerId as string
+        if (!layer.visible) continue
+        layer.visible = false
+        this.store.updateLayer(id, { visible: false })
+      }
+      if (!target.visible) {
+        target.visible = true
+        this.store.updateLayer(layerId, { visible: true })
+      }
+      this.pushHistory('Solo Layer')
+    }
+    this.scope.view.update()
+    return true
+  }
+
   getOverlayLayer(): paper.Layer {
     if (this.overlayLayer && this.project.layers.includes(this.overlayLayer)) {
       return this.overlayLayer
@@ -4189,6 +4242,39 @@ export class EditorEngine {
   }
 
   /**
+   * Hide everything except the selection (Show All restores). Top-level
+   * user items carrying any selected descendant stay. Returns hidden
+   * count; one history entry.
+   */
+  isolateVisible(): number {
+    const selection = this.getSelection()
+    if (selection.length === 0) return 0
+    const keep = new Set<paper.Item>()
+    for (const item of selection) {
+      let at: paper.Item | null = item
+      while (at) {
+        keep.add(at)
+        at = at.parent
+      }
+    }
+    let hidden = 0
+    for (const layer of this.project.layers) {
+      if (!(layer.data as any)?.isUserLayer || !layer.visible || layer.locked) continue
+      for (const child of layer.children) {
+        const c = child as paper.Item
+        if (keep.has(c) || !c.visible) continue
+        c.visible = false
+        hidden++
+      }
+    }
+    if (hidden > 0) {
+      this.pushHistory('Isolate Visible')
+      this.scope.view.update()
+    }
+    return hidden
+  }
+
+  /**
    * Select every appearance leaf sharing an attribute of the
    * first selected leaf (fill / stroke color, stroke width, opacity or
    * blend mode). Tolerance applies to fill/stroke as an RGB distance
@@ -4875,6 +4961,68 @@ export class EditorEngine {
     return true
   }
 
+  /**
+   * Swap the first selected raster's pixels for a new file (relink
+   * parity): the replacement scales into the old bounds at the same
+   * slot, opacity and selection carry over. Tainted/empty files fail
+   * gracefully. Returns false when nothing was queued.
+   */
+  replaceSelectedImage(dataUrl: string): boolean {
+    const scope = this.scope
+    if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) return false
+    const find = (node: paper.Item): paper.Raster | null => {
+      if ((node as any).locked || !node.parent) return null
+      if (node instanceof scope.Raster) return node
+      const children = (node as any).children as paper.Item[] | undefined
+      if (children) {
+        for (const child of children) {
+          const hit = find(child)
+          if (hit) return hit
+        }
+      }
+      return null
+    }
+    let source: paper.Raster | null = null
+    for (const item of this.getSelection()) {
+      source = find(item)
+      if (source) break
+    }
+    if (!source) return false
+    const bounds = (source as any).bounds as paper.Rectangle | undefined
+    if (!bounds || bounds.width < 1 || bounds.height < 1) return false
+    const parent = source.parent ?? this.getActiveLayer()
+    const at = parent.children.indexOf(source as any)
+    const opacity = (source as any).opacity
+    const next = new scope.Raster({ source: dataUrl }) as paper.Raster
+    parent.insertChild(Math.min(Math.max(at, 0), parent.children.length), next as any)
+    next.onLoad = () => {
+      const nb = (next as any).bounds as paper.Rectangle | undefined
+      if (nb && nb.width > 0 && nb.height > 0) {
+        next.scale(bounds.width / nb.width, bounds.height / nb.height)
+      }
+      next.position = bounds.center.clone()
+      next.opacity = opacity
+      next.data.id = this.genId()
+      next.data.isUserItem = true
+      try {
+        ;(source as paper.Raster).remove()
+      } catch { /* already gone */ }
+      this.clearSelection()
+      next.selected = true
+      this.syncSelectionToStore()
+      this.pushHistory('Replace Image')
+      this.scope.view.update()
+      this.showStatus('Image replaced')
+    }
+    next.onError = () => {
+      try {
+        next.remove()
+      } catch { /* already gone */ }
+      this.showStatus('Image replacement failed')
+    }
+    return true
+  }
+
   // ===== Symbols =====
   /**
    * Symbol definitions live behind hidden keeper instances (one invisible
@@ -5112,6 +5260,42 @@ export class EditorEngine {
     return swapped.length
   }
 
+  /**
+   * Select every placed instance of a symbol definition (locked ones
+   * stay out, like every selection path). Returns instances selected.
+   */
+  selectSymbolInstances(symbolId: string): number {
+    const scope = this.scope
+    const keeper = this.getKeepers().find((k) => (k.data as any)?.symbolId === symbolId)
+    if (!keeper) return 0
+    const definition = (keeper as any)._definition ?? (keeper as any).definition
+    if (!definition) return 0
+    const hits: paper.Item[] = []
+    const walk = (node: paper.Item) => {
+      const data = (node as any).data ?? {}
+      if (data.isChrome || data.isPreview || data.isGuide || data.isArtboard || data.annotation) return
+      if ((node as any).locked) return
+      if (node instanceof scope.SymbolItem && !data.isKeeper) {
+        const def = (node as any)._definition ?? (node as any).definition
+        if (def && def === definition) hits.push(node)
+        return
+      }
+      const children = (node as any).children as paper.Item[] | undefined
+      if (children) for (const child of children) walk(child)
+    }
+    for (const layer of this.project.layers) {
+      if (!(layer.data as any)?.isUserLayer || !layer.visible) continue
+      for (const child of layer.children) walk(child as paper.Item)
+    }
+    this.clearSelection()
+    hits.forEach((item) => {
+      item.selected = true
+    })
+    this.syncSelectionToStore()
+    this.scope.view.update()
+    return hits.length
+  }
+
   // ===== Isolation mode =====
 
   /** Isolated group root (object identity; cleared on any snapshot). */
@@ -5212,6 +5396,8 @@ export class EditorEngine {
   private clipboardItems: paper.Item[] = []
   /** Owning user-layer id per clipboard entry (AI paste-remembers-layer). */
   private clipboardLayerIds: string[] = []
+  /** Active-board origin at copy time (paste-on-all-boards anchor). */
+  private clipboardBoard: { x: number; y: number } = { x: 0, y: 0 }
   /** How many pastes have been made from the current clipboard content. */
   private pasteCount = 0
 
@@ -5225,6 +5411,8 @@ export class EditorEngine {
     const items = this.getSelection().filter((item) => (item.data as any)?.isUserItem)
     this.clipboardItems = items.map((item) => item.clone({ insert: false }))
     this.clipboardLayerIds = items.map((item) => this.getItemLayerId((item.data as any)?.id ?? ''))
+    const board = this.store.activeArtboard
+    this.clipboardBoard = board ? { x: board.x, y: board.y } : { x: 0, y: 0 }
     this.pasteCount = 0
     return this.clipboardItems.length
   }
@@ -5302,6 +5490,39 @@ export class EditorEngine {
     this.syncSelectionToStore()
     this.pushHistory('Paste')
     this.scope.view.update()
+  }
+
+  /**
+   * Paste the clipboard onto every artboard (AI Paste on All Artboards
+   * parity): each board gets the copies shifted by its origin delta from
+   * the copy-time board. All pastes become the selection; one history.
+   * Returns pastes made.
+   */
+  pasteOnAllBoards(): number {
+    if (this.clipboardItems.length === 0) return 0
+    const boards = this.store.artboards.filter((b) => b.width > 0 && b.height > 0)
+    if (boards.length === 0) return 0
+    const pasted: paper.Item[] = []
+    for (const board of boards) {
+      const delta = new this.scope.Point(board.x - this.clipboardBoard.x, board.y - this.clipboardBoard.y)
+      for (let i = 0; i < this.clipboardItems.length; i++) {
+        const layer = this.pasteTargetLayer(this.clipboardLayerIds[i] ?? '')
+        const clone = this.clipboardItems[i].clone({ insert: false })
+        layer.addChild(clone)
+        this.restampCloneTree(clone)
+        clone.data.id = this.genId()
+        clone.data.isUserItem = true
+        clone.position = (clone.position as paper.Point).add(delta)
+        pasted.push(clone)
+      }
+    }
+    if (pasted.length === 0) return 0
+    this.clearSelection()
+    pasted.forEach((item) => (item.selected = true))
+    this.syncSelectionToStore()
+    this.pushHistory('Paste on All Artboards')
+    this.scope.view.update()
+    return pasted.length
   }
 
   // ===== System clipboard (SVG exchange) =====
@@ -5890,6 +6111,38 @@ export class EditorEngine {
     }
     if (changed > 0) {
       this.pushHistory('Change Case')
+      this.scope.view.update()
+    }
+    return changed
+  }
+
+  /**
+   * Break thread links on selected text frames (both directions): linked
+   * siblings forget the frame, the frame forgets them. Content stays put.
+   * Returns frames unlinked; one history entry.
+   */
+  unlinkTextFrames(): number {
+    const scope = this.scope
+    let changed = 0
+    for (const item of this.getSelection()) {
+      if ((item as any).locked || !(item instanceof scope.PointText)) continue
+      const data = (item as any).data ?? {}
+      const links = [data.threadNext, data.threadPrev].filter(
+        (id): id is string => typeof id === 'string' && id.length > 0
+      )
+      if (links.length === 0) continue
+      for (const id of links) {
+        const other = this.getItemById(id) as any
+        if (!other?.data) continue
+        if (other.data.threadNext === data.id) delete other.data.threadNext
+        if (other.data.threadPrev === data.id) delete other.data.threadPrev
+      }
+      delete data.threadNext
+      delete data.threadPrev
+      changed++
+    }
+    if (changed > 0) {
+      this.pushHistory('Unlink Text')
       this.scope.view.update()
     }
     return changed

@@ -29,6 +29,7 @@
       </div>
       <div class="symbols-actions">
         <el-button size="small" :disabled="!pickedId || !hasSymbolSelection" title="Replace selected instances with the picked symbol" @click="swapInstances">Swap to Picked</el-button>
+        <el-button size="small" :disabled="!pickedId" title="Select every placed instance of the picked symbol" @click="selectInstances">Select All</el-button>
       </div>
       <div v-if="pickedId" class="symbols-hint">Picked: {{ pickedName }} — select placed instances, then Swap.</div>
     </div>
@@ -108,6 +109,13 @@ function swapInstances() {
     store.setStatusMessage(`Swapped ${n} instance${n === 1 ? '' : 's'}`)
     ;(store as any).setSpraySymbol?.(pickedId.value)
   }
+}
+
+function selectInstances() {
+  const e = getEngine()
+  if (!e || !pickedId.value) return
+  const n = e.selectSymbolInstances(pickedId.value)
+  store.setStatusMessage(n > 0 ? `Selected ${n} instance${n === 1 ? '' : 's'}` : 'No placed instances')
 }
 
 function startRename(entry: SymbolEntry) {

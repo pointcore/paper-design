@@ -38,6 +38,7 @@
               <el-dropdown-item command="paste">Paste</el-dropdown-item>
               <el-dropdown-item command="pasteFront">Paste in Front</el-dropdown-item>
               <el-dropdown-item command="pasteBack">Paste in Back</el-dropdown-item>
+              <el-dropdown-item command="pasteBoards">Paste on All Artboards</el-dropdown-item>
               <el-dropdown-item command="duplicate">Duplicate In Place</el-dropdown-item>
               <el-dropdown-item command="delete" divided :disabled="!store.hasSelection">Delete</el-dropdown-item>
               <el-dropdown-item command="selectAll" divided>Select All</el-dropdown-item>
@@ -83,6 +84,7 @@
               <el-dropdown-item command="rasterize" :disabled="!store.hasSelection">Rasterize Selection (2x)</el-dropdown-item>
               <el-dropdown-item command="extractImage" :disabled="!store.hasSelection">Extract Image...</el-dropdown-item>
               <el-dropdown-item command="adjustImage" :disabled="!store.hasSelection">Adjust Image...</el-dropdown-item>
+              <el-dropdown-item command="replaceImage" :disabled="!store.hasSelection">Replace Image...</el-dropdown-item>
               <el-dropdown-item command="closePath" :disabled="!store.hasSelection">Close Path</el-dropdown-item>
               <el-dropdown-item command="openPath" :disabled="!store.hasSelection">Open Path</el-dropdown-item>
               <el-dropdown-item command="envArcUpper" divided :disabled="!store.hasSelection">Envelope: Arc Upper</el-dropdown-item>
@@ -97,10 +99,12 @@
               <el-dropdown-item command="applyPattern" divided :disabled="!store.hasSelection">Apply Pattern Fill</el-dropdown-item>
               <el-dropdown-item command="removePattern" :disabled="!store.hasSelection">Remove Pattern Fill</el-dropdown-item>
               <el-dropdown-item command="flowText" divided :disabled="!store.hasSelection">Flow Text Overflow</el-dropdown-item>
+              <el-dropdown-item command="unlinkText" :disabled="!store.hasSelection">Unlink Text Frames</el-dropdown-item>
               <el-dropdown-item command="lock" divided :disabled="!store.hasSelection">Lock</el-dropdown-item>
               <el-dropdown-item command="unlockAll">Unlock All</el-dropdown-item>
               <el-dropdown-item command="hide" divided :disabled="!store.hasSelection">Hide</el-dropdown-item>
               <el-dropdown-item command="showAll">Show All</el-dropdown-item>
+              <el-dropdown-item command="isolateVisible" :disabled="!store.hasSelection">Isolate Visible</el-dropdown-item>
               <el-dropdown-item command="sameFill" divided :disabled="!store.hasSelection">Select Same Fill</el-dropdown-item>
               <el-dropdown-item command="sameStroke" :disabled="!store.hasSelection">Select Same Stroke</el-dropdown-item>
               <el-dropdown-item command="sameWidth" :disabled="!store.hasSelection">Select Same Stroke Width</el-dropdown-item>
@@ -1613,6 +1617,11 @@ function onEditCmd(cmd: string) {
     case 'pasteBack':
       if (!e.pasteInPlace('back')) store.setStatusMessage('Clipboard is empty')
       break
+    case 'pasteBoards': {
+      const n = e.pasteOnAllBoards()
+      store.setStatusMessage(n > 0 ? `Pasted on all artboards (${n} items)` : 'Clipboard is empty')
+      break
+    }
     case 'duplicate':
       if (!e.duplicateInPlace()) store.setStatusMessage('Nothing to duplicate')
       break
@@ -1752,6 +1761,11 @@ function onObjectCmd(cmd: string) {
     case 'showAll':
       e.showAll()
       break
+    case 'isolateVisible': {
+      const n = e.isolateVisible()
+      store.setStatusMessage(n > 0 ? `Isolated ${n} hidden (Show All restores)` : 'Nothing to isolate')
+      break
+    }
     case 'sameFill': {
       const count = e.selectSame('fill')
       store.setStatusMessage(`Selected ${count} items with the same fill`)
@@ -1939,6 +1953,34 @@ function onObjectCmd(cmd: string) {
       if (!area || !tc?.flowOverflowToNewFrame?.(area)) {
         store.setStatusMessage('Select an overflowing area text')
       }
+      break
+    }
+    case 'unlinkText': {
+      const n = e.unlinkTextFrames()
+      store.setStatusMessage(n > 0 ? `Unlinked ${n} frame${n === 1 ? '' : 's'}` : 'No linked frames selected')
+      break
+    }
+    case 'replaceImage': {
+      if (!e) break
+      const input = document.createElement('input')
+      input.type = 'file'
+      input.accept = 'image/png,image/jpeg,image/webp,image/gif'
+      input.onchange = async () => {
+        const file = input.files?.[0]
+        if (!file || !e) return
+        if (file.size > 15 * 1024 * 1024) {
+          store.setStatusMessage('Image too large (15 MB max)')
+          return
+        }
+        try {
+          if (!e.replaceSelectedImage(await readFileAsDataURL(file))) {
+            store.setStatusMessage('Select an image to replace')
+          }
+        } catch {
+          store.setStatusMessage('Image replacement failed')
+        }
+      }
+      input.click()
       break
     }
   }
