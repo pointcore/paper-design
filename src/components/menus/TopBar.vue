@@ -96,6 +96,7 @@
               <el-dropdown-item command="stepRepeat" :disabled="!store.hasSelection">Step and Repeat...</el-dropdown-item>
               <el-dropdown-item command="radialRepeat" :disabled="!store.hasSelection">Radial Repeat...</el-dropdown-item>
               <el-dropdown-item command="gridRepeat" :disabled="!store.hasSelection">Grid Repeat...</el-dropdown-item>
+              <el-dropdown-item command="blend" :disabled="!store.hasSelection">Blend...</el-dropdown-item>
               <el-dropdown-item command="splitGrid" :disabled="!store.hasSelection">Split Into Grid...</el-dropdown-item>
               <el-dropdown-item command="simplifyPath" :disabled="!store.hasSelection">Simplify Path</el-dropdown-item>
               <el-dropdown-item command="addAnchors" :disabled="!store.hasSelection">Add Anchor Points</el-dropdown-item>
@@ -545,6 +546,27 @@
           </div>
           <el-input-number v-model="gridRepeatForm.dx" :min="1" size="small" style="width: 100px" />
           <el-input-number v-model="gridRepeatForm.dy" :min="1" size="small" style="width: 100px" />
+        </div>
+      </div>
+    </AppDialog>
+
+    <!-- Blend Dialog (steps interpolated between the two selected paths) -->
+    <AppDialog
+      v-model="blendVisible"
+      title="Blend"
+      :width="360"
+      confirm-text="Blend"
+      cancel-text="Cancel"
+      @confirm="onBlendConfirm"
+      @cancel="blendVisible = false"
+    >
+      <div class="settings-body app-settings">
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Specified Steps</span>
+            <span class="setting-desc">Shapes between the two paths, back-to-front; solid fills, strokes and opacity blend too</span>
+          </div>
+          <el-input-number v-model="blendForm.steps" :min="1" :max="200" size="small" style="width: 100px" />
         </div>
       </div>
     </AppDialog>
@@ -1147,6 +1169,25 @@ function onGridRepeatConfirm() {
     return
   }
   gridRepeatVisible.value = false
+}
+
+// Blend dialog visibility lives on the store so Ctrl+Alt+B can open it.
+const blendVisible = computed({
+  get: () => store.ui.blendDialogOpen,
+  set: (v) => store.setBlendDialogOpen(v),
+})
+const blendForm = reactive({ steps: 6 })
+function onBlendConfirm() {
+  const e = engineRef?.value
+  if (!e) {
+    blendVisible.value = false
+    return
+  }
+  if (e.blendSelection(Number(blendForm.steps)) === 0) {
+    store.setStatusMessage('Blend needs exactly two unlocked paths (1–200 steps)')
+    return
+  }
+  blendVisible.value = false
 }
 
 const gridSplitVisible = ref(false)
@@ -2617,6 +2658,9 @@ function onObjectCmd(cmd: string) {
       break
     case 'gridRepeat':
       gridRepeatVisible.value = true
+      break
+    case 'blend':
+      blendVisible.value = true
       break
     case 'addAnchors':
       if (e.addAnchorPoints() === 0) {

@@ -8,6 +8,8 @@ import { createDefaultStyle } from './store'
 import { cursorForTool } from './cursors'
 import { gradientAngleFromVector, linearGradientEndpoints, normalizeAngleDeg } from './geometry'
 import { changeCaseText } from './text/text-case'
+import { alignSampledPoints, lerp, lerpRgba, rgbaToCss, sampleCountFor } from './blend/blend'
+import type { Rgba } from './color'
 import { colorDistanceRgb, invertCssColor, isOutOfCmykGamut, parseCssColor, rgbToCmyk, shiftCssColor } from './color'
 import { parseProjectFile } from './project-file'
 import { recordRecentProject } from './recent-files'
@@ -3977,6 +3979,141 @@ export class EditorEngine {
     if (item instanceof scope.Path) return item.segments.length === 0
     if (item instanceof scope.CompoundPath) return item.children.length === 0
     return false
+  }
+
+  /**
+   * Sample `count` vertices evenly along a path's arc length (closed
+   * outlines wrap without repeating the first vertex; open outlines include
+   * both endpoints). Returns null for degenerate geometry.
+   */
+  private resamplePathPoints(
+    path: paper.Path,
+    count: number,
+    closed: boolean
+  ): paper.Point[] | null {
+    const len = path.length
+    if (!Number.isFinite(len) || len <= 0) return null
+    const pts: paper.Point[] = []
+    if (closed) {
+      for (let i = 0; i < count; i++) {
+        const pt = path.getPointAt((len * i) / count)
+        if (!pt || !Number.isFinite(pt.x) || !Number.isFinite(pt.y)) return null
+        pts.push(pt)
+      }
+    } else {
+      for (let i = 0; i <= count; i++) {
+        const pt = path.getPointAt(Math.min(len, (len * i) / count))
+        if (!pt || !Number.isFinite(pt.x) || !Number.isFinite(pt.y)) return null
+        pts.push(pt)
+      }
+    }
+    return pts
+  }
+
+  /** Solid paint of an item as 8-bit channels, null for gradients/none. */
+  private solidPaintOf(item: paper.Item, key: 'fillColor' | 'strokeColor'): Rgba | null {
+    const paint = (item as any)[key] as any
+    if (!paint || paint.gradient) return null
+    return parseCssColor(this.colorToCSS(paint))
+  }
+
+  /**
+   * AI/CDR Object > Blend: build `steps` shapes interpolated between two
+   * unlocked selected paths (blending runs back-to-front). Both outlines
+   * resample to a shared vertex budget, align start/winding, then every step
+   * lerps the geometry plus solid fill/stroke colors, stroke widths and
+   * opacity — gradient paints or a paint present on only one end leave the
+   * matching step paint empty. Shared-parent operands group the whole run at
+   * the back operand's z slot; otherwise the steps stack above the back
+   * operand. One history entry. Returns the steps built, 0 when the
+   * selection or geometry cannot blend.
+   */
+  blendSelection(steps: number): number {
+    const scope = this.scope
+    const count = Math.round(Number(steps))
+    if (!Number.isFinite(count) || count < 1 || count > 200) return 0
+    const paths = this.getSelection().filter(
+      (item) => !item.locked && item.parent && item instanceof scope.Path
+    ) as paper.Path[]
+    if (paths.length !== 2) return 0
+    const [back, front] = paths
+      .slice()
+      .sort((a, b) => (a.isBelow(b) ? -1 : a.isAbove(b) ? 1 : 0))
+
+    // One closure convention for both operands so the vertex streams line up
+    // (a mixed closed/open pair resamples as open).
+    const closed = back.closed && front.closed
+    const budget = sampleCountFor([back.segments.length, front.segments.length])
+    const backPts = this.resamplePathPoints(back, budget, closed)
+    const frontPts = this.resamplePathPoints(front, budget, closed)
+    if (!backPts || !frontPts || backPts.length !== frontPts.length) return 0
+    const alignedFront = alignSampledPoints(backPts, frontPts, closed)
+
+    const fillBack = this.solidPaintOf(back, 'fillColor')
+    const fillFront = this.solidPaintOf(front, 'fillColor')
+    const strokeBack = this.solidPaintOf(back, 'strokeColor')
+    const strokeFront = this.solidPaintOf(front, 'strokeColor')
+    const widthBack = Number.isFinite(back.strokeWidth as number) ? (back.strokeWidth as number) : null
+    const widthFront = Number.isFinite(front.strokeWidth as number) ? (front.strokeWidth as number) : null
+
+    const steps_: paper.Path[] = []
+    for (let i = 1; i <= count; i++) {
+      const t = i / (count + 1)
+      const segs: paper.Point[] = []
+      for (let j = 0; j < backPts.length; j++) {
+        segs.push(
+          new scope.Point(
+            lerp(backPts[j].x, alignedFront[j].x, t),
+            lerp(backPts[j].y, alignedFront[j].y, t)
+          )
+        )
+      }
+      const step = new scope.Path({ segments: segs, closed, insert: false }) as paper.Path
+      try {
+        step.smooth({ type: 'catmull-rom', factor: 0.5 })
+      } catch {
+        // Straight-segment steps beat aborting the whole blend.
+      }
+      if (fillBack && fillFront) {
+        step.fillColor = new scope.Color(rgbaToCss(lerpRgba(fillBack, fillFront, t)))
+      }
+      if (strokeBack && strokeFront) {
+        step.strokeColor = new scope.Color(rgbaToCss(lerpRgba(strokeBack, strokeFront, t)))
+      }
+      if (widthBack !== null && widthFront !== null) step.strokeWidth = lerp(widthBack, widthFront, t)
+      step.strokeCap = back.strokeCap
+      step.strokeJoin = back.strokeJoin
+      step.opacity = lerp(back.opacity, front.opacity, t)
+      step.data.id = this.genId()
+      step.data.isUserItem = true
+      steps_.push(step)
+    }
+
+    const parent = back.parent as paper.Item
+    if (front.parent === back.parent) {
+      const at = parent.children.indexOf(back)
+      const group = new scope.Group({ insert: false }) as paper.Group
+      group.addChild(back)
+      for (const step of steps_) group.addChild(step)
+      group.addChild(front)
+      parent.insertChild(Math.min(Math.max(0, at), parent.children.length), group)
+      group.data.id = this.genId()
+      group.data.isUserItem = true
+      this.selectItem(group)
+    } else {
+      const at = parent.children.indexOf(back)
+      let k = 1
+      for (const step of steps_) {
+        parent.insertChild(Math.min(at + k, parent.children.length), step)
+        k++
+      }
+      this.clearSelection()
+      for (const item of [back, ...steps_, front]) item.selected = true
+      this.syncSelectionToStore()
+    }
+    this.pushHistory('Blend')
+    this.scope.view.update()
+    return count
   }
 
   /**

@@ -130,6 +130,7 @@ export const COMMAND_SHORTCUTS: Array<{ label: string; desc: string }> = [
   { label: 'Ctrl+Shift+A / Ctrl+6', desc: 'Deselect / Reselect' },
   { label: 'Ctrl+Shift+I', desc: 'Invert Selection' },
   { label: 'Ctrl+G / Ctrl+Shift+G', desc: 'Group / Ungroup' },
+  { label: 'Ctrl+Alt+B', desc: 'Blend Two Paths (AI/CDR)' },
   { label: 'Ctrl+J', desc: 'Join Paths' },
   { label: 'Ctrl+2 / Alt+2', desc: 'Lock / Unlock All' },
   { label: 'Ctrl+3 / Alt+3', desc: 'Hide / Show All' },
@@ -290,6 +291,11 @@ export function handleGlobalKeydown(
       try {
         select?.refreshSelectionChrome?.()
       } catch { /* chrome repaint must never break shortcuts */ }
+      e.preventDefault()
+    } else if (key === 'b' && e.altKey) {
+      // AI/CDR Ctrl+Alt+B: open the Blend dialog for the two selected paths
+      // (the dialog validates the selection when applying).
+      store.setBlendDialogOpen(true)
       e.preventDefault()
     } else if (key === 'b') {
       if (engine?.pasteInPlace('back')) e.preventDefault()

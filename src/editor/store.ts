@@ -229,6 +229,8 @@ export const useEditorStore = defineStore('editor', {
       settingsOpen: false,
       /** Save As filename dialog (Ctrl+Shift+S opens it) */
       saveDialogOpen: false,
+      /** Blend dialog (Ctrl+Alt+B opens it) */
+      blendDialogOpen: false,
       showNavigator: true,
       zenMode: false,
       showControlBar: true,
@@ -489,6 +491,12 @@ export const useEditorStore = defineStore('editor', {
      * the Ctrl+Shift+S shortcut can reach it) */
     setSaveDialogOpen(val: boolean) {
       this.ui.saveDialogOpen = val
+    },
+
+    /** Open/close the Blend dialog (owned by the TopBar, store-shared so
+     * the Ctrl+Alt+B shortcut can reach it) */
+    setBlendDialogOpen(val: boolean) {
+      this.ui.blendDialogOpen = val
     },
 
     /** Set page size */
