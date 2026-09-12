@@ -95,6 +95,7 @@
               <el-dropdown-item command="offsetPath" :disabled="!store.hasSelection">Offset Path...</el-dropdown-item>
               <el-dropdown-item command="stepRepeat" :disabled="!store.hasSelection">Step and Repeat...</el-dropdown-item>
               <el-dropdown-item command="radialRepeat" :disabled="!store.hasSelection">Radial Repeat...</el-dropdown-item>
+              <el-dropdown-item command="gridRepeat" :disabled="!store.hasSelection">Grid Repeat...</el-dropdown-item>
               <el-dropdown-item command="splitGrid" :disabled="!store.hasSelection">Split Into Grid...</el-dropdown-item>
               <el-dropdown-item command="simplifyPath" :disabled="!store.hasSelection">Simplify Path</el-dropdown-item>
               <el-dropdown-item command="addAnchors" :disabled="!store.hasSelection">Add Anchor Points</el-dropdown-item>
@@ -514,6 +515,36 @@
           </div>
           <el-input-number v-model="repeatForm.dx" size="small" style="width: 100px" />
           <el-input-number v-model="repeatForm.dy" size="small" style="width: 100px" />
+        </div>
+      </div>
+    </AppDialog>
+
+    <!-- Grid Repeat Dialog (rows x cols copies with per-axis spacing) -->
+    <AppDialog
+      v-model="gridRepeatVisible"
+      title="Grid Repeat"
+      :width="360"
+      confirm-text="Apply"
+      cancel-text="Close"
+      @confirm="onGridRepeatConfirm"
+      @cancel="gridRepeatVisible = false"
+    >
+      <div class="settings-body app-settings">
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Rows / Columns</span>
+            <span class="setting-desc">The original fills the 0,0 cell</span>
+          </div>
+          <el-input-number v-model="gridRepeatForm.rows" :min="1" :max="50" size="small" style="width: 100px" />
+          <el-input-number v-model="gridRepeatForm.cols" :min="1" :max="50" size="small" style="width: 100px" />
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Spacing X / Y</span>
+            <span class="setting-desc">Offset per cell in px</span>
+          </div>
+          <el-input-number v-model="gridRepeatForm.dx" :min="1" size="small" style="width: 100px" />
+          <el-input-number v-model="gridRepeatForm.dy" :min="1" size="small" style="width: 100px" />
         </div>
       </div>
     </AppDialog>
@@ -1103,6 +1134,21 @@ function onRepeatConfirm() {
 
 const radialVisible = ref(false)
 const radialForm = reactive({ count: 5, angle: 60 })
+const gridRepeatVisible = ref(false)
+const gridRepeatForm = reactive({ rows: 3, cols: 3, dx: 100, dy: 100 })
+function onGridRepeatConfirm() {
+  const e = engineRef?.value
+  if (!e) {
+    gridRepeatVisible.value = false
+    return
+  }
+  if (e.gridRepeat(Number(gridRepeatForm.rows), Number(gridRepeatForm.cols), Number(gridRepeatForm.dx), Number(gridRepeatForm.dy)) === 0) {
+    store.setStatusMessage('Grid Repeat needs artwork, rows x cols >= 2 and positive spacing')
+    return
+  }
+  gridRepeatVisible.value = false
+}
+
 const gridSplitVisible = ref(false)
 const gridSplitForm = reactive({ rows: 3, cols: 3, gutterX: 0, gutterY: 0 })
 function onGridSplitConfirm() {
@@ -2568,6 +2614,9 @@ function onObjectCmd(cmd: string) {
       break
     case 'splitGrid':
       gridSplitVisible.value = true
+      break
+    case 'gridRepeat':
+      gridRepeatVisible.value = true
       break
     case 'addAnchors':
       if (e.addAnchorPoints() === 0) {

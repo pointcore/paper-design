@@ -4001,6 +4001,52 @@ export class EditorEngine {
   }
 
   /**
+   * AI Object > Repeat > Grid: duplicate every unlocked selected item into
+   * a rows x cols grid offset by dx/dy document units per cell (the
+   * original occupies the 0,0 cell). Copies become the new selection; one
+   * history entry. Returns the copies made, 0 when nothing can repeat.
+   */
+  gridRepeat(rows: number, cols: number, dx: number, dy: number): number {
+    const r = Math.round(Number(rows))
+    const c = Math.round(Number(cols))
+    const stepX = Number(dx)
+    const stepY = Number(dy)
+    if (!Number.isFinite(r) || !Number.isFinite(c) || r < 1 || c < 1 || r * c < 2) return 0
+    if (!Number.isFinite(stepX) || !Number.isFinite(stepY) || stepX <= 0 || stepY <= 0) return 0
+    const sources = this.getSelection().filter((item) => !item.locked && item.parent)
+    if (sources.length === 0) return 0
+    const made: paper.Item[] = []
+    for (const item of sources) {
+      const parent = item.parent ?? this.getActiveLayer()
+      const at = parent.children.indexOf(item as any)
+      let k = 0
+      for (let row = 0; row < r; row++) {
+        for (let col = 0; col < c; col++) {
+          if (row === 0 && col === 0) continue
+          const clone = this.freshClone(item)
+          clone.position = (clone.position as paper.Point).add(
+            new this.scope.Point(col * stepX, row * stepY)
+          )
+          parent.insertChild(Math.min(at + 1 + k, parent.children.length), clone)
+          this.refreshItemGradient(clone)
+          made.push(clone)
+          k++
+        }
+      }
+    }
+    if (made.length === 0) return 0
+    this.clearSelection()
+    made.forEach((item) => {
+      item.selected = true
+    })
+    this.syncSelectionToStore()
+    this.reflowTextsForItems(made)
+    this.pushHistory('Grid Repeat')
+    this.scope.view.update()
+    return made.length
+  }
+
+  /**
    * Distribute with an exact gap value (first item stays, the rest follow
    * with `gap` document units between neighbors). Needs 3+ unlocked items.
    */
