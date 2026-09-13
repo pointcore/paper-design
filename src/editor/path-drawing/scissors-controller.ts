@@ -81,9 +81,11 @@ export class ScissorsController {
     const engine = this.engine
     if (!engine) return
     const scope = engine.scope
-    const location = path.getLocationOf(point)
-    // getLocationOf answers even for far fill clicks: only cut near the
-    // actual stroke, or fills would split at surprising places.
+    const location = path.getNearestLocation(point)
+    // getNearestLocation always answers (getLocationOf only succeeds when
+    // the click is numerically on the curve, which a real mouse click
+    // never is): only cut when the nearest curve point is close, or fill
+    // clicks would split at surprising places.
     if (
       !location ||
       !location.point ||
@@ -93,22 +95,50 @@ export class ScissorsController {
       return
     }
     const wasClosed = path.closed
+    if (wasClosed) {
+      // Anchor clicks would otherwise re-open the ring at the same spot
+      // with no visible change — keep the hint instead.
+      const onAnchor = path.segments.some(
+        (s) => s.point && s.point.getDistance(point) <= 1.5 / scope.view.zoom
+      )
+      if (onAnchor) {
+        engine.store.setStatusMessage('Click away from anchors to open the path')
+        return
+      }
+    }
     let second: paper.Path | null = null
     try {
       second = path.splitAt(location)
     } catch {
       second = null
     }
+    if (wasClosed) {
+      // paper 0.12.x opens a closed ring in place on splitAt and hands back
+      // the ring itself — there is no duplicate "rest" to drop, and removing
+      // `second` here would delete the artwork. Clicks landing on an
+      // existing anchor are rejected up front so they keep their hint
+      // instead of silently re-opening the ring at the same spot.
+      const opened = !!second && !path.closed
+      second = null
+      if (!opened) {
+        engine.store.setStatusMessage('Click away from anchors to open the path')
+        return
+      }
+      engine.clearSelection()
+      path.selected = true
+      engine.syncSelectionToStore()
+      engine.refreshItemGradient(path)
+      engine.pushHistory('Cut Path')
+      engine.scope.view.update()
+      return
+    }
     if (second && second.segments.length === 0) {
       second.remove()
       second = null
     }
     if (!second) {
-      // Endpoint clicks (or defeated geometry) change nothing — for closed
-      // paths too, since a clean split always yields a second part.
-      engine.store.setStatusMessage(
-        wasClosed ? 'Click away from anchors to open the path' : 'Click away from endpoints to cut'
-      )
+      // Endpoint clicks (or defeated geometry) change nothing.
+      engine.store.setStatusMessage('Click away from endpoints to cut')
       return
     }
     const parts: paper.Item[] = [path]
