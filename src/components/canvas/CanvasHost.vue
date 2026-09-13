@@ -133,6 +133,13 @@ onMounted(() => {
   // Initially activate the select tool
   engine.setTool('select')
 
+  // E2E hook: Playwright drives the real canvas through these handles.
+  // Dev-only so production builds expose nothing extra.
+  if (import.meta.env.DEV) {
+    (window as any).__engine__ = engine
+    ;(window as any).__store__ = store
+  }
+
   // Setup rulers after mount
   setupRulerCanvases()
   drawRulers()
@@ -243,6 +250,12 @@ onUnmounted(() => {
     }
     engine.destroy()
     engine = null
+    if (import.meta.env.DEV) {
+      try {
+        delete (window as any).__engine__
+        delete (window as any).__store__
+      } catch { /* ignore */ }
+    }
   }
 })
 
