@@ -136,6 +136,7 @@ const groups: ToolGroup[] = [
   ] },
   { key: 'edit', members: [
     { name: 'scissors', tip: 'Scissors Tool (C)', icon: Scissor },
+    { name: 'knife', tip: 'Knife Tool (K, drag a line to slice paths)', glyph: '🗡' },
     { name: 'shape-builder', tip: 'Shape Builder Tool (Shift+M)', icon: Share },
     { name: 'width', tip: 'Width Tool (Shift+W)', icon: Expand },
     { name: 'reshape', tip: 'Reshape Tool (drag to push anchors)', glyph: '〰' },

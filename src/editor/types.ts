@@ -36,7 +36,8 @@ export type ToolName =
   | 'spray'           // Symbol sprayer
   | 'wand'            // Magic wand Y
   | 'scissors'        // Scissors C
-  | 'width'             // Width tool Shift+W
+  | 'knife'           // Knife (CDR, drag to slice)
+  | 'width'           // Width tool Shift+W
   | 'rotate'          // Rotate R
   | 'scale'           // Scale S
   | 'mirror'          // Mirror O

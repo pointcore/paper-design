@@ -15,6 +15,7 @@ import { BlobBrushController } from './path-drawing/blob-brush-controller'
 import { BrushController } from './path-drawing/brush-controller'
 import { GradientController } from './path-drawing/gradient-controller'
 import { ScissorsController } from './path-drawing/scissors-controller'
+import { KnifeController } from './path-drawing/knife-controller'
 import { ShapeBuilderController } from './path-drawing/shape-builder-controller'
 import { WidthController } from './path-drawing/width-controller'
 import { EyedropperController } from './selection/eyedropper-controller'
@@ -66,6 +67,9 @@ export function registerAllControllers(engine: EditorEngine) {
 
   // Scissors tool (cut path at click)
   engine.registerController('scissors', new ScissorsController())
+
+  // Knife tool (CDR: drag a line to slice crossed paths)
+  engine.registerController('knife', new KnifeController())
 
   // Shape builder (drag-across unite, Alt-drag subtract)
   engine.registerController('shape-builder', new ShapeBuilderController())

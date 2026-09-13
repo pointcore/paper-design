@@ -31,6 +31,7 @@ describe('resolveToolShortcut', () => {
     expect(resolveToolShortcut(key({ key: 'q' }))).toBe('lasso')
     expect(resolveToolShortcut(key({ key: 'g' }))).toBe('gradient')
     expect(resolveToolShortcut(key({ key: 'y' }))).toBe('wand')
+    expect(resolveToolShortcut(key({ key: 'k' }))).toBe('knife')
   })
 
   it('prefers shifted bindings over plain letters', () => {
