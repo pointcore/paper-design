@@ -48,6 +48,7 @@ export type ToolName =
   | 'callout'         // Callout
   | 'shape-builder'   // Shape builder Shift+M
   | 'eyedropper'      // Eyedropper I
+  | 'perspective-grid' // Perspective grid (AI/CDR, toggle + drag VPs)
 
 /** Stroke alignment */
 export type StrokeAlign = 'center' | 'inside' | 'outside'

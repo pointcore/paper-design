@@ -27,6 +27,7 @@ import { CalloutController } from './annotation/callout-controller'
 import { MeasureController } from './annotation/measure-controller'
 import { TransformController } from './transform/transform-controller'
 import { ViewController } from './view-controller'
+import { PerspectiveGridController } from './path-drawing/perspective-grid-controller'
 
 export function registerAllControllers(engine: EditorEngine) {
   // Select tool (select and direct-select share the same implementation)
@@ -121,4 +122,7 @@ export function registerAllControllers(engine: EditorEngine) {
   const viewCtrl = new ViewController()
   engine.registerController('view-hand', viewCtrl)
   engine.registerController('zoom', viewCtrl)
+
+  // Perspective grid (AI/CDR toggle overlay)
+  engine.registerController('perspective-grid', new PerspectiveGridController())
 }

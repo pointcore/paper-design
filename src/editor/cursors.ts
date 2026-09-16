@@ -222,6 +222,7 @@ function buildToolCursors(): Record<ToolName, string> {
     callout: crosshair,
     'shape-builder': crosshair,
     eyedropper: CURSOR_EYEDROPPER,
+    'perspective-grid': crosshair,
   }
 }
 

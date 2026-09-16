@@ -143,6 +143,7 @@ const groups: ToolGroup[] = [
     { name: 'smooth', tip: 'Smooth Tool (drag along a path to smooth it)', glyph: '∿' },
     { name: 'gradient', tip: 'Gradient Tool (G, drag to set angle)', glyph: '🌈' },
     { name: 'eyedropper', tip: 'Eyedropper Tool (I, Alt = sample only)', icon: Stamp },
+    { name: 'perspective-grid', tip: 'Perspective Grid (Shift+P, cycle 1/2/3-point)', glyph: '◇' },
   ] },
   { key: 'transform', members: [
     { name: 'rotate', tip: 'Rotate Tool (Shift+R, drag to rotate)', glyph: '⟳' },

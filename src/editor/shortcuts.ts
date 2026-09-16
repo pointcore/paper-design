@@ -73,6 +73,7 @@ export const TOOL_SHORTCUTS: Record<ToolName, ShortcutDef | null> = {
   callout:         null,
   'shape-builder': { label: 'Shift+M', match: (e) => e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey && key(e) === 'm' },
   eyedropper:      { label: 'I',    match: (e) => key(e) === 'i' },
+  'perspective-grid': { label: 'Shift+P', match: (e) => e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey && key(e) === 'p' },
 }
 
 /**
@@ -99,6 +100,7 @@ const SHORTCUT_ORDER: ToolName[] = [
   'gradient',
   'wand',
   'pen',
+  'perspective-grid',
   'pencil',
   'eraser',
   'eyedropper',
