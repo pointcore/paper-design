@@ -144,7 +144,7 @@ export class CalloutController {
     const style = engine.store.calloutStyle
     const text = new scope.PointText({
       point: new scope.Point(lastPoint.x + style.offset, lastPoint.y),
-      content: 'Label',
+      content: style.defaultLabel || 'Label',
       fontSize: style.fontSize,
       fillColor: style.textColor,
       fontFamily: style.fontFamily,

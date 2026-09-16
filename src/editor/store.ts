@@ -104,6 +104,7 @@ export function createDefaultCalloutStyle(): CalloutStyle {
     fontFamily: 'Arial',
     offset: 10,
     strokeAlign: 'center',
+    defaultLabel: 'Label',
   }
 }
 

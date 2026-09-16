@@ -332,6 +332,7 @@ export interface CalloutStyle {
   fontFamily: string
   offset: number
   strokeAlign: StrokeAlign
+  defaultLabel: string
 }
 
 /** Callout content model */

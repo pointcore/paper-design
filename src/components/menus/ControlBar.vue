@@ -103,6 +103,7 @@
       <span class="cb-label">Text</span>
       <el-color-picker v-model="calloutText" size="small" @change="onCalloutStyle" />
       <el-input-number v-model="calloutSize" :min="6" :max="120" size="small" style="width: 76px" title="Label size" @change="onCalloutStyle" />
+      <el-input v-model="calloutLabel" size="small" style="width: 90px" placeholder="Default label" @change="onCalloutStyle" />
     </template>
 
     <!-- Paint tools: stroke width + opacity quick -->
@@ -245,6 +246,7 @@ const calloutWidth = ref(store.calloutStyle.lineWidth)
 const calloutFill = ref(store.calloutStyle.fillColor)
 const calloutText = ref(store.calloutStyle.textColor)
 const calloutSize = ref(store.calloutStyle.fontSize)
+const calloutLabel = ref(store.calloutStyle.defaultLabel)
 const rotateBy = ref(0)
 const scalePct = ref(100)
 
@@ -399,6 +401,7 @@ function onCalloutStyle() {
     fillColor: calloutFill.value,
     textColor: calloutText.value,
     fontSize: Number(calloutSize.value) || 12,
+    defaultLabel: calloutLabel.value || 'Label',
   })
 }
 function onRotateBy(v: number | undefined) {
