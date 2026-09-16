@@ -70,6 +70,16 @@ export function createDefaultCharStyle(): CharStyle {
     underline: false,
     strikethrough: false,
     align: 'left',
+    openType: {
+      liga: true,
+      dlig: false,
+      smallCaps: false,
+      oldstyleNums: false,
+      tabularNums: false,
+      fractions: false,
+      superscript: false,
+      subscript: false,
+    },
   }
 }
 

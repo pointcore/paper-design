@@ -407,6 +407,15 @@
             <el-input-number v-model="pathOffsetValue" size="small" controls-position="right" title="Type on path start offset" @change="onPathOffsetChange" />
             <span class="unit">offset</span>
           </div>
+          <div class="prop-row">
+            <span class="prop-label-sm">OT</span>
+            <el-button size="small" class="fmt-btn" :type="otLiga ? 'primary' : ''" title="Standard Ligatures (liga)" @click="toggleOT('liga')">Lig</el-button>
+            <el-button size="small" class="fmt-btn" :type="otDLiga ? 'primary' : ''" title="Discretionary Ligatures (dlig)" @click="toggleOT('dlig')">dLig</el-button>
+            <el-button size="small" class="fmt-btn" :type="otSmallCaps ? 'primary' : ''" title="Small Caps (smcp)" @click="toggleOT('smallCaps')">SC</el-button>
+            <el-button size="small" class="fmt-btn" :type="otOldstyle ? 'primary' : ''" title="Oldstyle Numerals (onum)" @click="toggleOT('oldstyleNums')">123</el-button>
+            <el-button size="small" class="fmt-btn" :type="otTabular ? 'primary' : ''" title="Tabular Numerals (tnum)" @click="toggleOT('tabularNums')">Tab</el-button>
+            <el-button size="small" class="fmt-btn" :type="otFrac ? 'primary' : ''" title="Fractions (frac)" @click="toggleOT('fractions')">Fr</el-button>
+          </div>
           <div v-if="isAreaSelected">
             <div class="prop-row">
               <span class="prop-label-sm">Frame</span>
@@ -876,6 +885,13 @@ const textAlign = ref<TextAlign>('left')
 const leadingAuto = ref(true)
 const leadingValue = ref(14)
 const trackingValue = ref(0)
+// OpenType feature toggles
+const otLiga = ref(true)
+const otDLiga = ref(false)
+const otSmallCaps = ref(false)
+const otOldstyle = ref(false)
+const otTabular = ref(false)
+const otFrac = ref(false)
 // Area-frame editing (single area-text selection only).
 const isAreaSelected = ref(false)
 const frameW = ref(0)
@@ -962,6 +978,14 @@ function syncTextFromSelection() {
     leadingAuto.value = true
   }
   trackingValue.value = Number(store.charStyle.tracking) || 0
+  // OpenType features
+  const ot = (item as any).data?.openType ?? store.charStyle.openType
+  otLiga.value = ot?.liga ?? true
+  otDLiga.value = ot?.dlig ?? false
+  otSmallCaps.value = ot?.smallCaps ?? false
+  otOldstyle.value = ot?.oldstyleNums ?? false
+  otTabular.value = ot?.tabularNums ?? false
+  otFrac.value = ot?.fractions ?? false
   syncAreaFromSelection()
 }
 
@@ -1062,6 +1086,25 @@ function toggleStrikethrough() {
   e?.getSelection().forEach((item) => { (item as any).data = { ...((item as any).data ?? {}), strikethrough: next } })
   e?.scope.view.update()
   if (store.hasSelection) e?.pushHistory(next ? 'Strikethrough On' : 'Strikethrough Off')
+}
+
+type OTKey = 'liga' | 'dlig' | 'smallCaps' | 'oldstyleNums' | 'tabularNums' | 'fractions'
+const otRefMap: Record<OTKey, typeof otLiga> = {
+  liga: otLiga, dlig: otDLiga, smallCaps: otSmallCaps,
+  oldstyleNums: otOldstyle, tabularNums: otTabular, fractions: otFrac,
+}
+function toggleOT(key: OTKey) {
+  const ref = otRefMap[key]
+  const next = !ref.value
+  ref.value = next
+  const openType = { ...store.charStyle.openType, [key]: next }
+  store.updateCharStyle({ openType })
+  const e = getEngine()
+  e?.getSelection().forEach((item) => {
+    ;(item as any).data = { ...((item as any).data ?? {}), openType }
+  })
+  e?.scope.view.update()
+  if (store.hasSelection) e?.pushHistory('Change OpenType')
 }
 
 function onBaselineChange(val: number | undefined) {

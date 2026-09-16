@@ -104,6 +104,26 @@ export interface GradientState {
   angle?: number
 }
 
+/** OpenType feature flags */
+export interface OpenTypeFeatures {
+  /** Standard Ligatures (liga) */
+  liga: boolean
+  /** Discrétionary Ligatures (dlig) */
+  dlig: boolean
+  /** Small Caps (smcp) */
+  smallCaps: boolean
+  /** Oldstyle Numerals (onum) */
+  oldstyleNums: boolean
+  /** Tabular Numerals (tnum) */
+  tabularNums: boolean
+  /** Fractions (frac) */
+  fractions: boolean
+  /** Superscript (sups) */
+  superscript: boolean
+  /** Subscript (subs) */
+  subscript: boolean
+}
+
 /** Character style state */
 export interface CharStyle {
   fontFamily: string
@@ -121,6 +141,7 @@ export interface CharStyle {
   underline: boolean
   strikethrough: boolean
   align: TextAlign
+  openType: OpenTypeFeatures
 }
 
 /** Paragraph style */

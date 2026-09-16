@@ -355,6 +355,7 @@ export class TextController {
         engine.pushHistory('Delete Text')
       } else if (raw !== this.originalContent) {
         item.content = raw
+        ;(item.data as any).openType = { ...engine.store.charStyle.openType }
         engine.selectItem(item)
         engine.pushHistory('Edit Text')
       }
@@ -514,6 +515,7 @@ export class TextController {
     text.data.isUserItem = true
     text.data.textMode = data.textMode
     text.data.raw = data.raw
+    text.data.openType = { ...charStyle.openType }
     if (data.frame) text.data.frame = { ...data.frame }
     engine.getActiveLayer().addChild(text)
 
@@ -953,6 +955,34 @@ export class TextController {
     }
   }
 
+  /** Get the OpenType features CSS string for the current session. */
+  private sessionOpenType(): string {
+    const ot = this.sessionCharStyle().openType
+    if (!ot) return '"liga" 1'
+    const parts: string[] = []
+    if (ot.liga) parts.push('"liga" 1')
+    if (ot.dlig) parts.push('"dlig" 1')
+    if (ot.smallCaps) parts.push('"smcp" 1')
+    if (ot.oldstyleNums) parts.push('"onum" 1')
+    if (ot.tabularNums) parts.push('"tnum" 1')
+    if (ot.fractions) parts.push('"frac" 1')
+    if (ot.superscript) parts.push('"sups" 1')
+    if (ot.subscript) parts.push('"subs" 1')
+    return parts.length > 0 ? parts.join(', ') : 'normal'
+  }
+
+  /** Get the CharStyle for the current session (editing item or store default). */
+  private sessionCharStyle() {
+    const engine = this.engine!
+    if (this.editingItem) {
+      const data = (this.editingItem as any).data ?? {}
+      return {
+        openType: data.openType ?? engine.store.charStyle.openType,
+      }
+    }
+    return engine.store.charStyle
+  }
+
   private buildOverlay(content: string) {
     const engine = this.engine!
     const container = engine.canvas.parentElement
@@ -992,6 +1022,10 @@ export class TextController {
     } else if (type.justification === 'right') {
       style.transform = 'translateX(-100%)'
     }
+    // Apply OpenType feature settings
+    const ot = this.sessionOpenType()
+    style.fontFeatureSettings = ot
+    style.fontVariantCaps = this.sessionCharStyle().openType?.smallCaps ? 'small-caps' : 'normal'
 
     overlay.addEventListener('input', () => this.autoSize())
     overlay.addEventListener('keydown', (e: KeyboardEvent) => {
