@@ -888,6 +888,12 @@ export class SelectController {
           this.refreshChrome()
           break
         case 'escape':
+          // Char selection takes priority: Escape clears it first.
+          if (engine.store.charSelection) {
+            engine.store.clearCharSelection()
+            this.clearCharHighlight()
+            break
+          }
           if (engine.store.isolationActive) {
             engine.exitIsolation()
             break
@@ -898,6 +904,35 @@ export class SelectController {
           engine.clearSelection()
           this.refreshChrome()
           break
+        case 'arrowleft':
+        case 'arrowright': {
+          // Arrow keys navigate within char selection.
+          const cs = engine.store.charSelection
+          if (cs) {
+            const sel = engine.getSelection()
+            const textItem = sel.find(
+              (i) => i instanceof engine.scope.PointText && (i.data as any)?.id === cs.itemId
+            ) as paper.PointText | undefined
+            if (textItem) {
+              const content = ((textItem as any).raw as string | undefined) ?? textItem.content
+              const dir = event.key === 'arrowleft' ? -1 : 1
+              let start = cs.start
+              let end = cs.end
+              if (event.modifiers.shift) {
+                // Extend selection.
+                end = Math.max(0, Math.min(content.length, end + dir))
+              } else {
+                // Move cursor.
+                start = end = Math.max(0, Math.min(content.length, (dir < 0 ? start : end) + dir))
+              }
+              engine.store.setCharSelection(cs.itemId, start, end)
+              this.drawCharSelection(textItem)
+              engine.scope.view.update()
+            }
+            break
+          }
+          break
+        }
         case 'd':
           if (event.modifiers.command) engine.duplicateSelected()
           break
