@@ -294,7 +294,7 @@ export type EnvelopePreset = 'arc-upper' | 'arc-lower' | 'bulge' | 'wave' | 'fla
 export type RulerUnit = 'px' | 'pt' | 'mm' | 'cm' | 'in'
 
 /** Right-panel tab */
-export type RightPanelTab = 'property' | 'align' | 'layer' | 'artboards' | 'swatches' | 'symbols' | 'history' | 'actions'
+export type RightPanelTab = 'property' | 'align' | 'layer' | 'artboards' | 'swatches' | 'symbols' | 'history' | 'actions' | 'appearance'
 
 /** Align target: united selection, active artboard, or a picked key object. */
 export type AlignTarget = 'selection' | 'board' | 'key'
@@ -307,6 +307,85 @@ export interface StylePreset {
   id: string
   name: string
   style: StyleState
+}
+
+/** One layer in a multi-fill/stroke appearance stack. */
+export interface AppearanceFill {
+  /** Unique id for drag-reorder and keyed selection. */
+  id: string
+  /** CSS color string (null = no fill). */
+  color: string | null
+  gradient: GradientState | null
+  pattern: PatternFillState | null
+  fillRule: FillRule
+  opacity: number
+  blendMode: string
+  /** Whether this fill is visible (can be toggled off). */
+  visible: boolean
+}
+
+export interface AppearanceStroke {
+  id: string
+  color: string | null
+  strokeWidth: number
+  strokeAlign: StrokeAlign
+  lineCap: LineCap
+  lineJoin: LineJoin
+  miterLimit: number
+  dashArray: number[]
+  dashOffset: number
+  opacity: number
+  blendMode: string
+  visible: boolean
+}
+
+/**
+ * Multi-appearance state stored on `item.data.appearance`.
+ * The bottom-most fill/stroke is the item's own Paper.js paint;
+ * additional layers render as child clones in a group.
+ */
+export interface AppearanceState {
+  fills: AppearanceFill[]
+  strokes: AppearanceStroke[]
+  /** Item-level opacity/blend (applies on top of per-layer values). */
+  opacity: number
+  blendMode: string
+}
+
+/** Opacity mask (AI/CDR opacity mask parity). */
+export interface OpacityMaskState {
+  /** Whether the mask is enabled. */
+  enabled: boolean
+  /** Invert the mask (swap black/white). */
+  invert: boolean
+  /**
+   * Mask source: a nested Paper.js item (path, group, or raster) whose
+   * luminance controls the alpha channel. Stored as serialized JSON
+   * to survive snapshots. Null = no mask content yet.
+   */
+  contentJson: string | null
+  /** The mask item's bounds (for positioning). Stored to restore after deserialization. */
+  bounds: { x: number; y: number; width: number; height: number } | null
+}
+
+/** One vertex in a mesh gradient grid. */
+export interface MeshGradientVertex {
+  /** Position relative to the shape's bounds origin. */
+  x: number
+  y: number
+  /** CSS color at this vertex. */
+  color: string
+  /** Opacity 0–1 at this vertex (optional, defaults to 1). */
+  opacity?: number
+}
+
+/** Mesh gradient (simulated via triangle tessellation). */
+export interface MeshGradientState {
+  /** Grid dimensions: cols × rows of control points. */
+  cols: number
+  rows: number
+  /** Vertex colors laid out row-major: index = row * cols + col. */
+  vertices: MeshGradientVertex[]
 }
 
 /** Saved workspace layout preset. */

@@ -41,6 +41,22 @@
     </div>
 
     <div class="panel-section">
+      <div class="sec-title">N-up Imposition</div>
+      <div class="row">
+        <el-select v-model="nUpCount" size="small" style="width: 100px">
+          <el-option :value="2" label="2-up" />
+          <el-option :value="4" label="4-up" />
+          <el-option :value="6" label="6-up" />
+          <el-option :value="9" label="9-up" />
+          <el-option :value="16" label="16-up" />
+        </el-select>
+        <el-button size="small" class="grid-btn" @click="exportNUp('svg')">SVG</el-button>
+        <el-button size="small" class="grid-btn" @click="exportNUp('pdf')">PDF</el-button>
+      </div>
+      <div class="hint">Arrange artboards on a single sheet for print.</div>
+    </div>
+
+    <div class="panel-section">
       <div class="sec-title">Keyboard Shortcuts</div>
       <div class="sc-list">
         <div v-for="s in shortcuts" :key="s.label + s.tool" class="sc-row">
@@ -64,6 +80,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch, inject, type Ref } from 'vue'
+import JSZip from 'jszip'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
 import type { RasterExportArea, RasterExportFormat, WorkspacePreset } from '../../editor/types'
@@ -159,8 +176,35 @@ function exportOne(scale: number) {
     store.setStatusMessage(`Asset exported (${format.value.toUpperCase()} ${scale}x)`)
   } catch { store.setStatusMessage('Raster export failed') }
 }
-function exportAll() {
-  for (const s of [1, 2, 3]) exportOne(s)
+async function exportAll() {
+  const e = engineRef?.value
+  if (!e) return
+  if (area.value === 'selection' && !store.hasSelection) {
+    store.setStatusMessage('Nothing selected to export')
+    return
+  }
+  const zip = new JSZip()
+  let exported = 0
+  for (const s of [1, 2, 3]) {
+    const url = e.exportRaster({ format: format.value, scale: s, area: area.value })
+    if (!url) continue
+    const label = area.value === 'page'
+      ? (store.activeArtboard?.name || 'page').replace(/[\/:*?"<>|]+/g, '-').slice(0, 40)
+      : area.value
+    const filename = `asset-${label}-${s}x.${format.value}`
+    // Convert data URL to blob for ZIP storage.
+    const res = await fetch(url)
+    const blob = await res.blob()
+    zip.file(filename, blob)
+    exported++
+  }
+  if (exported > 0) {
+    const blob = await zip.generateAsync({ type: 'blob' })
+    downloadHref(URL.createObjectURL(blob), 'assets-export.zip')
+    store.setStatusMessage(`Exported ${exported} assets as ZIP`)
+  } else {
+    store.setStatusMessage('Raster export failed')
+  }
 }
 
 const commandShortcuts = COMMAND_SHORTCUTS
@@ -171,6 +215,47 @@ const shortcuts = computed(() =>
     .map(([tool, def]) => ({ tool, label: (def as { label: string }).label }))
     .sort((a, b) => a.tool.localeCompare(b.tool))
 )
+
+// N-up imposition
+const nUpCount = ref(4)
+
+async function exportNUp(format: 'svg' | 'pdf' = 'svg') {
+  const e = engineRef?.value
+  if (!e) return
+  const boards = store.artboards.filter((b) => b.width > 0 && b.height > 0)
+  if (boards.length === 0) {
+    store.setStatusMessage('No artboards to impose')
+    return
+  }
+  try {
+    const svg = e.exportNUpSVG(boards, { upCount: nUpCount.value, spacing: 12, margin: 36 })
+    if (!svg) {
+      store.setStatusMessage('N-up export failed')
+      return
+    }
+    if (format === 'pdf') {
+      const { jsPDF } = await import('jspdf')
+      const { svg2pdf } = await import('svg2pdf.js')
+      const w = parseFloat(svg.getAttribute('width') || '800')
+      const h = parseFloat(svg.getAttribute('height') || '600')
+      const doc = new jsPDF({
+        orientation: w >= h ? 'landscape' : 'portrait',
+        unit: 'pt',
+        format: [w, h],
+        compress: true,
+      })
+      await svg2pdf(svg, doc, { x: 0, y: 0, width: w, height: h })
+      doc.save(`imposition-${nUpCount.value}up.pdf`)
+      store.setStatusMessage(`N-up imposition exported as PDF (${nUpCount.value}-up)`)
+    } else {
+      const str = new XMLSerializer().serializeToString(svg)
+      downloadHref(URL.createObjectURL(new Blob([str], { type: 'image/svg+xml' })), `imposition-${nUpCount.value}up.svg`)
+      store.setStatusMessage(`N-up imposition exported (${nUpCount.value}-up)`)
+    }
+  } catch {
+    store.setStatusMessage('N-up export failed')
+  }
+}
 </script>
 
 <style scoped>

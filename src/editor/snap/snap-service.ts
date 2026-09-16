@@ -10,6 +10,11 @@
  * - alignDraggedBounds() compares a dragged selection bounds against every
  *   other visible user item and returns the edge / center correction plus
  *   temporary guide segments (the "smart guides" behavior).
+ *
+ * Performance: anchor points and target rectangles are cached with spatial
+ * indexing (grid hash) and rebuilt only when the document geometry changes
+ * (dirty flag). Callers must call invalidateCache() when items are
+ * added/removed/moved/resized.
  */
 import type { EditorEngine } from '../engine'
 
@@ -20,11 +25,183 @@ export interface SmartCorrection {
   lines: Array<{ from: paper.Point; to: paper.Point }>
 }
 
+/** Cell in the spatial grid hash index. */
+interface GridCell {
+  /** Indices into the global anchors array. */
+  anchors: number[]
+}
+
+/**
+ * Spatial grid index for fast nearest-neighbor anchor lookups.
+ * Divides the document space into cells; each anchor is assigned to one cell.
+ * When searching, only the cell containing the query point and its 8 neighbors
+ * are checked (constant-time per lookup regardless of total anchor count).
+ */
+class SpatialGrid {
+  private cellSize: number
+  private cells = new Map<string, GridCell>()
+
+  constructor(cellSize = 200) {
+    this.cellSize = cellSize
+  }
+
+  /** Clear all cells. */
+  clear() {
+    this.cells.clear()
+  }
+
+  /** Get the grid key for a document coordinate. */
+  private key(x: number, y: number): string {
+    const cx = Math.floor(x / this.cellSize)
+    const cy = Math.floor(y / this.cellSize)
+    return `${cx},${cy}`
+  }
+
+  /** Insert an anchor point index into the grid. */
+  insert(index: number, x: number, y: number) {
+    const k = this.key(x, y)
+    let cell = this.cells.get(k)
+    if (!cell) {
+      cell = { anchors: [] }
+      this.cells.set(k, cell)
+    }
+    cell.anchors.push(index)
+  }
+
+  /**
+   * Query all anchor indices within the tolerance radius of (qx, qy).
+   * Returns indices from the 3×3 neighborhood of cells.
+   */
+  queryRange(qx: number, qy: number, tol: number): number[] {
+    const out: number[] = []
+    const cx = Math.floor(qx / this.cellSize)
+    const cy = Math.floor(qy / this.cellSize)
+    // Expand search by 1 cell in each direction (covers points near cell edges).
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        const cell = this.cells.get(`${cx + dx},${cy + dy}`)
+        if (cell) {
+          for (const idx of cell.anchors) out.push(idx)
+        }
+      }
+    }
+    return out
+  }
+}
+
+/**
+ * Spatial grid index for fast alignment target lookups.
+ * Stores target rectangle bounds; query returns targets that overlap
+ * an expanded candidate rectangle (candidate + tolerance).
+ */
+class TargetSpatialGrid {
+  private cellSize: number
+  private cells = new Map<string, number[]>()
+
+  constructor(cellSize = 400) {
+    this.cellSize = cellSize
+  }
+
+  clear() {
+    this.cells.clear()
+  }
+
+  private key(x: number, y: number): string {
+    const cx = Math.floor(x / this.cellSize)
+    const cy = Math.floor(y / this.cellSize)
+    return `${cx},${cy}`
+  }
+
+  /** Insert a target index; the target's bounds span multiple cells. */
+  insert(index: number, bounds: paper.Rectangle) {
+    const x0 = Math.floor(bounds.x / this.cellSize)
+    const y0 = Math.floor(bounds.y / this.cellSize)
+    const x1 = Math.floor((bounds.x + bounds.width) / this.cellSize)
+    const y1 = Math.floor((bounds.y + bounds.height) / this.cellSize)
+    for (let cx = x0; cx <= x1; cx++) {
+      for (let cy = y0; cy <= y1; cy++) {
+        const k = `${cx},${cy}`
+        let cell = this.cells.get(k)
+        if (!cell) {
+          cell = []
+          this.cells.set(k, cell)
+        }
+        cell.push(index)
+      }
+    }
+  }
+
+  /**
+   * Query target indices whose bounds may overlap with (candidate + tolerance).
+   * Returns a deduplicated set of candidate indices.
+   */
+  queryRange(candidate: paper.Rectangle, tol: number): number[] {
+    const expanded = candidate.expand(tol)
+    const x0 = Math.floor(expanded.x / this.cellSize)
+    const y0 = Math.floor(expanded.y / this.cellSize)
+    const x1 = Math.floor((expanded.x + expanded.width) / this.cellSize)
+    const y1 = Math.floor((expanded.y + expanded.height) / this.cellSize)
+    const seen = new Set<number>()
+    const out: number[] = []
+    for (let cx = x0; cx <= x1; cx++) {
+      for (let cy = y0; cy <= y1; cy++) {
+        const cell = this.cells.get(`${cx},${cy}`)
+        if (cell) {
+          for (const idx of cell) {
+            if (!seen.has(idx)) {
+              seen.add(idx)
+              out.push(idx)
+            }
+          }
+        }
+      }
+    }
+    return out
+  }
+}
+
+/**
+ * Cached snap data to avoid rebuilding every frame.
+ * Cached until invalidateCache() is called (on document changes).
+ */
+interface SnapCache {
+  anchors: paper.Point[]
+  targets: paper.Rectangle[]
+  anchorGrid: SpatialGrid
+  targetGrid: TargetSpatialGrid
+  version: number
+  anchorVersion: number
+  targetVersion: number
+}
+
+/**
+ * Document-wide snap cache shared across all SnapService instances.
+ * Invalidated on every document mutation (pushHistory, layer toggle, etc.).
+ */
+const snapCache: SnapCache = {
+  anchors: [],
+  targets: [],
+  anchorGrid: new SpatialGrid(200),
+  targetGrid: new TargetSpatialGrid(400),
+  version: -1,
+  anchorVersion: -1,
+  targetVersion: -1,
+}
+
 export class SnapService {
   engine: EditorEngine | null = null
 
   attachEngine(engine: EditorEngine) {
     this.engine = engine
+  }
+
+  /**
+   * Mark cached data as stale. Call after any document mutation that
+   * changes item geometry, visibility, lock state, or layer structure.
+   * Safe to call multiple times per frame (idempotent).
+   */
+  invalidateCache() {
+    snapCache.version++
   }
 
   /** Screen-space tolerance converted to document units. */
@@ -86,11 +263,27 @@ export class SnapService {
     // Path anchor points (strictly nearer wins, so guides/grid win ties).
     if (snap.point) {
       const excluded = new Set(exclude ?? [])
-      for (const anchor of this.collectAnchorPoints(excluded)) {
-        const dist = anchor.getDistance(raw)
-        if (dist < bestDist) {
-          best = anchor.clone()
-          bestDist = dist
+      const anchors = this.collectAnchorPoints(excluded)
+      // Use spatial grid when available and no exclusions (common case).
+      if (excluded.size === 0 && snapCache.anchorVersion === snapCache.version) {
+        const candidateIndices = snapCache.anchorGrid.queryRange(raw.x, raw.y, tol)
+        for (const idx of candidateIndices) {
+          const anchor = anchors[idx]
+          if (!anchor) continue
+          const dist = anchor.getDistance(raw)
+          if (dist < bestDist) {
+            best = anchor.clone()
+            bestDist = dist
+          }
+        }
+      } else {
+        // Fallback: linear scan (excluded set means we can't use cached grid).
+        for (const anchor of anchors) {
+          const dist = anchor.getDistance(raw)
+          if (dist < bestDist) {
+            best = anchor.clone()
+            bestDist = dist
+          }
         }
       }
     }
@@ -115,6 +308,12 @@ export class SnapService {
     const targets = this.collectTargetRects(excluded)
     if (targets.length === 0) return empty
 
+    // Use spatial grid to filter candidates when no exclusions (common case).
+    let targetIndices: number[] | null = null
+    if (excluded.size === 0 && snapCache.targetVersion === snapCache.version) {
+      targetIndices = snapCache.targetGrid.queryRange(candidate, tol)
+    }
+
     const candX = [candidate.x, candidate.x + candidate.width / 2, candidate.x + candidate.width]
     const candY = [candidate.y, candidate.y + candidate.height / 2, candidate.y + candidate.height]
 
@@ -132,7 +331,11 @@ export class SnapService {
     let spanRight = 0
     let foundY = false
 
-    for (const target of targets) {
+    // Iterate over filtered targets (spatial grid) or all targets (fallback).
+    const iterTargets = targetIndices !== null
+      ? targetIndices.map((i) => targets[i]).filter(Boolean)
+      : targets
+    for (const target of iterTargets) {
       const tx = [target.x, target.x + target.width / 2, target.x + target.width]
       const ty = [target.y, target.y + target.height / 2, target.y + target.height]
       for (const cx of candX) {
@@ -188,6 +391,12 @@ export class SnapService {
     const engine = this.engine
     if (!engine) return []
     const scope = engine.scope
+
+    // Use cache if valid (not invalidated since last build) and no exclusions.
+    if (snapCache.anchorVersion === snapCache.version && excluded.size === 0) {
+      return snapCache.anchors
+    }
+
     const out: paper.Point[] = []
     const walk = (item: paper.Item) => {
       if (excluded.has(item)) return
@@ -234,6 +443,17 @@ export class SnapService {
         new scope.Point(cx, cy)
       )
     }
+
+    // Cache when no exclusions (common case: snapPoint without dragged items).
+    if (excluded.size === 0) {
+      snapCache.anchors = out
+      // Build spatial grid for fast nearest-neighbor lookups.
+      snapCache.anchorGrid.clear()
+      for (let i = 0; i < out.length; i++) {
+        snapCache.anchorGrid.insert(i, out[i].x, out[i].y)
+      }
+      snapCache.anchorVersion = snapCache.version
+    }
     return out
   }
 
@@ -242,6 +462,12 @@ export class SnapService {
     const engine = this.engine
     if (!engine) return []
     const scope = engine.scope
+
+    // Use cache if valid (not invalidated since last build) and no exclusions.
+    if (snapCache.targetVersion === snapCache.version && excluded.size === 0) {
+      return snapCache.targets
+    }
+
     const out: paper.Rectangle[] = []
     for (const layer of engine.project.layers) {
       if (!(layer.data as any)?.isUserLayer || !layer.visible || layer.locked) continue
@@ -259,6 +485,17 @@ export class SnapService {
     for (const board of engine.store.artboards) {
       if (board.width <= 0 || board.height <= 0) continue
       out.push(new scope.Rectangle(board.x, board.y, board.width, board.height))
+    }
+
+    // Cache when no exclusions (common case: alignDraggedBounds without excluded items).
+    if (excluded.size === 0) {
+      snapCache.targets = out
+      // Build spatial grid for fast alignment target lookups.
+      snapCache.targetGrid.clear()
+      for (let i = 0; i < out.length; i++) {
+        snapCache.targetGrid.insert(i, out[i])
+      }
+      snapCache.targetVersion = snapCache.version
     }
     return out
   }

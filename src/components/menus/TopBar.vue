@@ -1041,6 +1041,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, inject, watch, onMounted, type Ref } from 'vue'
 import { QuestionFilled, Check } from '@element-plus/icons-vue'
+import JSZip from 'jszip'
 import AppDialog from '../ui/AppDialog.vue'
 import { uniqueSelectionName, pruneSelectionIds } from '../../editor/selection/saved-selection'
 import { clearRecentProjects, listRecentProjects, loadRecentProjectText } from '../../editor/recent-files'
@@ -1409,6 +1410,8 @@ async function onBoardsExportConfirm() {
     )
   } catch { /* private mode */ }
   const previousActive = store.activeArtboardId
+  const useZip = boards.length > 1
+  const zip = useZip ? new JSZip() : null
   try {
     if (boardsForm.format === 'pdf') {
       const { jsPDF } = await import('jspdf')
@@ -1424,8 +1427,17 @@ async function onBoardsExportConfirm() {
           compress: true,
         })
         doc.addImage(dataUrl, 'PNG', 0, 0, board.width, board.height)
-        doc.save(`${board.name || 'artboard'}.pdf`)
+        const filename = `${board.name || 'artboard'}.pdf`
+        if (zip) {
+          zip.file(filename, doc.output('blob'))
+        } else {
+          doc.save(filename)
+        }
         painted++
+      }
+      if (zip && painted > 0) {
+        const blob = await zip.generateAsync({ type: 'blob' })
+        downloadHref(URL.createObjectURL(blob), 'boards-export.zip')
       }
       store.setStatusMessage(painted > 0 ? `Exported ${painted} board PDF${painted === 1 ? '' : 's'}` : 'Board export failed')
     } else if (boardsForm.format === 'svg') {
@@ -1434,8 +1446,17 @@ async function onBoardsExportConfirm() {
         const svg = e.exportBoardVectorSVG(board, { bleed: 0, marks: false })
         if (!svg) continue
         const str = new XMLSerializer().serializeToString(svg)
-        downloadHref(URL.createObjectURL(new Blob([str], { type: 'image/svg+xml' })), `${board.name || 'artboard'}.svg`)
+        const filename = `${board.name || 'artboard'}.svg`
+        if (zip) {
+          zip.file(filename, str)
+        } else {
+          downloadHref(URL.createObjectURL(new Blob([str], { type: 'image/svg+xml' })), filename)
+        }
         painted++
+      }
+      if (zip && painted > 0) {
+        const blob = await zip.generateAsync({ type: 'blob' })
+        downloadHref(URL.createObjectURL(blob), 'boards-export.zip')
       }
       store.setStatusMessage(painted > 0 ? `Exported ${painted} board SVG${painted === 1 ? '' : 's'}` : 'Board export failed')
     } else {
@@ -1453,8 +1474,20 @@ async function onBoardsExportConfirm() {
           skipped++
           continue
         }
-        downloadHref(dataUrl, `${board.name || 'artboard'}.${boardsForm.format}`)
+        const filename = `${board.name || 'artboard'}.${boardsForm.format}`
+        if (zip) {
+          // Convert data URL to blob for ZIP storage.
+          const res = await fetch(dataUrl)
+          const blob = await res.blob()
+          zip.file(filename, blob)
+        } else {
+          downloadHref(dataUrl, filename)
+        }
         painted++
+      }
+      if (zip && painted > 0) {
+        const blob = await zip.generateAsync({ type: 'blob' })
+        downloadHref(URL.createObjectURL(blob), 'boards-export.zip')
       }
       store.setStatusMessage(
         painted === 0
@@ -2286,6 +2319,8 @@ async function onExportVectorPdf() {
       format: [pageWidth, pageHeight],
       compress: true,
     })
+    // Embed registered fonts into the PDF
+    await e.applyFontsToPdf(doc)
     await svg2pdf(svg, doc, { x: 0, y: 0, width: pageWidth, height: pageHeight })
     doc.save('export-vector.pdf')
     store.setStatusMessage(bleed > 0 ? `Vector PDF exported (bleed ${bleed})` : 'Vector PDF exported')
@@ -2297,7 +2332,7 @@ async function onExportVectorPdf() {
 /**
  * Export every artboard as one vector PDF page each (one-up imposition:
  * every board is its own page). Boards keep their own page sizes plus the
- * shared bleed; fonts are referenced, not embedded.
+ * shared bleed; registered fonts are embedded.
  */
 async function onExportBoardsVectorPdf() {
   const e = engineRef?.value
@@ -2321,6 +2356,8 @@ async function onExportBoardsVectorPdf() {
       const orientation = pageWidth >= pageHeight ? 'landscape' : 'portrait'
       if (!doc) {
         doc = new jsPDF({ orientation, unit: 'pt', format: [pageWidth, pageHeight], compress: true })
+        // Embed registered fonts into the PDF
+        await e.applyFontsToPdf(doc)
       } else {
         doc.addPage([pageWidth, pageHeight], orientation)
       }

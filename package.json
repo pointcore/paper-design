@@ -10,12 +10,14 @@
     "preview": "vite preview",
     "test": "node scripts/check-engine-size.js && vitest run",
     "test:unit": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "npx playwright test"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.1",
     "element-plus": "^2.14.0",
     "jspdf": "^4.2.1",
+    "jszip": "^3.10.2",
     "paper": "^0.12.17",
     "paperjs-offset": "^2.2.1",
     "pinia": "^2.1.7",

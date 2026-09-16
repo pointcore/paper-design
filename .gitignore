@@ -20,6 +20,7 @@ dist-ssr/
 
 # Test & Type
 tests/
+coverage/
 *.tsbuildinfo
 components.d.ts
 auto-imports.d.ts

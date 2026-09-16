@@ -9,21 +9,26 @@
       </div>
     </div>
 
+    <div v-if="store.history.length > 0" class="hs-search">
+      <input v-model="filterText" class="hs-search-input" placeholder="Filter history..." />
+    </div>
+
     <div class="panel-body" ref="bodyRef">
       <div v-if="store.history.length === 0" class="history-empty">No history yet</div>
-      <div v-for="(entry, index) in store.history" :key="entry.timestamp + '-' + index"
+      <div v-else-if="filteredHistory.length === 0" class="history-empty">No matches</div>
+      <div v-for="item in filteredHistory" :key="item.entry.timestamp + '-' + item.index"
            class="history-item"
-           :class="{ active: index === store.historyIndex, future: index > store.historyIndex }"
-           @click="jumpTo(index)">
+           :class="{ active: item.index === store.historyIndex, future: item.index > store.historyIndex }"
+           @click="jumpTo(item.index)">
         <el-icon size="14" class="history-icon"><Document /></el-icon>
-        <span class="history-name">{{ entry.name }}</span>
+        <span class="history-name">{{ item.entry.name }}</span>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, inject, type Ref } from 'vue'
+import { ref, computed, watch, inject, type Ref } from 'vue'
 import { Back, Delete, Document, Right } from '@element-plus/icons-vue'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
@@ -32,6 +37,14 @@ const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
 
 const bodyRef = ref<HTMLElement>()
+const filterText = ref('')
+
+const filteredHistory = computed(() => {
+  const text = filterText.value.toLowerCase().trim()
+  return store.history
+    .map((entry, index) => ({ entry, index }))
+    .filter(({ entry }) => !text || entry.name.toLowerCase().includes(text))
+})
 
 function getEngine() { return engineRef?.value || null }
 
@@ -109,6 +122,31 @@ watch(() => store.historyIndex, () => {
 .action-btn.disabled {
   opacity: 0.35;
   pointer-events: none;
+}
+
+.hs-search {
+  padding: 6px 10px;
+  border-bottom: 1px solid #161616;
+  flex-shrink: 0;
+}
+
+.hs-search-input {
+  width: 100%;
+  background: #333;
+  border: 1px solid #4a4a4a;
+  border-radius: 3px;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: #d5d5d5;
+  outline: none;
+}
+
+.hs-search-input:focus {
+  border-color: #2f6fbf;
+}
+
+.hs-search-input::placeholder {
+  color: #666;
 }
 
 .panel-body {

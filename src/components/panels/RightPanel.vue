@@ -51,22 +51,28 @@
       <div v-show="activeTab === 'actions'" class="rp-pane">
         <ActionsPanel />
       </div>
+      <div v-show="activeTab === 'appearance'" class="rp-pane">
+        <AppearancePanel />
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, defineAsyncComponent } from 'vue'
 import { useEditorStore } from '../../editor/store'
 import type { RightPanelTab } from '../../editor/types'
-import PropertyPanel from './PropertyPanel.vue'
-import AlignPanel from './AlignPanel.vue'
-import LayerPanel from './LayerPanel.vue'
-import ArtboardPanel from './ArtboardPanel.vue'
-import SwatchesPanel from './SwatchesPanel.vue'
-import HistoryPanel from './HistoryPanel.vue'
-import SymbolsPanel from './SymbolsPanel.vue'
-import ActionsPanel from './ActionsPanel.vue'
+
+// Lazy-load panels so each tab's code is only fetched when first activated.
+const PropertyPanel = defineAsyncComponent(() => import('./PropertyPanel.vue'))
+const AlignPanel = defineAsyncComponent(() => import('./AlignPanel.vue'))
+const LayerPanel = defineAsyncComponent(() => import('./LayerPanel.vue'))
+const ArtboardPanel = defineAsyncComponent(() => import('./ArtboardPanel.vue'))
+const SwatchesPanel = defineAsyncComponent(() => import('./SwatchesPanel.vue'))
+const HistoryPanel = defineAsyncComponent(() => import('./HistoryPanel.vue'))
+const SymbolsPanel = defineAsyncComponent(() => import('./SymbolsPanel.vue'))
+const ActionsPanel = defineAsyncComponent(() => import('./ActionsPanel.vue'))
+const AppearancePanel = defineAsyncComponent(() => import('./AppearancePanel.vue'))
 
 const store = useEditorStore()
 
@@ -139,6 +145,7 @@ const tabs = [
   { key: 'artboards', label: 'Boards' },
   { key: 'swatches', label: 'Swatch' },
   { key: 'symbols', label: 'Symbol' },
+  { key: 'appearance', label: 'Appear' },
   { key: 'history', label: 'Hist' },
   { key: 'actions', label: 'Action' },
 ] as const

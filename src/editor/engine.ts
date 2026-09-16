@@ -3,7 +3,7 @@
  */
 import paper from 'paper'
 import { PaperOffset } from 'paperjs-offset'
-import type { ToolName, StyleState, LayerMeta, LayerItemNode, ArtboardMeta, SymbolEntry, HistoryEntry, GuideOrientation, ProjectFileData, ReferencePoint, AlignMode, DistributeAxis, BooleanOperation, RasterExportOptions, GradientState, PatternFillState, EnvelopePreset } from './types'
+import type { ToolName, StyleState, LayerMeta, LayerItemNode, ArtboardMeta, SymbolEntry, HistoryEntry, GuideOrientation, ProjectFileData, ReferencePoint, AlignMode, DistributeAxis, BooleanOperation, RasterExportOptions, GradientState, PatternFillState, EnvelopePreset, AppearanceState, AppearanceFill, AppearanceStroke, OpacityMaskState, MeshGradientState, MeshGradientVertex } from './types'
 import { createDefaultStyle } from './store'
 import { cursorForTool } from './cursors'
 import { gradientAngleFromVector, linearGradientEndpoints, normalizeAngleDeg } from './geometry'
@@ -14,6 +14,7 @@ import { colorDistanceRgb, invertCssColor, isOutOfCmykGamut, parseCssColor, rgbT
 import { parseProjectFile } from './project-file'
 import { recordRecentProject } from './recent-files'
 import type { EditorStore } from './store-types'
+import { SnapService } from './snap/snap-service'
 
 /** Identifier stamped into every saved project file. */
 const PROJECT_FILE_APP = 'vue-vector-editor'
@@ -54,6 +55,9 @@ export class EditorEngine {
   private historySnapshots: string[] = []
   /** Document metadata riding alongside each paper snapshot (undoable). */
   private historyMeta: Array<HistoryDocMeta | null> = []
+
+  // Font registry for PDF embedding: maps font family name → { data: ArrayBuffer, style: string }
+  private static fontRegistry = new Map<string, { data: ArrayBuffer; style: string; weight: number }>()
 
   constructor(canvas: HTMLCanvasElement, store: EditorStore) {
     this.canvas = canvas
@@ -1644,6 +1648,475 @@ export class EditorEngine {
     return style
   }
 
+  // ===== Multi-appearance (AI Appearance panel parity) =====
+
+  /** Create a default empty appearance (single fill + stroke). */
+  createDefaultAppearance(): AppearanceState {
+    return {
+      fills: [{
+        id: this.genId(),
+        color: null,
+        gradient: null,
+        pattern: null,
+        fillRule: 'nonzero',
+        opacity: 1,
+        blendMode: 'source-over',
+        visible: true,
+      }],
+      strokes: [{
+        id: this.genId(),
+        color: '#000000',
+        strokeWidth: 1,
+        strokeAlign: 'center',
+        lineCap: 'round',
+        lineJoin: 'miter',
+        miterLimit: 4,
+        dashArray: [],
+        dashOffset: 0,
+        opacity: 1,
+        blendMode: 'source-over',
+        visible: true,
+      }],
+      opacity: 1,
+      blendMode: 'source-over',
+    }
+  }
+
+  /** Read appearance from an item (or create default). */
+  getAppearanceFromItem(item: paper.Item): AppearanceState {
+    const data = (item.data as any) ?? {}
+    if (data.appearance) {
+      return data.appearance as AppearanceState
+    }
+    // Legacy single-appearance: build from current item paint.
+    const style = this.getStyleFromItem(item)
+    return {
+      fills: [{
+        id: this.genId(),
+        color: style.fillColor,
+        gradient: style.gradient,
+        pattern: style.pattern,
+        fillRule: style.fillRule,
+        opacity: 1,
+        blendMode: 'source-over',
+        visible: true,
+      }],
+      strokes: [{
+        id: this.genId(),
+        color: style.strokeColor,
+        strokeWidth: style.strokeWidth,
+        strokeAlign: style.strokeAlign,
+        lineCap: style.lineCap,
+        lineJoin: style.lineJoin,
+        miterLimit: style.miterLimit,
+        dashArray: style.dashArray,
+        dashOffset: style.dashOffset,
+        opacity: 1,
+        blendMode: 'source-over',
+        visible: true,
+      }],
+      opacity: style.opacity,
+      blendMode: style.blendMode,
+    }
+  }
+
+  /** Store appearance on an item and apply the bottom-most fill/stroke to Paper. */
+  setAppearanceOnItem(item: paper.Item, appearance: AppearanceState) {
+    const data = (item.data as any) ?? {}
+    data.appearance = appearance
+    item.data = data
+    // Apply bottom-most visible fill and stroke to the Paper.js item.
+    const fill = appearance.fills.filter((f) => f.visible).pop()
+    const stroke = appearance.strokes.filter((s) => s.visible).pop()
+    const paperStyle: any = {}
+    if (fill) {
+      if (fill.gradient) {
+        const gf = this.gradientFillForItem(item, { gradient: fill.gradient } as StyleState)
+        paperStyle.fillColor = gf ?? fill.color
+      } else if (fill.pattern) {
+        // Pattern fills are handled by the pattern group; skip here.
+      } else {
+        paperStyle.fillColor = fill.color
+      }
+      paperStyle.fillRule = fill.fillRule
+    } else {
+      paperStyle.fillColor = null
+    }
+    if (stroke && stroke.visible) {
+      paperStyle.strokeColor = stroke.color
+      paperStyle.strokeWidth = stroke.strokeWidth
+      paperStyle.strokeCap = stroke.lineCap
+      paperStyle.strokeJoin = stroke.lineJoin
+      paperStyle.miterLimit = stroke.miterLimit
+      if (stroke.dashArray.length > 0) paperStyle.dashArray = stroke.dashArray
+      paperStyle.dashOffset = stroke.dashOffset
+    } else {
+      paperStyle.strokeColor = null
+    }
+    paperStyle.opacity = appearance.opacity
+    paperStyle.blendMode = appearance.blendMode
+    item.set(paperStyle)
+  }
+
+  /** Add a fill layer to an item's appearance. */
+  addAppearanceFill(item: paper.Item, fill?: Partial<AppearanceFill>): AppearanceFill {
+    const app = this.getAppearanceFromItem(item)
+    const newFill: AppearanceFill = {
+      id: this.genId(),
+      color: '#ff0000',
+      gradient: null,
+      pattern: null,
+      fillRule: 'nonzero',
+      opacity: 1,
+      blendMode: 'source-over',
+      visible: true,
+      ...fill,
+    }
+    app.fills.push(newFill)
+    this.setAppearanceOnItem(item, app)
+    return newFill
+  }
+
+  /** Add a stroke layer to an item's appearance. */
+  addAppearanceStroke(item: paper.Item, stroke?: Partial<AppearanceStroke>): AppearanceStroke {
+    const app = this.getAppearanceFromItem(item)
+    const newStroke: AppearanceStroke = {
+      id: this.genId(),
+      color: '#000000',
+      strokeWidth: 1,
+      strokeAlign: 'center',
+      lineCap: 'round',
+      lineJoin: 'miter',
+      miterLimit: 4,
+      dashArray: [],
+      dashOffset: 0,
+      opacity: 1,
+      blendMode: 'source-over',
+      visible: true,
+      ...stroke,
+    }
+    app.strokes.push(newStroke)
+    this.setAppearanceOnItem(item, app)
+    return newStroke
+  }
+
+  /** Remove a fill layer by id. */
+  removeAppearanceFill(item: paper.Item, fillId: string) {
+    const app = this.getAppearanceFromItem(item)
+    app.fills = app.fills.filter((f) => f.id !== fillId)
+    if (app.fills.length === 0) {
+      app.fills.push({ id: this.genId(), color: null, gradient: null, pattern: null, fillRule: 'nonzero', opacity: 1, blendMode: 'source-over', visible: true })
+    }
+    this.setAppearanceOnItem(item, app)
+  }
+
+  /** Remove a stroke layer by id. */
+  removeAppearanceStroke(item: paper.Item, strokeId: string) {
+    const app = this.getAppearanceFromItem(item)
+    app.strokes = app.strokes.filter((s) => s.id !== strokeId)
+    if (app.strokes.length === 0) {
+      app.strokes.push({ id: this.genId(), color: null, strokeWidth: 1, strokeAlign: 'center', lineCap: 'round', lineJoin: 'miter', miterLimit: 4, dashArray: [], dashOffset: 0, opacity: 1, blendMode: 'source-over', visible: true })
+    }
+    this.setAppearanceOnItem(item, app)
+  }
+
+  /** Update a fill layer. */
+  updateAppearanceFill(item: paper.Item, fillId: string, patch: Partial<AppearanceFill>) {
+    const app = this.getAppearanceFromItem(item)
+    const fill = app.fills.find((f) => f.id === fillId)
+    if (fill) {
+      Object.assign(fill, patch)
+      this.setAppearanceOnItem(item, app)
+    }
+  }
+
+  /** Update a stroke layer. */
+  updateAppearanceStroke(item: paper.Item, strokeId: string, patch: Partial<AppearanceStroke>) {
+    const app = this.getAppearanceFromItem(item)
+    const stroke = app.strokes.find((s) => s.id === strokeId)
+    if (stroke) {
+      Object.assign(stroke, patch)
+      this.setAppearanceOnItem(item, app)
+    }
+  }
+
+  /** Reorder fill layers (drag-and-drop). */
+  reorderAppearanceFills(item: paper.Item, fromIndex: number, toIndex: number) {
+    const app = this.getAppearanceFromItem(item)
+    const [moved] = app.fills.splice(fromIndex, 1)
+    if (moved) {
+      app.fills.splice(toIndex, 0, moved)
+      this.setAppearanceOnItem(item, app)
+    }
+  }
+
+  /** Reorder stroke layers (drag-and-drop). */
+  reorderAppearanceStrokes(item: paper.Item, fromIndex: number, toIndex: number) {
+    const app = this.getAppearanceFromItem(item)
+    const [moved] = app.strokes.splice(fromIndex, 1)
+    if (moved) {
+      app.strokes.splice(toIndex, 0, moved)
+      this.setAppearanceOnItem(item, app)
+    }
+  }
+
+  // ===== Opacity masks (AI/CDR parity) =====
+
+  /** Get opacity mask from an item (or null). */
+  getOpacityMask(item: paper.Item): OpacityMaskState | null {
+    const data = (item.data as any) ?? {}
+    return data.opacityMask ?? null
+  }
+
+  /** Create a default opacity mask state. */
+  private createDefaultOpacityMask(): OpacityMaskState {
+    return {
+      enabled: true,
+      invert: false,
+      contentJson: null,
+      bounds: null,
+    }
+  }
+
+  /**
+   * Apply an opacity mask to an item. The mask content is a Paper.js item
+   * whose luminance controls the alpha channel. For live preview, we use
+   * a simplified approach: the mask is stored and applied during export.
+   */
+  applyOpacityMask(target: paper.Item, maskContent: paper.Item | null): void {
+    const data = (target.data as any) ?? {}
+    if (!maskContent) {
+      // Remove mask.
+      delete data.opacityMask
+      target.data = data
+      // Remove mask group if it exists.
+      if (target.parent instanceof this.scope.Group && (target.parent as any).data?.isOpacityMaskGroup) {
+        const group = target.parent
+        const parent = group.parent ?? this.getActiveLayer()
+        const at = parent.children.indexOf(group)
+        // Move target out of the group.
+        for (const child of group.children.slice()) {
+          if (child !== target) {
+            parent.insertChild(Math.min(at, parent.children.length), child)
+          }
+        }
+        group.remove()
+        target.selected = true
+      }
+      return
+    }
+
+    // Serialize the mask content for storage.
+    const contentJson = maskContent.exportJSON({ asString: true })
+    const bounds = maskContent.bounds ? {
+      x: maskContent.bounds.x,
+      y: maskContent.bounds.y,
+      width: maskContent.bounds.width,
+      height: maskContent.bounds.height,
+    } : null
+
+    const maskState: OpacityMaskState = {
+      enabled: true,
+      invert: false,
+      contentJson,
+      bounds,
+    }
+    data.opacityMask = maskState
+    target.data = data
+
+    // For live preview: wrap in a group with the mask applied via alpha.
+    // This is a simplified preview; full mask is applied during SVG export.
+    this.applyOpacityMaskPreview(target, maskContent)
+  }
+
+  /**
+   * Simplified live preview of opacity mask using Paper.js group compositing.
+   * The full mask is applied during SVG/PDF export.
+   */
+  private applyOpacityMaskPreview(target: paper.Item, maskContent: paper.Item): void {
+    const scope = this.scope
+    const parent = target.parent ?? this.getActiveLayer()
+    const at = parent.children.indexOf(target)
+
+    // Create a group to hold the masked content.
+    const group = new scope.Group({ insert: false }) as paper.Group
+    ;(group as any).data = { isOpacityMaskGroup: true, id: this.genId(), isUserItem: true }
+
+    // Clone the target for the masked version.
+    const clone = target.clone({ insert: false }) as paper.Item
+    clone.data = { ...clone.data, isOpacityMaskClone: true }
+
+    // Create the mask shape (white fill = opaque, black = transparent).
+    const maskClone = maskContent.clone({ insert: false }) as paper.Item
+    maskClone.fillColor = new scope.Color(1, 1, 1) // White = opaque
+    maskClone.opacity = 0.5 // Semi-transparent for preview
+    ;(maskClone as any).data = { isOpacityMaskPreview: true }
+
+    group.addChild(clone)
+    group.addChild(maskClone)
+
+    // Replace the original with the group.
+    parent.insertChild(Math.min(at, parent.children.length), group)
+    target.remove()
+
+    // Store reference for cleanup.
+    const groupData = (group as any).data
+    groupData.maskedItemId = (clone as any).data?.id
+
+    this.scope.view.update()
+  }
+
+  /** Remove opacity mask from an item. */
+  removeOpacityMask(item: paper.Item): void {
+    this.applyOpacityMask(item, null)
+  }
+
+  /** Toggle opacity mask enabled state. */
+  toggleOpacityMask(item: paper.Item, enabled: boolean): void {
+    const data = (item.data as any) ?? {}
+    const mask = data.opacityMask as OpacityMaskState | undefined
+    if (mask) {
+      mask.enabled = enabled
+      item.data = data
+    }
+  }
+
+  /** Toggle opacity mask invert. */
+  toggleOpacityMaskInvert(item: paper.Item, invert: boolean): void {
+    const data = (item.data as any) ?? {}
+    const mask = data.opacityMask as OpacityMaskState | undefined
+    if (mask) {
+      mask.invert = invert
+      item.data = data
+    }
+  }
+
+  // ===== Mesh gradients (simulated via triangle tessellation) =====
+  //
+  // Paper.js has no native mesh gradient. We simulate one by:
+  // 1. Creating a grid of control vertices with per-vertex colors
+  // 2. Tessellating the grid into triangles
+  // 3. Rendering each triangle as a 3-stop linear gradient (barycentric interpolation)
+
+  /** Get mesh gradient state from item, or null. */
+  getMeshGradient(item: paper.Item): MeshGradientState | null {
+    const data = (item.data as any) ?? {}
+    return (data.meshGradient as MeshGradientState) ?? null
+  }
+
+  /** Create a default mesh gradient (2×2 grid, 4 vertices). */
+  createDefaultMeshGradient(item: paper.Item): MeshGradientState {
+    const bounds = item.bounds
+    if (!bounds) {
+      return { cols: 2, rows: 2, vertices: [] }
+    }
+    const w = bounds.width
+    const h = bounds.height
+    const vertices: MeshGradientVertex[] = [
+      { x: 0, y: 0, color: '#ff0000' },
+      { x: w, y: 0, color: '#ffff00' },
+      { x: 0, y: h, color: '#0000ff' },
+      { x: w, y: h, color: '#00ff00' },
+    ]
+    return { cols: 2, rows: 2, vertices }
+  }
+
+  /** Apply a mesh gradient to an item by tessellating into gradient-filled triangles. */
+  applyMeshGradient(item: paper.Item, mesh: MeshGradientState): void {
+    const data = (item.data as any) ?? {}
+    data.meshGradient = mesh
+    item.data = data
+
+    // Remove old mesh children
+    this.clearMeshGradientChildren(item)
+
+    // Tessellate and render
+    const bounds = item.bounds
+    if (!bounds || mesh.vertices.length === 0) return
+
+    const originX = bounds.x
+    const originY = bounds.y
+    const cellW = bounds.width / Math.max(mesh.cols - 1, 1)
+    const cellH = bounds.height / Math.max(mesh.rows - 1, 1)
+
+    const group = new this.scope.Group()
+    ;(group as any).data = { isMeshGradientGroup: true, id: this.genId(), isUserItem: true }
+
+    for (let r = 0; r < mesh.rows - 1; r++) {
+      for (let c = 0; c < mesh.cols - 1; c++) {
+        const tl = mesh.vertices[r * mesh.cols + c]
+        const tr = mesh.vertices[r * mesh.cols + c + 1]
+        const bl = mesh.vertices[(r + 1) * mesh.cols + c]
+        const br = mesh.vertices[(r + 1) * mesh.cols + c + 1]
+
+        // Upper-left triangle: tl, tr, bl
+        this.renderMeshTriangle(group, originX, originY, tl, tr, bl)
+        // Lower-right triangle: tr, br, bl
+        this.renderMeshTriangle(group, originX, originY, tr, br, bl)
+      }
+    }
+
+    item.parent?.insertChild(item.parent.children.length, group)
+  }
+
+  private renderMeshTriangle(
+    parent: paper.Group,
+    ox: number, oy: number,
+    v0: MeshGradientVertex, v1: MeshGradientVertex, v2: MeshGradientVertex,
+  ) {
+    const scope = this.scope
+    const path = new scope.Path({
+      segments: [
+        [ox + v0.x, oy + v0.y],
+        [ox + v1.x, oy + v1.y],
+        [ox + v2.x, oy + v2.y],
+      ],
+      closed: true,
+      insert: false,
+    })
+
+    // Compute centroid for gradient center
+    const cx = (v0.x + v1.x + v2.x) / 3
+    const cy = (v0.y + v1.y + v2.y) / 3
+
+    // Use a linear gradient from v0→v2 blending the 3 vertex colors
+    // This is an approximation; full barycentric would require per-pixel rendering
+    const grad = new scope.Gradient()
+    grad.stops = [
+      new scope.GradientStop(new scope.Color(v0.color), 0),
+      new scope.GradientStop(new scope.Color(v1.color), 0.5),
+      new scope.GradientStop(new scope.Color(v2.color), 1),
+    ]
+    grad.radial = false
+
+    const origin = new scope.Point(ox + v0.x, oy + v0.y)
+    const destination = new scope.Point(ox + v2.x, oy + v2.y)
+    path.fillColor = new scope.Color(grad, origin, destination)
+    path.strokeWidth = 0
+    ;(path as any).data = { isMeshTriangle: true }
+    parent.addChild(path)
+  }
+
+  /** Remove all mesh gradient child triangles from an item. */
+  private clearMeshGradientChildren(item: paper.Item): void {
+    const children = item.parent?.children ?? []
+    for (let i = children.length - 1; i >= 0; i--) {
+      const child = children[i]
+      const d = (child.data as any) ?? {}
+      if (d.isMeshGradientGroup) {
+        child.remove()
+      }
+    }
+  }
+
+  /** Remove mesh gradient from an item. */
+  removeMeshGradient(item: paper.Item): void {
+    const data = (item.data as any) ?? {}
+    delete data.meshGradient
+    item.data = data
+    this.clearMeshGradientChildren(item)
+  }
+
   // ===== Pattern fills (AI-style swatches via clipped tile groups) =====
   //
   // Paper.js has no native pattern paint, so a pattern fill is a plain
@@ -2086,6 +2559,9 @@ export class EditorEngine {
     'Duplicate',
   ])
 
+  /** Shared snap service for invalidating the document-wide cache. */
+  private static readonly snapService = new SnapService()
+
   /** Bump the geometry version (invalidates untracked selection frames). */
   bumpGeometryVersion() {
     this.geometryVersion++
@@ -2110,6 +2586,8 @@ export class EditorEngine {
     this.store.bumpRevision()
     if (!EditorEngine.FRAME_SAFE_HISTORY.has(name)) {
       this.geometryVersion++
+      // Invalidate snap cache when document geometry changes.
+      EditorEngine.snapService.invalidateCache()
     }
   }
 
@@ -2132,6 +2610,8 @@ export class EditorEngine {
       )
       this.store.setHistoryIndex(this.historyIndex)
       this.store.bumpRevision()
+      // Invalidate snap cache after undo (document geometry may have changed).
+      EditorEngine.snapService.invalidateCache()
     }
   }
 
@@ -2144,6 +2624,8 @@ export class EditorEngine {
       )
       this.store.setHistoryIndex(this.historyIndex)
       this.store.bumpRevision()
+      // Invalidate snap cache after redo (document geometry may have changed).
+      EditorEngine.snapService.invalidateCache()
     }
   }
 
@@ -4660,6 +5142,8 @@ export class EditorEngine {
       if (opts?.marks && bleed > 0) {
         this.appendCropMarks(root, ns, board, bleed)
       }
+      // Convert opacity-mask groups to SVG <mask> elements
+      this.applySvgMasks(root)
       return root
     } catch {
       return null
@@ -4715,6 +5199,197 @@ export class EditorEngine {
       group.appendChild(line)
     }
     root.appendChild(group)
+  }
+
+  /**
+   * Post-process exported SVG to convert opacity-mask groups into proper
+   * SVG `<mask>` elements. Paper.js has no native mask export, so we
+   * detect groups with `data-isOpacityMaskGroup` and rewrite them.
+   */
+  private applySvgMasks(root: SVGSVGElement): void {
+    const ns = 'http://www.w3.org/2000/svg'
+    const defs = document.createElementNS(ns, 'defs')
+    let defsInserted = false
+    let maskId = 0
+
+    const groups = root.querySelectorAll('g')
+    for (const g of Array.from(groups)) {
+      const dataStr = g.getAttribute('data-isOpacityMaskGroup')
+      if (dataStr !== 'true') continue
+
+      const children = Array.from(g.children)
+      if (children.length < 1) continue
+
+      // The first child is the masked content, second (if present) is the mask shape
+      const maskedContent = children[0]
+      const maskShape = children.length > 1 ? children[1] : null
+
+      if (!maskShape) continue
+
+      const id = `vve-mask-${maskId++}`
+
+      // Build a <mask> element with the mask shape
+      const mask = document.createElementNS(ns, 'mask')
+      mask.setAttribute('id', id)
+      mask.setAttribute('maskUnits', 'userSpaceOnUse')
+
+      // Copy the mask shape into the mask (luminance mask = white=opaque)
+      const maskContent = maskShape.cloneNode(true) as SVGElement
+      // Ensure the mask shape renders in luminance
+      if (maskContent.tagName === 'path' || maskContent.tagName === 'rect' ||
+          maskContent.tagName === 'ellipse' || maskContent.tagName === 'circle') {
+        maskContent.removeAttribute('fill')
+        maskContent.setAttribute('fill', 'white')
+      }
+      mask.appendChild(maskContent)
+
+      // Insert defs if not done yet
+      if (!defsInserted) {
+        root.insertBefore(defs, root.firstChild)
+        defsInserted = true
+      }
+      defs.appendChild(mask)
+
+      // Get the masked content's existing attributes
+      const transform = g.getAttribute('transform') || ''
+
+      // Replace the group with the masked content wrapped in mask reference
+      const wrapper = document.createElementNS(ns, 'g')
+      if (transform) wrapper.setAttribute('transform', transform)
+      wrapper.setAttribute('mask', `url(#${id})`)
+
+      // Move all children of the original masked content into the wrapper
+      while (maskedContent.firstChild) {
+        wrapper.appendChild(maskedContent.firstChild)
+      }
+      // If maskedContent has attributes (like transform), copy them
+      for (const attr of Array.from(maskedContent.attributes)) {
+        if (attr.name !== 'transform') {
+          wrapper.setAttribute(attr.name, attr.value)
+        }
+      }
+
+      g.parentNode?.replaceChild(wrapper, g)
+    }
+  }
+
+  // ===== N-up imposition (multi-page → single sheet layout) =====
+
+  /**
+   * Compute an N-up imposition layout. Returns a list of { page, x, y }
+   * describing where each board goes on the imposition sheet.
+   * @param boards - array of artboard dimensions
+   * @param upCount - number of pages per sheet (e.g. 2, 4, 6, 9, 16)
+   * @param spacing - gap between imposed pages (pt)
+   * @param margin - sheet margin (pt)
+   * @param landscape - force sheet orientation
+   */
+  computeNUpLayout(
+    boards: Array<{ width: number; height: number }>,
+    upCount: number = 4,
+    spacing: number = 12,
+    margin: number = 36,
+    landscape?: boolean,
+  ): Array<{ pageIndex: number; x: number; y: number; scale: number }> {
+    if (boards.length === 0 || upCount < 1) return []
+
+    // Find max board dimensions to determine sheet size
+    const maxW = Math.max(...boards.map((b) => b.width))
+    const maxH = Math.max(...boards.map((b) => b.height))
+
+    // Compute grid dimensions (rows × cols) to fit upCount
+    const cols = Math.ceil(Math.sqrt(upCount))
+    const rows = Math.ceil(upCount / cols)
+
+    const useLandscape = landscape ?? (maxW >= maxH)
+    const sheetW = useLandscape ? Math.max(maxW, maxH) : Math.min(maxW, maxH)
+    const sheetH = useLandscape ? Math.min(maxW, maxH) : Math.max(maxW, maxH)
+
+    // Available area per cell
+    const cellW = (sheetW * 2 - margin * 2 - spacing * (cols - 1)) / cols
+    const cellH = (sheetH * 2 - margin * 2 - spacing * (rows - 1)) / rows
+
+    const result: Array<{ pageIndex: number; x: number; y: number; scale: number }> = []
+
+    for (let i = 0; i < Math.min(boards.length, upCount); i++) {
+      const row = Math.floor(i / cols)
+      const col = i % cols
+      const board = boards[i]
+
+      // Scale board to fit within cell while maintaining aspect ratio
+      const scaleX = cellW / board.width
+      const scaleY = cellH / board.height
+      const scale = Math.min(scaleX, scaleY, 1) // Never upscale
+
+      // Center board within cell
+      const drawW = board.width * scale
+      const drawH = board.height * scale
+      const cellX = margin + col * (cellW + spacing)
+      const cellY = margin + row * (cellH + spacing)
+      const x = cellX + (cellW - drawW) / 2
+      const y = cellY + (cellH - drawH) / 2
+
+      result.push({ pageIndex: i, x, y, scale })
+    }
+
+    return result
+  }
+
+  /**
+   * Create an N-up imposition SVG. Each board's artwork is placed on
+   * the sheet according to the computed layout, scaled to fit.
+   */
+  exportNUpSVG(
+    boards: Array<{ x: number; y: number; width: number; height: number; name?: string }>,
+    opts?: { upCount?: number; spacing?: number; margin?: number; landscape?: boolean; bleed?: number }
+  ): SVGSVGElement | null {
+    const upCount = opts?.upCount ?? 4
+    const spacing = opts?.spacing ?? 12
+    const margin = opts?.margin ?? 36
+    const bleed = opts?.bleed ?? 0
+
+    const layout = this.computeNUpLayout(boards, upCount, spacing, margin, opts?.landscape)
+    if (layout.length === 0) return null
+
+    // Compute sheet size from layout
+    const maxCellX = Math.max(...layout.map((l) => l.x))
+    const maxCellY = Math.max(...layout.map((l) => l.y))
+    const lastBoard = boards[layout[layout.length - 1].pageIndex]
+    const sheetW = maxCellX + lastBoard.width * layout[layout.length - 1].scale + margin
+    const sheetH = maxCellY + lastBoard.height * layout[layout.length - 1].scale + margin
+
+    const ns = 'http://www.w3.org/2000/svg'
+    const root = document.createElementNS(ns, 'svg') as SVGSVGElement
+    root.setAttribute('xmlns', ns)
+    root.setAttribute('width', String(Math.round(sheetW * 100) / 100))
+    root.setAttribute('height', String(Math.round(sheetH * 100) / 100))
+    root.setAttribute('viewBox', `0 0 ${Math.round(sheetW * 100) / 100} ${Math.round(sheetH * 100) / 100}`)
+
+    // White sheet background
+    const sheet = document.createElementNS(ns, 'rect')
+    sheet.setAttribute('width', '100%')
+    sheet.setAttribute('height', '100%')
+    sheet.setAttribute('fill', '#ffffff')
+    root.appendChild(sheet)
+
+    // Place each board's artwork
+    for (const item of layout) {
+      const board = boards[item.pageIndex]
+      const svg = this.exportBoardVectorSVG(board, { bleed, marks: false })
+      if (!svg) continue
+
+      // Create a group for this positioned board
+      const g = document.createElementNS(ns, 'g')
+      g.setAttribute('transform', `translate(${item.x},${item.y}) scale(${item.scale})`)
+
+      // Copy all children from the board SVG
+      while (svg.firstChild) {
+        g.appendChild(svg.firstChild)
+      }
+      root.appendChild(g)
+    }
+
+    return root
   }
 
   // ===== Object order / visibility / select-same =====
@@ -7970,6 +8645,101 @@ export class EditorEngine {
 
   showStatus(message: string) {
     this.store.setStatusMessage(message)
+  }
+
+  // ===== Font registry for PDF embedding =====
+
+  /**
+   * Register a font file (TTF/OTF) for PDF embedding.
+   * @param family - Font family name (e.g., 'Arial', 'Helvetica')
+   * @param data - Raw font file data as ArrayBuffer
+   * @param style - 'normal' | 'italic' (default: 'normal')
+   * @param weight - Font weight (400=normal, 700=bold)
+   */
+  static registerFont(
+    family: string,
+    data: ArrayBuffer,
+    style: string = 'normal',
+    weight: number = 400,
+  ): void {
+    const key = `${family.toLowerCase()}-${style}-${weight}`
+    EditorEngine.fontRegistry.set(key, { data, style, weight })
+  }
+
+  /**
+   * Get all registered fonts as an array of { family, style, weight }.
+   */
+  static getRegisteredFonts(): Array<{ family: string; style: string; weight: number }> {
+    const result: Array<{ family: string; style: string; weight: number }> = []
+    for (const [key, entry] of EditorEngine.fontRegistry) {
+      const [family, style, weight] = key.split('-')
+      result.push({ family, style, weight: Number(weight) })
+    }
+    return result
+  }
+
+  /**
+   * Check if a font family is registered.
+   */
+  static isFontRegistered(family: string, style: string = 'normal', weight: number = 400): boolean {
+    const key = `${family.toLowerCase()}-${style}-${weight}`
+    return EditorEngine.fontRegistry.has(key)
+  }
+
+  /**
+   * Collect all unique font families used in the document.
+   * Returns a Set of font family names.
+   */
+  collectDocumentFonts(): Set<string> {
+    const fonts = new Set<string>()
+    const items = this.project.getItems({ match: () => true })
+    for (const item of items) {
+      const data = (item.data as any) ?? {}
+      // Check for text items with font family
+      if ('fontFamily' in item) {
+        const ff = (item as any).fontFamily
+        if (ff && typeof ff === 'string') {
+          fonts.add(ff)
+        }
+      }
+      // Check appearance fills/strokes
+      const app = data.appearance as { fills?: Array<{ fontFamily?: string }> } | undefined
+      if (app?.fills) {
+        for (const fill of app.fills) {
+          if (fill.fontFamily) fonts.add(fill.fontFamily)
+        }
+      }
+    }
+    return fonts
+  }
+
+  /**
+   * Apply registered fonts to a jsPDF document before svg2pdf conversion.
+   * This embeds font data into the PDF so text renders correctly on any system.
+   */
+  async applyFontsToPdf(doc: InstanceType<typeof import('jspdf').jsPDF>): Promise<void> {
+    if (EditorEngine.fontRegistry.size === 0) return
+
+    for (const [key, entry] of EditorEngine.fontRegistry) {
+      try {
+        const fontName = key.split('-')[0]
+        // jsPDF expects base64-encoded font data
+        const base64 = this.arrayBufferToBase64(entry.data)
+        doc.addFileToVFS(`${fontName}.ttf`, base64)
+        doc.addFont(`${fontName}.ttf`, fontName, entry.style as 'normal' | 'italic')
+      } catch {
+        // Font registration failed, continue with remaining fonts
+      }
+    }
+  }
+
+  private arrayBufferToBase64(buffer: ArrayBuffer): string {
+    const bytes = new Uint8Array(buffer)
+    let binary = ''
+    for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i])
+    }
+    return btoa(binary)
   }
 
   destroy() {
