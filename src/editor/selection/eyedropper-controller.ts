@@ -108,19 +108,57 @@ export class EyedropperController {
       const size = Number(leaf.fontSize) || 12
       const leading = Number((leaf as any).leading) || size * 1.2
       const itemData = (leaf as any).data ?? {}
+
+      // Per-character style readback: if this PointText is a child of a
+      // styled-runs Group, resolve the run that covers the clicked character.
+      let charStyleOverrides: Record<string, any> = {}
+      const parent = leaf.parent
+      if (
+        parent instanceof engine.scope.Group &&
+        Array.isArray((parent.data as any)?.runs)
+      ) {
+        const runs = (parent.data as any).runs as Array<{ start: number; end: number; style: Record<string, any> }>
+        const raw = (parent.data as any).raw as string ?? ''
+        // Find which child index this PointText is (its position in the group).
+        const childIdx = parent.children.indexOf(leaf)
+        // Each child is one run; find the global character range for this child.
+        let globalStart = 0
+        for (let i = 0; i < childIdx && i < runs.length; i++) {
+          globalStart += runs[i].end - runs[i].start
+        }
+        const run = runs[childIdx]
+        if (run) {
+          charStyleOverrides = { ...run.style }
+          // Use the run's font size if present (may differ from item-level).
+          if (run.style.fontSize !== undefined) {
+            charStyleOverrides._resolvedFontSize = Number(run.style.fontSize) || size
+          }
+        }
+      }
+
+      const resolvedFontSize = charStyleOverrides._resolvedFontSize ?? size
+      delete charStyleOverrides._resolvedFontSize
+
       engine.store.updateCharStyle({
-        fontFamily: (leaf.fontFamily as string) || 'Arial',
-        fontSize: size,
-        fontWeight: leaf.fontWeight as string,
-        fontStyle: ((leaf as any).fontStyle as 'normal' | 'italic' | 'oblique') ?? 'normal',
+        fontFamily: (charStyleOverrides.fontFamily as string) ?? ((leaf.fontFamily as string) || 'Arial'),
+        fontSize: resolvedFontSize,
+        fontWeight: (charStyleOverrides.fontWeight as string) ?? (leaf.fontWeight as string),
+        fontStyle: ((charStyleOverrides.fontStyle as string) ?? ((leaf as any).fontStyle as 'normal' | 'italic' | 'oblique') ?? 'normal') as 'normal' | 'italic' | 'oblique',
         leading,
-        autoLeading: Math.abs(leading - size * 1.2) < 0.05,
+        autoLeading: Math.abs(leading - resolvedFontSize * 1.2) < 0.05,
         openType: itemData.openType ?? engine.store.charStyle.openType,
+        ...(charStyleOverrides.underline !== undefined ? { underline: !!charStyleOverrides.underline } : {}),
+        ...(charStyleOverrides.strikethrough !== undefined ? { strikethrough: !!charStyleOverrides.strikethrough } : {}),
+        ...(charStyleOverrides.tracking !== undefined ? { tracking: Number(charStyleOverrides.tracking) || 0 } : {}),
       })
       const justification = ((leaf as any).justification as string) ?? 'left'
       engine.store.updateParagraphStyle({
         align: justification === 'center' ? 'center' : justification === 'right' ? 'right' : 'left',
       })
+      // Also pick up fill color from the run if present.
+      if (charStyleOverrides.fillColor) {
+        engine.store.updateStyle({ fillColor: charStyleOverrides.fillColor })
+      }
     }
 
     const scope = engine.scope
