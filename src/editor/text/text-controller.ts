@@ -255,6 +255,41 @@ export class TextController {
       })
       return
     }
+    // Styled runs group (per-character styling): collapse back to a single
+    // PointText for the editing session; runs are re-rendered on commit.
+    if (
+      root.node instanceof engine.scope.Group &&
+      (root.node.data as any)?.textMode === 'point' &&
+      Array.isArray((root.node.data as any)?.runs)
+    ) {
+      const group = root.node as paper.Group
+      const runs = [...((group.data as any).runs as Array<{ start: number; end: number; style: Record<string, any> }>)]
+      const raw = ((group.data as any).raw as string) ?? ''
+      const anchor = group.bounds?.center?.clone() ?? new engine.scope.Point(0, 0)
+      const runsId = (group.data as any)?.id as string | undefined
+      // Remove the group; create a temporary single PointText for editing.
+      group.remove()
+      const tmp = new engine.scope.PointText({
+        point: anchor,
+        content: raw,
+        fontSize: Number(engine.store.charStyle.fontSize) || 12,
+        fillColor: engine.store.style.fillColor || '#000000',
+      }) as paper.PointText
+      tmp.data.id = runsId ?? engine.genId()
+      tmp.data.isUserItem = true
+      tmp.data.textMode = 'point'
+      tmp.data.raw = raw
+      tmp.data.runs = runs
+      engine.getActiveLayer().addChild(tmp)
+      engine.selectItem(tmp)
+      this.beginSession({
+        kind: 'point',
+        editingItem: tmp,
+        anchor,
+        raw,
+      })
+      return
+    }
     const node = root.node as paper.PointText
     const info = ((node.data as any) ?? {}) as { raw?: string; frame?: TextFrame }
     const kind = root.kind
@@ -356,7 +391,14 @@ export class TextController {
       } else if (raw !== this.originalContent) {
         item.content = raw
         ;(item.data as any).openType = { ...engine.store.charStyle.openType }
-        engine.selectItem(item)
+        // Render styled runs if the item has per-character styling.
+        const runs = (item.data as any)?.runs
+        if (Array.isArray(runs) && runs.length > 0) {
+          const group = this.renderStyledRuns(item)
+          engine.selectItem(group)
+        } else {
+          engine.selectItem(item)
+        }
         engine.pushHistory('Edit Text')
       }
     } else if (!item && raw.length > 0) {
@@ -1220,5 +1262,117 @@ export class TextController {
       }
     }
     return null
+  }
+
+  // ------------------------------------------------------------------
+  // Per-character styled runs rendering (AI/CDR parity)
+  // ------------------------------------------------------------------
+
+  /**
+   * Replace a single PointText with a Group of PointTexts, one per styled
+   * run. Each glyph run is positioned to match the original text layout.
+   * Returns the new group (or the original item if no runs exist).
+   */
+  renderStyledRuns(item: paper.PointText): paper.Item {
+    const engine = this.engine
+    if (!engine) return item
+    const runs = ((item.data as any)?.runs as Array<{ start: number; end: number; style: Record<string, any> }>) ?? []
+    if (runs.length === 0) return item
+
+    const scope = engine.scope
+    const content = (item as any).raw as string | undefined ?? item.content
+    if (!content || content.length === 0) return item
+
+    // Build a canvas context for measuring character advances.
+    const canvas = document.createElement('canvas')
+    const ctx = canvas.getContext('2d')!
+    const baseFontSize = Number(item.fontSize) || 12
+    const baseFontFamily = (item.fontFamily as string) || 'Arial'
+    const baseFontWeight = (item.fontWeight as string | number) ?? 'normal'
+    const baseFontStyle = ((item as any).fontStyle as string) ?? 'normal'
+    const justification = ((item as any).justification as string) ?? 'left'
+    const baseLeading = Number((item as any).leading) || baseFontSize * 1.2
+
+    // Measure full text width for justification offset.
+    ctx.font = `${baseFontStyle} ${baseFontWeight} ${baseFontSize}px ${baseFontFamily}`
+    const totalW = ctx.measureText(content).width
+
+    const group = new scope.Group() as paper.Group
+    group.data.id = (item.data as any)?.id ?? engine.genId()
+    group.data.isUserItem = true
+    group.data.textMode = (item.data as any)?.textMode ?? 'point'
+    group.data.raw = (item as any).raw ?? content
+    group.data.openType = { ...((item.data as any)?.openType ?? {}) }
+    if ((item.data as any)?.frame) group.data.frame = { ...(item.data as any).frame }
+    if ((item.data as any)?.annotation) group.data.annotation = true
+    if ((item.data as any)?.isCallout) group.data.isCallout = true
+
+    // Build a default style from the base item.
+    const baseStyle: Record<string, any> = {
+      fontFamily: baseFontFamily,
+      fontSize: baseFontSize,
+      fontWeight: baseFontWeight,
+      fontStyle: baseFontStyle,
+      fillColor: item.fillColor ? item.fillColor.toCSS(true) : '#000000',
+      underline: !!(item.data as any)?.underline,
+      strikethrough: !!(item.data as any)?.strikethrough,
+    }
+
+    let cursor = 0
+    for (const run of runs) {
+      const runContent = content.substring(run.start, run.end)
+      if (runContent.length === 0) continue
+
+      const runStyle = { ...baseStyle, ...run.style }
+      const fontSize = Number(runStyle.fontSize) || baseFontSize
+      const fontFamily = runStyle.fontFamily || baseFontFamily
+      const fontWeight = runStyle.fontWeight ?? baseFontWeight
+      const fontStyle = runStyle.fontStyle ?? baseFontStyle
+
+      ctx.font = `${fontStyle} ${fontWeight} ${fontSize}px ${fontFamily}`
+      const runW = ctx.measureText(runContent).width
+
+      // Compute x position: advance from the start of the full text.
+      const beforeW = ctx.measureText(content.substring(0, run.start)).width
+      let x: number
+      if (justification === 'center') {
+        x = item.point.x - totalW / 2 + beforeW
+      } else if (justification === 'right') {
+        x = item.point.x - totalW + beforeW
+      } else {
+        x = item.point.x + beforeW
+      }
+
+      const leading = fontSize * 1.2
+      const glyph = new scope.PointText({
+        point: new scope.Point(x, item.point.y),
+        content: runContent,
+        fontFamily,
+        fontWeight,
+        fontStyle,
+        fontSize,
+        leading,
+        fillColor: new scope.Color(runStyle.fillColor),
+        justification: 'left',
+      }) as paper.PointText
+
+      if (runStyle.underline) (glyph.data as any).underline = true
+      if (runStyle.strikethrough) (glyph.data as any).strikethrough = true
+
+      group.addChild(glyph)
+      cursor = run.end
+    }
+
+    // Replace the original item in the layer.
+    const parent = item.parent
+    const index = parent ? parent.children.indexOf(item) : -1
+    item.remove()
+    if (parent && index >= 0) {
+      parent.insertChild(index, group)
+    } else {
+      engine.getActiveLayer().addChild(group)
+    }
+
+    return group
   }
 }

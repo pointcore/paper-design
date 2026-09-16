@@ -250,6 +250,8 @@ export const useEditorStore = defineStore('editor', {
     },
     /** Whether isolated group editing is active */
     isolationActive: false,
+    /** Per-character selection within a text item (null = no char selection) */
+    charSelection: null as { itemId: string; start: number; end: number } | null,
   }),
 
   getters: {
@@ -368,6 +370,16 @@ export const useEditorStore = defineStore('editor', {
     /** Record cursor position */
     setCursorPos(x: number, y: number) {
       this.cursorPos = { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 }
+    },
+
+    /** Set per-character selection within a text item */
+    setCharSelection(itemId: string, start: number, end: number) {
+      this.charSelection = { itemId, start: Math.min(start, end), end: Math.max(start, end) }
+    },
+
+    /** Clear per-character selection */
+    clearCharSelection() {
+      this.charSelection = null
     },
 
     /**

@@ -522,7 +522,7 @@ import {
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
 import { cssToCmykString, isOutOfCmykGamut } from '../../editor/color'
-import type { AlignMode, BooleanOperation, DistributeAxis, FillRule, GradientState, LineCap, LineJoin, PatternFillState, ReferencePoint, RulerUnit, TextAlign } from '../../editor/types'
+import type { AlignMode, BooleanOperation, DistributeAxis, FillRule, GradientState, LineCap, LineJoin, PatternFillState, ReferencePoint, RulerUnit, TextAlign, CharRun } from '../../editor/types'
 
 const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
@@ -957,14 +957,25 @@ function syncTextFromSelection() {
   overflowHint.value = ''
   threadHint.value = ''
   if (!item) return
-  fontFamily.value = (item.fontFamily as string) || 'Arial'
-  fontSize.value = Number(item.fontSize) || 12
-  isBold.value = String(item.fontWeight) === 'bold' || Number(item.fontWeight) >= 600
-  isItalic.value = ((item as any).fontStyle as string) === 'italic'
-  isUnderline.value = !!(item as any).underline || !!store.charStyle.underline
-  isStrikethrough.value = !!(item as any).strikethrough || !!store.charStyle.strikethrough
-  baselineValue.value = Number((item as any).baselineShift ?? store.charStyle.baselineShift) || 0
-  hScaleValue.value = Number((item as any).horizontalScale ?? store.charStyle.horizontalScale) || 100
+
+  // Per-character style readback: when a char range is selected, read from
+  // the styled runs instead of the item-level properties.
+  const charSel = store.charSelection
+  const hasCharSel = !!charSel && charSel.itemId === (item.data as any)?.id
+  const runStyle = hasCharSel ? charRunStyleAt(item, charSel.start, charSel.end) : {}
+
+  fontFamily.value = (runStyle.fontFamily as string) ?? ((item.fontFamily as string) || 'Arial')
+  fontSize.value = Number(runStyle.fontSize ?? item.fontSize) || 12
+  isBold.value = runStyle.fontWeight !== undefined
+    ? (String(runStyle.fontWeight) === 'bold' || Number(runStyle.fontWeight) >= 600)
+    : (String(item.fontWeight) === 'bold' || Number(item.fontWeight) >= 600)
+  isItalic.value = runStyle.fontStyle !== undefined
+    ? (runStyle.fontStyle as string) === 'italic'
+    : ((item as any).fontStyle as string) === 'italic'
+  isUnderline.value = !!(runStyle as any).underline || !!(item as any).underline || !!store.charStyle.underline
+  isStrikethrough.value = !!(runStyle as any).strikethrough || !!(item as any).strikethrough || !!store.charStyle.strikethrough
+  baselineValue.value = Number((runStyle as any).baselineShift ?? (item as any).baselineShift ?? store.charStyle.baselineShift) || 0
+  hScaleValue.value = Number((runStyle as any).horizontalScale ?? (item as any).horizontalScale ?? store.charStyle.horizontalScale) || 100
   pathOffsetValue.value = Number(store.textPathOffset) || 0
   const j = (item as any).justification as string
   const storedAlign = store.paragraphStyle.align
@@ -1014,10 +1025,64 @@ function syncAreaFromSelection() {
   }
 }
 
-/** Apply a style change to every selected point text and record history. */
+// ------------------------------------------------------------------
+// Per-character styling helpers (AI/CDR parity)
+// ------------------------------------------------------------------
+
+/** Read the effective style for a character range from an item's styled runs. */
+function charRunStyleAt(item: paper.PointText, start: number, end: number): Partial<import('../../editor/types').CharStyle> {
+  const runs = ((item as any).data?.runs as CharRun[]) ?? []
+  const merged: Record<string, any> = {}
+  for (const run of runs) {
+    if (run.end <= start || run.start >= end) continue
+    for (const [k, v] of Object.entries(run.style)) {
+      if (v !== undefined && v !== null) merged[k] = v
+    }
+  }
+  return merged
+}
+
+/** Split/insert runs and apply a style to the selected range. */
+function applyCharRunStyle(
+  item: paper.PointText,
+  start: number,
+  end: number,
+  style: Partial<import('../../editor/types').CharStyle>
+) {
+  const runs = ((item as any).data?.runs as CharRun[]) ?? []
+  const next: CharRun[] = []
+  let i = 0
+  while (i < runs.length && runs[i].end <= start) { next.push({ ...runs[i] }); i++ }
+  if (i < runs.length && runs[i].start < start) {
+    next.push({ start: runs[i].start, end: start, style: { ...runs[i].style } })
+  }
+  next.push({ start, end, style: { ...style } })
+  while (i < runs.length && runs[i].end < end) { i++ }
+  if (i < runs.length && runs[i].start < end) {
+    next.push({ start: end, end: runs[i].end, style: { ...runs[i].style } })
+    i++
+  }
+  while (i < runs.length) { next.push({ ...runs[i] }); i++ }
+  // Merge adjacent runs with identical style.
+  const merged: CharRun[] = []
+  for (const r of next) {
+    if (merged.length > 0) {
+      const last = merged[merged.length - 1]
+      if (last.end === r.start && JSON.stringify(last.style) === JSON.stringify(r.style)) {
+        last.end = r.end
+        continue
+      }
+    }
+    merged.push({ ...r })
+  }
+  ;(item as any).data.runs = merged
+}
+
+/** Apply a style change to character-selected range, or whole item if no char selection. */
 function applyTextStyle(apply: (item: paper.PointText) => void, label: string) {
   const e = getEngine()
   if (!e) return
+  const charSel = store.charSelection
   e.getSelection().forEach((item) => {
     if (item instanceof e.scope.PointText) {
       apply(item as paper.PointText)
@@ -1028,9 +1093,55 @@ function applyTextStyle(apply: (item: paper.PointText) => void, label: string) {
   e.pushHistory(label)
 }
 
+/** Like applyTextStyle but with per-character selection awareness. */
+function applyCharStyle(partial: Partial<import('../../editor/types').CharStyle>, label: string) {
+  const e = getEngine()
+  if (!e) return
+  const charSel = store.charSelection
+  e.getSelection().forEach((item) => {
+    if (!(item instanceof e.scope.PointText)) return
+    const textItem = item as paper.PointText
+    if (charSel && charSel.itemId === (textItem.data as any)?.id) {
+      applyCharRunStyle(textItem, charSel.start, charSel.end, partial)
+    } else {
+      // Whole-item fallback: apply directly.
+      if (partial.fontFamily !== undefined) textItem.fontFamily = partial.fontFamily as string
+      if (partial.fontSize !== undefined) textItem.fontSize = partial.fontSize as number
+      if (partial.fontWeight !== undefined) textItem.fontWeight = partial.fontWeight as any
+      if (partial.fontStyle !== undefined) (textItem as any).fontStyle = partial.fontStyle
+    }
+    e.refreshItemGradient(textItem)
+  })
+  e.scope.view.update()
+  e.pushHistory(label)
+}
+
+/** Apply fill color to character-selected range. */
+function applyCharFillColor(color: string, label: string) {
+  const e = getEngine()
+  if (!e) return
+  const charSel = store.charSelection
+  e.getSelection().forEach((item) => {
+    if (!(item instanceof e.scope.PointText)) return
+    const textItem = item as paper.PointText
+    if (charSel && charSel.itemId === (textItem.data as any)?.id) {
+      applyCharRunStyle(textItem, charSel.start, charSel.end, { fillColor: color } as any)
+    } else {
+      textItem.fillColor = new e.scope.Color(color)
+    }
+    e.refreshItemGradient(textItem)
+  })
+  e.scope.view.update()
+  e.pushHistory(label)
+}
+
 function onFontFamilyChange(val: string) {
   store.updateCharStyle({ fontFamily: val })
-  applyTextStyle((item) => { item.fontFamily = val }, 'Change Font')
+  if (store.charSelection) {
+    applyCharStyle({ fontFamily: val }, 'Change Font')
+  } else {
+    applyTextStyle((item) => { item.fontFamily = val }, 'Change Font')
+  }
 }
 
 function onFontSizeChange(val: number | undefined) {
@@ -1039,15 +1150,23 @@ function onFontSizeChange(val: number | undefined) {
     const leading = val * 1.2
     leadingValue.value = Math.round(leading * 10) / 10
     store.updateCharStyle({ fontSize: val, leading, autoLeading: true })
-    applyTextStyle((item) => {
-      item.fontSize = val
-      item.leading = leading
-    }, 'Change Font Size')
+    if (store.charSelection) {
+      applyCharStyle({ fontSize: val, leading }, 'Change Font Size')
+    } else {
+      applyTextStyle((item) => {
+        item.fontSize = val
+        item.leading = leading
+      }, 'Change Font Size')
+    }
   } else {
     store.updateCharStyle({ fontSize: val })
-    applyTextStyle((item) => {
-      item.fontSize = val
-    }, 'Change Font Size')
+    if (store.charSelection) {
+      applyCharStyle({ fontSize: val }, 'Change Font Size')
+    } else {
+      applyTextStyle((item) => {
+        item.fontSize = val
+      }, 'Change Font Size')
+    }
   }
   syncAreaFromSelection()
 }
@@ -1056,14 +1175,22 @@ function toggleBold() {
   const next = !isBold.value
   isBold.value = next
   store.updateCharStyle({ fontWeight: next ? 'bold' : 'normal' })
-  applyTextStyle((item) => { item.fontWeight = next ? 'bold' : 'normal' }, 'Change Font Weight')
+  if (store.charSelection) {
+    applyCharStyle({ fontWeight: next ? 'bold' : 'normal' }, 'Change Font Weight')
+  } else {
+    applyTextStyle((item) => { item.fontWeight = next ? 'bold' : 'normal' }, 'Change Font Weight')
+  }
 }
 
 function toggleItalic() {
   const next = !isItalic.value
   isItalic.value = next
   store.updateCharStyle({ fontStyle: next ? 'italic' : 'normal' })
-  applyTextStyle((item) => { (item as any).fontStyle = next ? 'italic' : 'normal' }, 'Change Font Style')
+  if (store.charSelection) {
+    applyCharStyle({ fontStyle: next ? 'italic' : 'normal' }, 'Change Font Style')
+  } else {
+    applyTextStyle((item) => { (item as any).fontStyle = next ? 'italic' : 'normal' }, 'Change Font Style')
+  }
 }
 
 function toggleUnderline() {
@@ -1072,20 +1199,28 @@ function toggleUnderline() {
   store.updateCharStyle({ underline: next })
   // Paper.js has no underline primitive: stored on charStyle + item data so
   // SVG export and future text engines can honour it.
-  const e = getEngine()
-  e?.getSelection().forEach((item) => { (item as any).data = { ...((item as any).data ?? {}), underline: next } })
-  e?.scope.view.update()
-  if (store.hasSelection) e?.pushHistory(next ? 'Underline On' : 'Underline Off')
+  if (store.charSelection) {
+    applyCharStyle({ underline: next } as any, next ? 'Underline On' : 'Underline Off')
+  } else {
+    const e = getEngine()
+    e?.getSelection().forEach((item) => { (item as any).data = { ...((item as any).data ?? {}), underline: next } })
+    e?.scope.view.update()
+    if (store.hasSelection) e?.pushHistory(next ? 'Underline On' : 'Underline Off')
+  }
 }
 
 function toggleStrikethrough() {
   const next = !isStrikethrough.value
   isStrikethrough.value = next
   store.updateCharStyle({ strikethrough: next })
-  const e = getEngine()
-  e?.getSelection().forEach((item) => { (item as any).data = { ...((item as any).data ?? {}), strikethrough: next } })
-  e?.scope.view.update()
-  if (store.hasSelection) e?.pushHistory(next ? 'Strikethrough On' : 'Strikethrough Off')
+  if (store.charSelection) {
+    applyCharStyle({ strikethrough: next } as any, next ? 'Strikethrough On' : 'Strikethrough Off')
+  } else {
+    const e = getEngine()
+    e?.getSelection().forEach((item) => { (item as any).data = { ...((item as any).data ?? {}), strikethrough: next } })
+    e?.scope.view.update()
+    if (store.hasSelection) e?.pushHistory(next ? 'Strikethrough On' : 'Strikethrough Off')
+  }
 }
 
 type OTKey = 'liga' | 'dlig' | 'smallCaps' | 'oldstyleNums' | 'tabularNums' | 'fractions'
@@ -1319,6 +1454,10 @@ function onFillChange(val: string) {
   const e = getEngine()
   if (!e) return
   store.updateStyle({ fillColor: val || null })
+  if (store.charSelection) {
+    applyCharFillColor(val || '#000000', 'Change Fill')
+    return
+  }
   e.getSelection().forEach((item: any) => {
     if (item.fillColor !== undefined) {
       item.fillColor = val || null

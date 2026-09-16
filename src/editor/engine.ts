@@ -575,6 +575,7 @@ export class EditorEngine {
   clearSelection() {
     this.project.deselectAll()
     this.store.clearSelection()
+    this.store.clearCharSelection()
     this.refreshSelectionChrome()
   }
 

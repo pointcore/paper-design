@@ -617,6 +617,51 @@ export class SelectController {
       // Not clicking a guide -> clear guide selection.
       this.guides.clearSelection()
 
+      // Character selection: clicking on an already-selected text item
+      // enters per-character selection mode (AI/CDR parity).
+      if (
+        this.mode === 'select' &&
+        !event.modifiers.control && !event.modifiers.command &&
+        !event.modifiers.alt
+      ) {
+        const charSel = engine.store.charSelection
+        const sel = engine.getSelection()
+        if (sel.length === 1 && sel[0] instanceof scope.PointText) {
+          const textItem = sel[0] as paper.PointText
+          const hit = this.hitTest(event.point)
+          if (hit && hit.item === textItem) {
+            // Already in char selection: extend with Shift, otherwise move cursor.
+            if (charSel && charSel.itemId === (textItem.data as any)?.id) {
+              const idx = this.charIndexAt(textItem, event.point)
+              if (event.modifiers.shift) {
+                engine.store.setCharSelection(charSel.itemId, charSel.start, idx)
+              } else {
+                engine.store.setCharSelection(charSel.itemId, idx, idx)
+              }
+              this.drawCharSelection(textItem)
+              engine.scope.view.update()
+              return
+            }
+            // First click on selected text → enter char selection at clicked position.
+            if (!event.modifiers.shift) {
+              const idx = this.charIndexAt(textItem, event.point)
+              const id = (textItem.data as any)?.id as string
+              if (id) {
+                engine.store.setCharSelection(id, idx, idx)
+                this.drawCharSelection(textItem)
+                engine.scope.view.update()
+                return
+              }
+            }
+          }
+        }
+        // Clicking elsewhere clears char selection.
+        if (charSel) {
+          engine.store.clearCharSelection()
+          this.clearCharHighlight()
+        }
+      }
+
       // Ctrl+click cycles the selection through the objects stacked under
       // the cursor (AI select-behind parity; Alt stays duplicate, Shift
       // stays add-to-selection).
@@ -644,8 +689,10 @@ export class SelectController {
 
       if (hitResult) {
         const item = hitResult.item
-        this.clearAnchorSelection()
-        this.clearCurveSelection()
+    this.clearAnchorSelection()
+    this.clearCurveSelection()
+    this.clearCharHighlight()
+    this.engine?.store.clearCharSelection()
         engine.store.setDragging(true)
 
         if (!item.selected && !event.modifiers.shift) {
@@ -3005,6 +3052,148 @@ export class SelectController {
       engine.pushHistory('Move Guide')
     }
     engine.scope.view.update()
+  }
+
+  // ------------------------------------------------------------------
+  // Per-character selection (AI/CDR parity)
+  // ------------------------------------------------------------------
+
+  /** Shared canvas 2d context for measuring character widths. */
+  private charMeasureCtx: CanvasRenderingContext2D | null = null
+
+  /**
+   * Find the character index closest to `point` within a PointText item.
+   * Uses cumulative canvas measureText for proportional font positioning.
+   */
+  private charIndexAt(item: paper.PointText, point: paper.Point): number {
+    const content = (item as any).raw as string | undefined ?? item.content
+    if (!content || content.length === 0) return 0
+    if (!this.charMeasureCtx) {
+      const c = document.createElement('canvas')
+      this.charMeasureCtx = c.getContext('2d')
+    }
+    const ctx = this.charMeasureCtx
+    if (!ctx) return 0
+
+    const zoom = this.engine?.zoom ?? 1
+    const fontSize = Number(item.fontSize) || 12
+    const fontFamily = (item.fontFamily as string) || 'Arial'
+    const fontWeight = (item.fontWeight as string | number) ?? 'normal'
+    const fontStyle = ((item as any).fontStyle as string) ?? 'normal'
+    ctx.font = `${fontStyle} ${fontWeight} ${fontSize}px ${fontFamily}`
+
+    const justification = ((item as any).justification as string) ?? 'left'
+    const textBounds = item.bounds
+    if (!textBounds) return 0
+
+    // Convert click point to text-local coordinates.
+    const localX = point.x - item.point.x
+
+    // Measure cumulative advance for each character.
+    let bestIdx = 0
+    let bestDist = Infinity
+    for (let i = 0; i <= content.length; i++) {
+      const advance = ctx.measureText(content.substring(0, i)).width
+      let charX: number
+      if (justification === 'center') {
+        const totalW = ctx.measureText(content).width
+        charX = -totalW / 2 + advance
+      } else if (justification === 'right') {
+        const totalW = ctx.measureText(content).width
+        charX = -totalW + advance
+      } else {
+        charX = advance
+      }
+      const dist = Math.abs(localX - charX)
+      if (dist < bestDist) {
+        bestDist = dist
+        bestIdx = i
+      }
+    }
+    return bestIdx
+  }
+
+  /**
+   * Compute per-character bounding rectangles in document coordinates.
+   * Used for selection highlight rendering and PropertyPanel char-style readback.
+   */
+  charBounds(item: paper.PointText): DOMRect[] {
+    const content = (item as any).raw as string | undefined ?? item.content
+    if (!content || content.length === 0) return []
+    if (!this.charMeasureCtx) {
+      const c = document.createElement('canvas')
+      this.charMeasureCtx = c.getContext('2d')
+    }
+    const ctx = this.charMeasureCtx
+    if (!ctx) return []
+
+    const fontSize = Number(item.fontSize) || 12
+    const fontFamily = (item.fontFamily as string) || 'Arial'
+    const fontWeight = (item.fontWeight as string | number) ?? 'normal'
+    const fontStyle = ((item as any).fontStyle as string) ?? 'normal'
+    ctx.font = `${fontStyle} ${fontWeight} ${fontSize}px ${fontFamily}`
+
+    const justification = ((item as any).justification as string) ?? 'left'
+    const totalW = ctx.measureText(content).width
+    const leading = Number((item as any).leading) || fontSize * 1.2
+    const bounds = item.bounds
+    if (!bounds) return []
+
+    const rects: DOMRect[] = []
+    for (let i = 0; i < content.length; i++) {
+      const before = ctx.measureText(content.substring(0, i)).width
+      const charW = ctx.measureText(content[i]).width
+      let x: number
+      if (justification === 'center') {
+        x = bounds.x + (bounds.width - totalW) / 2 + before
+      } else if (justification === 'right') {
+        x = bounds.x + bounds.width - totalW + before
+      } else {
+        x = bounds.x + before
+      }
+      rects.push(new DOMRect(x, bounds.y, charW, leading))
+    }
+    return rects
+  }
+
+  /** Draw (or refresh) the semi-transparent highlight over the char selection. */
+  drawCharSelection(item: paper.PointText) {
+    this.clearCharHighlight()
+    const engine = this.engine
+    const sel = engine?.store.charSelection
+    if (!engine || !sel) return
+    const id = (item.data as any)?.id as string
+    if (sel.itemId !== id) return
+
+    const rects = this.charBounds(item)
+    const start = sel.start
+    const end = Math.min(sel.end, rects.length)
+    const overlay = engine.getOverlayLayer()
+    const zoom = engine.zoom || 1
+
+    for (let i = start; i < end; i++) {
+      const r = rects[i]
+      if (!r) continue
+      const rect = new engine.scope.Path.Rectangle({
+        from: [r.x, r.y],
+        to: [r.x + r.width, r.y + r.height],
+        fillColor: 'rgba(74, 144, 217, 0.25)',
+        strokeColor: null,
+        data: { isCharHighlight: true },
+      }) as paper.Path
+      overlay.addChild(rect)
+    }
+  }
+
+  /** Remove all character-selection highlight rectangles. */
+  clearCharHighlight() {
+    const engine = this.engine
+    if (!engine) return
+    const overlay = engine.getOverlayLayer()
+    const children = [...overlay.children]
+    for (const child of children) {
+      if ((child.data as any)?.isCharHighlight) child.remove()
+    }
   }
 }
 

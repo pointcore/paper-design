@@ -144,6 +144,13 @@ export interface CharStyle {
   openType: OpenTypeFeatures
 }
 
+/** Per-character styled run (AI/CDR parity). */
+export interface CharRun {
+  start: number
+  end: number
+  style: Partial<CharStyle>
+}
+
 /** Paragraph style */
 export interface ParagraphStyle {
   align: TextAlign
