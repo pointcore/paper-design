@@ -3063,7 +3063,7 @@ export class SelectController {
 
   /**
    * Find the character index closest to `point` within a PointText item.
-   * Uses cumulative canvas measureText for proportional font positioning.
+   * Handles multi-line text (newlines) by measuring per-line.
    */
   private charIndexAt(item: paper.PointText, point: paper.Point): number {
     const content = (item as any).raw as string | undefined ?? item.content
@@ -3075,7 +3075,6 @@ export class SelectController {
     const ctx = this.charMeasureCtx
     if (!ctx) return 0
 
-    const zoom = this.engine?.zoom ?? 1
     const fontSize = Number(item.fontSize) || 12
     const fontFamily = (item.fontFamily as string) || 'Arial'
     const fontWeight = (item.fontWeight as string | number) ?? 'normal'
@@ -3083,39 +3082,49 @@ export class SelectController {
     ctx.font = `${fontStyle} ${fontWeight} ${fontSize}px ${fontFamily}`
 
     const justification = ((item as any).justification as string) ?? 'left'
-    const textBounds = item.bounds
-    if (!textBounds) return 0
+    const leading = Number((item as any).leading) || fontSize * 1.2
+    const lines = content.split('\n')
 
-    // Convert click point to text-local coordinates.
+    // Determine which line the click falls on.
+    const localY = point.y - item.point.y
+    let lineIdx = Math.round(localY / leading)
+    lineIdx = Math.max(0, Math.min(lineIdx, lines.length - 1))
+
+    // Within the line, find the closest character by x.
+    const line = lines[lineIdx]
     const localX = point.x - item.point.x
+    const lineW = ctx.measureText(line).width
 
-    // Measure cumulative advance for each character.
-    let bestIdx = 0
+    let bestOffset = 0
     let bestDist = Infinity
-    for (let i = 0; i <= content.length; i++) {
-      const advance = ctx.measureText(content.substring(0, i)).width
+    for (let i = 0; i <= line.length; i++) {
+      const advance = ctx.measureText(line.substring(0, i)).width
       let charX: number
       if (justification === 'center') {
-        const totalW = ctx.measureText(content).width
-        charX = -totalW / 2 + advance
+        charX = -lineW / 2 + advance
       } else if (justification === 'right') {
-        const totalW = ctx.measureText(content).width
-        charX = -totalW + advance
+        charX = -lineW + advance
       } else {
         charX = advance
       }
       const dist = Math.abs(localX - charX)
       if (dist < bestDist) {
         bestDist = dist
-        bestIdx = i
+        bestOffset = i
       }
     }
-    return bestIdx
+
+    // Convert line-local offset to global character index.
+    let globalIdx = 0
+    for (let i = 0; i < lineIdx; i++) {
+      globalIdx += lines[i].length + 1 // +1 for the \n
+    }
+    return globalIdx + bestOffset
   }
 
   /**
    * Compute per-character bounding rectangles in document coordinates.
-   * Used for selection highlight rendering and PropertyPanel char-style readback.
+   * Handles multi-line text (newlines) by measuring per-line.
    */
   charBounds(item: paper.PointText): DOMRect[] {
     const content = (item as any).raw as string | undefined ?? item.content
@@ -3134,24 +3143,35 @@ export class SelectController {
     ctx.font = `${fontStyle} ${fontWeight} ${fontSize}px ${fontFamily}`
 
     const justification = ((item as any).justification as string) ?? 'left'
-    const totalW = ctx.measureText(content).width
     const leading = Number((item as any).leading) || fontSize * 1.2
     const bounds = item.bounds
     if (!bounds) return []
 
+    const lines = content.split('\n')
     const rects: DOMRect[] = []
-    for (let i = 0; i < content.length; i++) {
-      const before = ctx.measureText(content.substring(0, i)).width
-      const charW = ctx.measureText(content[i]).width
-      let x: number
-      if (justification === 'center') {
-        x = bounds.x + (bounds.width - totalW) / 2 + before
-      } else if (justification === 'right') {
-        x = bounds.x + bounds.width - totalW + before
-      } else {
-        x = bounds.x + before
+    let globalIdx = 0
+
+    for (let li = 0; li < lines.length; li++) {
+      const line = lines[li]
+      const lineW = ctx.measureText(line).width
+      const lineY = item.point.y + li * leading
+
+      for (let ci = 0; ci < line.length; ci++) {
+        const before = ctx.measureText(line.substring(0, ci)).width
+        const charW = ctx.measureText(line[ci]).width
+        let x: number
+        if (justification === 'center') {
+          x = item.point.x - lineW / 2 + before
+        } else if (justification === 'right') {
+          x = item.point.x - lineW + before
+        } else {
+          x = item.point.x + before
+        }
+        rects.push(new DOMRect(x, lineY, charW, leading))
+        globalIdx++
       }
-      rects.push(new DOMRect(x, bounds.y, charW, leading))
+      // Account for the \n character (no visual rect, but advance globalIdx).
+      globalIdx++ // skip newline
     }
     return rects
   }

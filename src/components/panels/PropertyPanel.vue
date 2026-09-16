@@ -1114,6 +1114,14 @@ function applyCharStyle(partial: Partial<import('../../editor/types').CharStyle>
   })
   e.scope.view.update()
   e.pushHistory(label)
+  // Re-draw char highlight (positions may shift on font size changes).
+  if (charSel) {
+    const sel = e.getSelection().find((i) => i instanceof e.scope.PointText && (i.data as any)?.id === charSel.itemId) as paper.PointText | undefined
+    if (sel) {
+      const ctrl = e.getController('select') as { drawCharSelection?: (item: paper.PointText) => void } | null
+      ctrl?.drawCharSelection?.(sel)
+    }
+  }
 }
 
 /** Apply fill color to character-selected range. */
@@ -1133,6 +1141,14 @@ function applyCharFillColor(color: string, label: string) {
   })
   e.scope.view.update()
   e.pushHistory(label)
+  // Re-draw char highlight.
+  if (charSel) {
+    const sel = e.getSelection().find((i) => i instanceof e.scope.PointText && (i.data as any)?.id === charSel.itemId) as paper.PointText | undefined
+    if (sel) {
+      const ctrl = e.getController('select') as { drawCharSelection?: (item: paper.PointText) => void } | null
+      ctrl?.drawCharSelection?.(sel)
+    }
+  }
 }
 
 function onFontFamilyChange(val: string) {
@@ -1344,6 +1360,10 @@ function onTrackingChange(val: number | undefined) {
   }
   trackingValue.value = val
   store.updateCharStyle({ tracking: val })
+  if (store.charSelection) {
+    applyCharStyle({ tracking: val }, 'Change Tracking')
+    return
+  }
   // Tracking has no Paper.js PointText primitive: area frames re-wrap
   // (visible) and path runs pick it up on next layout; point text stores
   // it for export.
