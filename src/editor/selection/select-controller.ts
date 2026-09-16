@@ -936,6 +936,26 @@ export class SelectController {
         case 'd':
           if (event.modifiers.command) engine.duplicateSelected()
           break
+        case 'a': {
+          // Ctrl+A in char selection mode: select all characters.
+          if ((event.modifiers.control || event.modifiers.command) && !event.modifiers.alt) {
+            const cs = engine.store.charSelection
+            if (cs) {
+              const sel = engine.getSelection()
+              const textItem = sel.find(
+                (i) => i instanceof engine.scope.PointText && (i.data as any)?.id === cs.itemId
+              ) as paper.PointText | undefined
+              if (textItem) {
+                const content = ((textItem as any).raw as string | undefined) ?? textItem.content
+                engine.store.setCharSelection(cs.itemId, 0, content.length)
+                this.drawCharSelection(textItem)
+                engine.scope.view.update()
+              }
+              break
+            }
+          }
+          break
+        }
       }
     }
 
