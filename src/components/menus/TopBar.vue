@@ -566,10 +566,22 @@
       <div class="settings-body app-settings">
         <div class="setting-row">
           <div class="setting-label">
-            <span class="setting-name">Specified Steps</span>
+            <span class="setting-name">Blend Mode</span>
+          </div>
+          <el-radio-group v-model="blendForm.mode" size="small">
+            <el-radio-button value="smooth">Smooth Color</el-radio-button>
+            <el-radio-button value="steps">Specified Steps</el-radio-button>
+          </el-radio-group>
+        </div>
+        <div v-if="blendForm.mode === 'steps'" class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Steps</span>
             <span class="setting-desc">Shapes between the two paths, back-to-front; solid fills, strokes and opacity blend too</span>
           </div>
           <el-input-number v-model="blendForm.steps" :min="1" :max="200" size="small" style="width: 100px" />
+        </div>
+        <div v-else class="setting-desc" style="padding: 4px 0">
+          Auto-calculate steps for a smooth color transition (up to 256)
         </div>
       </div>
     </AppDialog>
@@ -1179,15 +1191,18 @@ const blendVisible = computed({
   get: () => store.ui.blendDialogOpen,
   set: (v) => store.setBlendDialogOpen(v),
 })
-const blendForm = reactive({ steps: 6 })
+const blendForm = reactive({ mode: 'smooth' as 'smooth' | 'steps', steps: 6 })
 function onBlendConfirm() {
   const e = engineRef?.value
   if (!e) {
     blendVisible.value = false
     return
   }
-  if (e.blendSelection(Number(blendForm.steps)) === 0) {
-    store.setStatusMessage('Blend needs exactly two unlocked paths (1–200 steps)')
+  const steps = blendForm.mode === 'smooth'
+    ? e.autoBlendSteps()
+    : Number(blendForm.steps)
+  if (e.blendSelection(steps) === 0) {
+    store.setStatusMessage('Blend needs exactly two unlocked paths')
     return
   }
   blendVisible.value = false

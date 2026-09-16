@@ -4018,6 +4018,40 @@ export class EditorEngine {
   }
 
   /**
+   * AI/CDR "Smooth Color" blend: auto-calculate the number of steps needed
+   * for a smooth color transition between two selected paths. Returns up to
+   * 256 steps (enough for 8-bit-per-channel gradients).
+   */
+  autoBlendSteps(): number {
+    const scope = this.scope
+    const paths = this.getSelection().filter(
+      (item) => !item.locked && item.parent && item instanceof scope.Path
+    ) as paper.Path[]
+    if (paths.length !== 2) return 8
+    const [a, b] = paths
+    const fa = this.solidPaintOf(a, 'fillColor')
+    const fb = this.solidPaintOf(b, 'fillColor')
+    const sa = this.solidPaintOf(a, 'strokeColor')
+    const sb = this.solidPaintOf(b, 'strokeColor')
+    let maxDist = 0
+    if (fa && fb) {
+      const d = Math.abs(fa.r - fb.r) + Math.abs(fa.g - fb.g) + Math.abs(fa.b - fb.b) + Math.abs(fa.a - fb.a)
+      maxDist = Math.max(maxDist, d)
+    }
+    if (sa && sb) {
+      const d = Math.abs(sa.r - sb.r) + Math.abs(sa.g - sb.g) + Math.abs(sa.b - sb.b) + Math.abs(sa.a - sb.a)
+      maxDist = Math.max(maxDist, d)
+    }
+    // Also factor in opacity difference
+    const opa = a.opacity ?? 1
+    const opb = b.opacity ?? 1
+    maxDist = Math.max(maxDist, Math.abs(opa - opb) * 4)
+    // Map 0..4 color distance to 8..256 steps
+    const steps = Math.min(256, Math.max(8, Math.round(maxDist * 64)))
+    return steps
+  }
+
+  /**
    * AI/CDR Object > Blend: build `steps` shapes interpolated between two
    * unlocked selected paths (blending runs back-to-front). Both outlines
    * resample to a shared vertex budget, align start/winding, then every step
