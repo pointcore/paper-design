@@ -7839,7 +7839,10 @@ export class EditorEngine {
         preset === 'bulge' ? 'Envelope Bulge' :
         preset === 'wave' ? 'Envelope Wave' :
         preset === 'flag' ? 'Envelope Flag' :
-        preset === 'fisheye' ? 'Envelope Fisheye' : 'Envelope Squeeze'
+        preset === 'fisheye' ? 'Envelope Fisheye' :
+        preset === 'pinch' ? 'Envelope Pinch' :
+        preset === 'rise' ? 'Envelope Rise' :
+        preset === 'fish' ? 'Envelope Fish' : 'Envelope Squeeze'
       this.reflowTextsForItems(this.getSelection())
       this.pushHistory(label)
       this.scope.view.update()
@@ -7905,6 +7908,28 @@ export class EditorEngine {
       case 'squeeze':
         // Pinch the middle horizontally (inverse bulge).
         return new scope.Point(b.x + b.width / 2 + (p.x - (b.x + b.width / 2)) * (1 - 0.3 * Math.sin(Math.PI * ny)), p.y)
+      case 'pinch': {
+        // Contract toward the center (inverse fisheye).
+        const pcx = b.x + b.width / 2
+        const pcy = b.y + b.height / 2
+        const prx = (nx - 0.5) * 2
+        const pry = (ny - 0.5) * 2
+        const pf = 1 - 0.35 * Math.max(0, 1 - (prx * prx + pry * pry) / 2)
+        return new scope.Point(pcx + (p.x - pcx) * pf, pcy + (p.y - pcy) * pf)
+      }
+      case 'rise': {
+        // Perspective rise: wider at the bottom, narrower at the top.
+        const ry2 = 1 - 0.3 * ny  // ny=0 top → scale 1, ny=1 bottom → scale 0.7
+        const rcx = b.x + b.width / 2
+        return new scope.Point(rcx + (p.x - rcx) * ry2, p.y)
+      }
+      case 'fish': {
+        // Asymmetric horizontal stretch: stronger on the right side.
+        const fx = nx < 0.5
+          ? 1 + 0.15 * Math.sin(Math.PI * nx * 2)
+          : 1 + 0.35 * Math.sin(Math.PI * (nx - 0.5) * 2)
+        return new scope.Point(b.x + b.width / 2 + (p.x - (b.x + b.width / 2)) * fx, p.y)
+      }
     }
   }
 

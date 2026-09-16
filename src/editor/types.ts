@@ -260,7 +260,7 @@ export type DistributeAxis = 'horizontal' | 'vertical'
 export type BooleanOperation = 'unite' | 'subtract' | 'intersect' | 'exclude'
 
 /** Destructive envelope-distort preset (warps path geometry in place). */
-export type EnvelopePreset = 'arc-upper' | 'arc-lower' | 'bulge' | 'wave' | 'flag' | 'fisheye' | 'squeeze'
+export type EnvelopePreset = 'arc-upper' | 'arc-lower' | 'bulge' | 'wave' | 'flag' | 'fisheye' | 'squeeze' | 'pinch' | 'rise' | 'fish'
 
 /** Ruler unit */
 export type RulerUnit = 'px' | 'pt' | 'mm' | 'cm' | 'in'

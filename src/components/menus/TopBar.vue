@@ -122,6 +122,9 @@
               <el-dropdown-item command="envFlag" :disabled="!store.hasSelection">Envelope: Flag</el-dropdown-item>
               <el-dropdown-item command="envFisheye" :disabled="!store.hasSelection">Envelope: Fisheye</el-dropdown-item>
               <el-dropdown-item command="envSqueeze" :disabled="!store.hasSelection">Envelope: Squeeze</el-dropdown-item>
+              <el-dropdown-item command="envPinch" :disabled="!store.hasSelection">Envelope: Pinch</el-dropdown-item>
+              <el-dropdown-item command="envRise" :disabled="!store.hasSelection">Envelope: Rise</el-dropdown-item>
+              <el-dropdown-item command="envFish" :disabled="!store.hasSelection">Envelope: Fish</el-dropdown-item>
               <el-dropdown-item command="makeMask" divided :disabled="!store.hasSelection">Make Clipping Mask</el-dropdown-item>
               <el-dropdown-item command="releaseMask" :disabled="!store.hasSelection">Release Clipping Mask</el-dropdown-item>
               <el-dropdown-item command="applyPattern" divided :disabled="!store.hasSelection">Apply Pattern Fill</el-dropdown-item>
@@ -1031,7 +1034,7 @@ import { uniqueSelectionName, pruneSelectionIds } from '../../editor/selection/s
 import { clearRecentProjects, listRecentProjects, loadRecentProjectText } from '../../editor/recent-files'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
-import type { RulerUnit, RasterExportFormat, RasterExportArea } from '../../editor/types'
+import type { RulerUnit, RasterExportFormat, RasterExportArea, EnvelopePreset } from '../../editor/types'
 
 const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
@@ -2729,15 +2732,21 @@ function onObjectCmd(cmd: string) {
     case 'envWave':
     case 'envFlag':
     case 'envFisheye':
-    case 'envSqueeze': {
+    case 'envSqueeze':
+    case 'envPinch':
+    case 'envRise':
+    case 'envFish': {
       const preset = (
         cmd === 'envArcUpper' ? 'arc-upper' :
         cmd === 'envArcLower' ? 'arc-lower' :
         cmd === 'envBulge' ? 'bulge' :
         cmd === 'envWave' ? 'wave' :
         cmd === 'envFlag' ? 'flag' :
-        cmd === 'envFisheye' ? 'fisheye' : 'squeeze'
-      ) as 'arc-upper' | 'arc-lower' | 'bulge' | 'wave' | 'flag' | 'fisheye' | 'squeeze'
+        cmd === 'envFisheye' ? 'fisheye' :
+        cmd === 'envPinch' ? 'pinch' :
+        cmd === 'envRise' ? 'rise' :
+        cmd === 'envFish' ? 'fish' : 'squeeze'
+      ) as EnvelopePreset
       if (e.envelopeDistort(preset) === 0) {
         store.setStatusMessage('Envelope needs a path selection')
       }
