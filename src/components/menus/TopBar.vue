@@ -1952,7 +1952,7 @@ async function onFileCmd(cmd: string) {
       exportVisible.value = true
       break
     case 'exportBoardsPng':
-      onExportBoardsPng()
+      void onExportBoardsPng()
       break
     case 'exportBoards':
       openBoardsExport()
@@ -2199,14 +2199,12 @@ async function onExportPdf() {
 }
 
 /**
- * Export every artboard as one PDF page each (2x rasters embedded
- * full-bleed). The active board is restored afterwards.
+ * Export every artboard as a 2x PNG. A single board downloads directly;
+ * multiple boards are zipped into one file so the browser cannot block
+ * the second and later downloads of the same gesture. The active board
+ * is restored afterwards.
  */
-/**
- * Export every artboard as a 2x PNG file each (download-per-board, like
- * Boards SVG). The active board is restored afterwards.
- */
-function onExportBoardsPng() {
+async function onExportBoardsPng() {
   const e = engineRef?.value
   if (!e) return
   const boards = store.artboards.filter((b) => b.width > 0 && b.height > 0)
@@ -2215,6 +2213,7 @@ function onExportBoardsPng() {
     return
   }
   const previousActive = store.activeArtboardId
+  const zip = boards.length > 1 ? new JSZip() : null
   try {
     let painted = 0
     let skipped = 0
@@ -2225,8 +2224,19 @@ function onExportBoardsPng() {
         skipped++
         continue
       }
-      downloadHref(dataUrl, `${board.name || 'artboard'}.png`)
+      const filename = `${board.name || 'artboard'}.png`
+      if (zip) {
+        // A data URL cannot go into a ZIP entry directly; fetch it as a blob first.
+        const res = await fetch(dataUrl)
+        zip.file(filename, await res.blob())
+      } else {
+        downloadHref(dataUrl, filename)
+      }
       painted++
+    }
+    if (zip && painted > 0) {
+      const blob = await zip.generateAsync({ type: 'blob' })
+      downloadHref(URL.createObjectURL(blob), 'boards-export.zip')
     }
     store.setStatusMessage(
       painted === 0
