@@ -13,8 +13,10 @@
  *
  * Performance: anchor points and target rectangles are cached with spatial
  * indexing (grid hash) and rebuilt only when the document geometry changes
- * (dirty flag). Callers must call invalidateCache() when items are
- * added/removed/moved/resized.
+ * (dirty flag). Per-query exclusions (dragged items) filter by recorded
+ * owner identity instead of triggering a re-walk, so every frame after the
+ * first is a grid lookup. Callers must call invalidateCache() when items
+ * are added/removed/moved/resized.
  */
 import type { EditorEngine } from '../engine'
 
@@ -70,15 +72,18 @@ class SpatialGrid {
 
   /**
    * Query all anchor indices within the tolerance radius of (qx, qy).
-   * Returns indices from the 3×3 neighborhood of cells.
+   * The search ring widens with the tolerance so zoomed-out views (where
+   * the snap radius can exceed one cell) never miss in-range anchors.
    */
   queryRange(qx: number, qy: number, tol: number): number[] {
     const out: number[] = []
     const cx = Math.floor(qx / this.cellSize)
     const cy = Math.floor(qy / this.cellSize)
-    // Expand search by 1 cell in each direction (covers points near cell edges).
-    for (let dx = -1; dx <= 1; dx++) {
-      for (let dy = -1; dy <= 1; dy++) {
+    // Minimum 3x3 neighborhood; expand by one cell per cellSize of radius
+    // so points near cell edges (or huge radii) stay covered.
+    const ring = Math.max(1, Math.ceil(tol / this.cellSize))
+    for (let dx = -ring; dx <= ring; dx++) {
+      for (let dy = -ring; dy <= ring; dy++) {
         const cell = this.cells.get(`${cx + dx},${cy + dy}`)
         if (cell) {
           for (const idx of cell.anchors) out.push(idx)
@@ -91,70 +96,72 @@ class SpatialGrid {
 
 /**
  * Spatial grid index for fast alignment target lookups.
- * Stores target rectangle bounds; query returns targets that overlap
- * an expanded candidate rectangle (candidate + tolerance).
+ * Stores target rectangle bounds in per-column and per-row indexes.
+ * X-alignment only needs column overlap (any row) and Y-alignment only
+ * row overlap (any column) — the old full scan never constrained the
+ * other axis, so a single-rectangle query would silently drop far-away
+ * (but edge-aligned) targets. Strip queries keep that exact behavior.
  */
 class TargetSpatialGrid {
   private cellSize: number
-  private cells = new Map<string, number[]>()
+  private columns = new Map<number, number[]>()
+  private rows = new Map<number, number[]>()
 
   constructor(cellSize = 400) {
     this.cellSize = cellSize
   }
 
   clear() {
-    this.cells.clear()
-  }
-
-  private key(x: number, y: number): string {
-    const cx = Math.floor(x / this.cellSize)
-    const cy = Math.floor(y / this.cellSize)
-    return `${cx},${cy}`
+    this.columns.clear()
+    this.rows.clear()
   }
 
   /** Insert a target index; the target's bounds span multiple cells. */
   insert(index: number, bounds: paper.Rectangle) {
     const x0 = Math.floor(bounds.x / this.cellSize)
-    const y0 = Math.floor(bounds.y / this.cellSize)
     const x1 = Math.floor((bounds.x + bounds.width) / this.cellSize)
-    const y1 = Math.floor((bounds.y + bounds.height) / this.cellSize)
     for (let cx = x0; cx <= x1; cx++) {
-      for (let cy = y0; cy <= y1; cy++) {
-        const k = `${cx},${cy}`
-        let cell = this.cells.get(k)
-        if (!cell) {
-          cell = []
-          this.cells.set(k, cell)
-        }
-        cell.push(index)
+      let col = this.columns.get(cx)
+      if (!col) {
+        col = []
+        this.columns.set(cx, col)
       }
+      col.push(index)
+    }
+    const y0 = Math.floor(bounds.y / this.cellSize)
+    const y1 = Math.floor((bounds.y + bounds.height) / this.cellSize)
+    for (let cy = y0; cy <= y1; cy++) {
+      let row = this.rows.get(cy)
+      if (!row) {
+        row = []
+        this.rows.set(cy, row)
+      }
+      row.push(index)
     }
   }
 
   /**
-   * Query target indices whose bounds may overlap with (candidate + tolerance).
-   * Returns a deduplicated set of candidate indices.
+   * Target indices whose x-range overlaps [x0, x1] (any row).
+   * May contain duplicates across columns; callers deduplicate.
    */
-  queryRange(candidate: paper.Rectangle, tol: number): number[] {
-    const expanded = candidate.expand(tol)
-    const x0 = Math.floor(expanded.x / this.cellSize)
-    const y0 = Math.floor(expanded.y / this.cellSize)
-    const x1 = Math.floor((expanded.x + expanded.width) / this.cellSize)
-    const y1 = Math.floor((expanded.y + expanded.height) / this.cellSize)
-    const seen = new Set<number>()
+  queryColumns(x0: number, x1: number): number[] {
     const out: number[] = []
-    for (let cx = x0; cx <= x1; cx++) {
-      for (let cy = y0; cy <= y1; cy++) {
-        const cell = this.cells.get(`${cx},${cy}`)
-        if (cell) {
-          for (const idx of cell) {
-            if (!seen.has(idx)) {
-              seen.add(idx)
-              out.push(idx)
-            }
-          }
-        }
-      }
+    for (let cx = Math.floor(x0 / this.cellSize); cx <= Math.floor(x1 / this.cellSize); cx++) {
+      const col = this.columns.get(cx)
+      if (col) for (const idx of col) out.push(idx)
+    }
+    return out
+  }
+
+  /**
+   * Target indices whose y-range overlaps [y0, y1] (any column).
+   * May contain duplicates across rows; callers deduplicate.
+   */
+  queryRows(y0: number, y1: number): number[] {
+    const out: number[] = []
+    for (let cy = Math.floor(y0 / this.cellSize); cy <= Math.floor(y1 / this.cellSize); cy++) {
+      const row = this.rows.get(cy)
+      if (row) for (const idx of row) out.push(idx)
     }
     return out
   }
@@ -163,12 +170,18 @@ class TargetSpatialGrid {
 /**
  * Cached snap data to avoid rebuilding every frame.
  * Cached until invalidateCache() is called (on document changes).
+ * Owner lists run parallel to anchors/targets so per-query exclusions
+ * (dragged items) filter by identity instead of triggering a re-walk.
  */
 interface SnapCache {
   anchors: paper.Point[]
+  anchorOwners: Array<paper.Item | null>
   targets: paper.Rectangle[]
+  targetOwners: paper.Item[]
   anchorGrid: SpatialGrid
   targetGrid: TargetSpatialGrid
+  /** Cache rebuilds since startup (diagnostic/test seam, see getSnapCacheStats). */
+  builds: number
   version: number
   anchorVersion: number
   targetVersion: number
@@ -180,12 +193,37 @@ interface SnapCache {
  */
 const snapCache: SnapCache = {
   anchors: [],
+  anchorOwners: [],
   targets: [],
+  targetOwners: [],
   anchorGrid: new SpatialGrid(200),
   targetGrid: new TargetSpatialGrid(400),
+  builds: 0,
   version: -1,
   anchorVersion: -1,
   targetVersion: -1,
+}
+
+/**
+ * Diagnostic snapshot of the shared snap cache. The editor never reads
+ * this; unit tests and benchmarks use it to assert rebuild counts.
+ */
+export function getSnapCacheStats(): {
+  version: number
+  anchorVersion: number
+  targetVersion: number
+  anchorCount: number
+  targetCount: number
+  builds: number
+} {
+  return {
+    version: snapCache.version,
+    anchorVersion: snapCache.anchorVersion,
+    targetVersion: snapCache.targetVersion,
+    anchorCount: snapCache.anchors.length,
+    targetCount: snapCache.targets.length,
+    builds: snapCache.builds,
+  }
 }
 
 export class SnapService {
@@ -198,10 +236,15 @@ export class SnapService {
   /**
    * Mark cached data as stale. Call after any document mutation that
    * changes item geometry, visibility, lock state, or layer structure.
-   * Safe to call multiple times per frame (idempotent).
+   * Safe to call multiple times per frame (idempotent). Arrays are
+   * dropped eagerly so removed items are never retained by the cache.
    */
   invalidateCache() {
     snapCache.version++
+    snapCache.anchors = []
+    snapCache.anchorOwners = []
+    snapCache.targets = []
+    snapCache.targetOwners = []
   }
 
   /** Screen-space tolerance converted to document units. */
@@ -261,34 +304,42 @@ export class SnapService {
     }
 
     // Path anchor points (strictly nearer wins, so guides/grid win ties).
+    // Served from the shared grid every frame now: exclusions are
+    // owner-filtered per query instead of triggering a full re-walk.
     if (snap.point) {
       const excluded = new Set(exclude ?? [])
-      const anchors = this.collectAnchorPoints(excluded)
-      // Use spatial grid when available and no exclusions (common case).
-      if (excluded.size === 0 && snapCache.anchorVersion === snapCache.version) {
-        const candidateIndices = snapCache.anchorGrid.queryRange(raw.x, raw.y, tol)
-        for (const idx of candidateIndices) {
-          const anchor = anchors[idx]
-          if (!anchor) continue
-          const dist = anchor.getDistance(raw)
-          if (dist < bestDist) {
-            best = anchor.clone()
-            bestDist = dist
-          }
+      this.collectAnchorPoints()
+      const anchors = snapCache.anchors
+      const owners = snapCache.anchorOwners
+      for (const idx of snapCache.anchorGrid.queryRange(raw.x, raw.y, tol)) {
+        if (excluded.size > 0 && owners[idx] && this.isExcluded(owners[idx] as paper.Item, excluded)) {
+          continue
         }
-      } else {
-        // Fallback: linear scan (excluded set means we can't use cached grid).
-        for (const anchor of anchors) {
-          const dist = anchor.getDistance(raw)
-          if (dist < bestDist) {
-            best = anchor.clone()
-            bestDist = dist
-          }
+        const anchor = anchors[idx]
+        if (!anchor) continue
+        const dist = anchor.getDistance(raw)
+        if (dist < bestDist) {
+          best = anchor.clone()
+          bestDist = dist
         }
       }
     }
 
     return best
+  }
+
+  /**
+   * Whether the item or any of its ancestors is excluded. Anchor ownership
+   * is recorded at the leaf, so a nested excluded path prunes exactly its
+   * own anchors while siblings keep snapping (same as the old subtree walk).
+   */
+  private isExcluded(item: paper.Item | null, excluded: Set<paper.Item>): boolean {
+    let at: paper.Item | null | undefined = item
+    while (at) {
+      if (excluded.has(at)) return true
+      at = at.parent
+    }
+    return false
   }
 
   /**
@@ -305,14 +356,11 @@ export class SnapService {
     const scope = engine.scope
     const tol = this.tolerance()
     const excluded = new Set(exclude ?? [])
-    const targets = this.collectTargetRects(excluded)
+    const targets = this.collectTargetRects()
     if (targets.length === 0) return empty
 
-    // Use spatial grid to filter candidates when no exclusions (common case).
-    let targetIndices: number[] | null = null
-    if (excluded.size === 0 && snapCache.targetVersion === snapCache.version) {
-      targetIndices = snapCache.targetGrid.queryRange(candidate, tol)
-    }
+    // Grid-filtered every frame now; the dragged (excluded) top-level items
+    // drop out by owner below instead of triggering a full rebuild.
 
     const candX = [candidate.x, candidate.x + candidate.width / 2, candidate.x + candidate.width]
     const candY = [candidate.y, candidate.y + candidate.height / 2, candidate.y + candidate.height]
@@ -331,11 +379,28 @@ export class SnapService {
     let spanRight = 0
     let foundY = false
 
-    // Iterate over filtered targets (spatial grid) or all targets (fallback).
-    const iterTargets = targetIndices !== null
-      ? targetIndices.map((i) => targets[i]).filter(Boolean)
-      : targets
-    for (const target of iterTargets) {
+    // Iterate over strip-filtered targets, skipping the dragged items by
+    // top-level owner (mirrors the old collection-time exclusion exactly).
+    // X-alignment needs column overlap only, Y-alignment row overlap only.
+    const seen = new Set<number>()
+    const order: number[] = []
+    for (const i of snapCache.targetGrid.queryColumns(candidate.x - tol, candidate.x + candidate.width + tol)) {
+      if (!seen.has(i)) {
+        seen.add(i)
+        order.push(i)
+      }
+    }
+    for (const i of snapCache.targetGrid.queryRows(candidate.y - tol, candidate.y + candidate.height + tol)) {
+      if (!seen.has(i)) {
+        seen.add(i)
+        order.push(i)
+      }
+    }
+    const targetOwners = snapCache.targetOwners
+    for (const i of order) {
+      if (excluded.size > 0 && excluded.has(targetOwners[i])) continue
+      const target = targets[i]
+      if (!target) continue
       const tx = [target.x, target.x + target.width / 2, target.x + target.width]
       const ty = [target.y, target.y + target.height / 2, target.y + target.height]
       for (const cx of candX) {
@@ -386,20 +451,24 @@ export class SnapService {
     return { dx, dy, lines }
   }
 
-  /** Segment points (and text anchors) of user artwork outside `excluded`. */
-  private collectAnchorPoints(excluded: Set<paper.Item>): paper.Point[] {
+  /**
+   * Segment points (and text anchors) of user artwork, cached by version.
+   * The walk ignores per-query exclusions: every anchor records its leaf
+   * owner so queries filter dragged items by identity (see isExcluded).
+   */
+  private collectAnchorPoints(): paper.Point[] {
     const engine = this.engine
     if (!engine) return []
     const scope = engine.scope
 
-    // Use cache if valid (not invalidated since last build) and no exclusions.
-    if (snapCache.anchorVersion === snapCache.version && excluded.size === 0) {
+    // Use cache if valid (not invalidated since last build).
+    if (snapCache.anchorVersion === snapCache.version) {
       return snapCache.anchors
     }
 
     const out: paper.Point[] = []
+    const owners: Array<paper.Item | null> = []
     const walk = (item: paper.Item) => {
-      if (excluded.has(item)) return
       // Locked / hidden art never pulls the pointer (AI); pattern tiles
       // and path-text glyph runs are layout exhaust, not snap targets.
       if ((item as any).locked || (item as any).visible === false) return
@@ -410,7 +479,10 @@ export class SnapService {
       if (data.isPatternTile) return
       if (data.textMode === 'path') return
       if (item instanceof scope.Path && !(item instanceof scope.CompoundPath)) {
-        for (const seg of item.segments) out.push(seg.point.clone())
+        for (const seg of item.segments) {
+          out.push(seg.point.clone())
+          owners.push(item)
+        }
         return
       }
       if (item instanceof scope.CompoundPath || item instanceof scope.Group) {
@@ -419,6 +491,7 @@ export class SnapService {
       }
       if (item instanceof scope.PointText && !data.annotation) {
         out.push((item as paper.PointText).point.clone())
+        owners.push(item)
         return
       }
       const children = (item as any).children as paper.Item[] | undefined
@@ -442,61 +515,70 @@ export class SnapService {
         new scope.Point(board.x + board.width, board.y + board.height),
         new scope.Point(cx, cy)
       )
+      owners.push(null, null, null, null, null)
     }
 
-    // Cache when no exclusions (common case: snapPoint without dragged items).
-    if (excluded.size === 0) {
-      snapCache.anchors = out
-      // Build spatial grid for fast nearest-neighbor lookups.
-      snapCache.anchorGrid.clear()
-      for (let i = 0; i < out.length; i++) {
-        snapCache.anchorGrid.insert(i, out[i].x, out[i].y)
-      }
-      snapCache.anchorVersion = snapCache.version
+    // Always cache: queries filter exclusions by owner, so the full set is
+    // valid for every caller until the next invalidation.
+    snapCache.anchors = out
+    snapCache.anchorOwners = owners
+    // Build spatial grid for fast nearest-neighbor lookups.
+    snapCache.anchorGrid.clear()
+    for (let i = 0; i < out.length; i++) {
+      snapCache.anchorGrid.insert(i, out[i].x, out[i].y)
     }
+    snapCache.anchorVersion = snapCache.version
+    snapCache.builds++
     return out
   }
 
-  /** Bounds of top-level user items outside `excluded` (alignment targets). */
-  private collectTargetRects(excluded: Set<paper.Item>): paper.Rectangle[] {
+  /**
+   * Bounds of top-level user items (alignment targets), cached by version.
+   * Ownership is the top-level item itself, matching the old behavior where
+   * only top-level children were tested against the excluded set.
+   */
+  private collectTargetRects(): paper.Rectangle[] {
     const engine = this.engine
     if (!engine) return []
     const scope = engine.scope
 
-    // Use cache if valid (not invalidated since last build) and no exclusions.
-    if (snapCache.targetVersion === snapCache.version && excluded.size === 0) {
+    // Use cache if valid (not invalidated since last build).
+    if (snapCache.targetVersion === snapCache.version) {
       return snapCache.targets
     }
 
     const out: paper.Rectangle[] = []
+    const owners: paper.Item[] = []
     for (const layer of engine.project.layers) {
       if (!(layer.data as any)?.isUserLayer || !layer.visible || layer.locked) continue
       for (const child of layer.children) {
         const item = child as paper.Item
-        if (excluded.has(item)) continue
         if (!item.visible || (item as any).locked) continue
         if ((item.data as any)?.isPreview) continue
         const b = item.bounds
         if (!b) continue
         out.push(b.clone())
+        owners.push(item)
       }
     }
     // Artboard edges participate in smart alignment like any bounds.
     for (const board of engine.store.artboards) {
       if (board.width <= 0 || board.height <= 0) continue
       out.push(new scope.Rectangle(board.x, board.y, board.width, board.height))
+      owners.push(null as unknown as paper.Item)
     }
 
-    // Cache when no exclusions (common case: alignDraggedBounds without excluded items).
-    if (excluded.size === 0) {
-      snapCache.targets = out
-      // Build spatial grid for fast alignment target lookups.
-      snapCache.targetGrid.clear()
-      for (let i = 0; i < out.length; i++) {
-        snapCache.targetGrid.insert(i, out[i])
-      }
-      snapCache.targetVersion = snapCache.version
+    // Always cache: queries filter exclusions by owner, so the full set is
+    // valid for every caller until the next invalidation.
+    snapCache.targets = out
+    snapCache.targetOwners = owners
+    // Build spatial grid for fast alignment target lookups.
+    snapCache.targetGrid.clear()
+    for (let i = 0; i < out.length; i++) {
+      snapCache.targetGrid.insert(i, out[i])
     }
+    snapCache.targetVersion = snapCache.version
+    snapCache.builds++
     return out
   }
 }
