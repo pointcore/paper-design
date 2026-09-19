@@ -15,6 +15,15 @@ import { parseProjectFile } from './project-file'
 import { recordRecentProject } from './recent-files'
 import type { EditorStore } from './store-types'
 import { SnapService } from './snap/snap-service'
+import {
+  parseCdrBytes,
+  cdrMmToPx,
+  cdrSvgToImportSvg,
+  cdrViewBoxScale,
+  countCdrUrlFills,
+  scaleCdrImportedStrokes,
+} from './cdr/cdr-to-svg'
+import { yieldToUI, type ProgressReport } from './busy'
 
 /** Identifier stamped into every saved project file. */
 const PROJECT_FILE_APP = 'vue-vector-editor'
@@ -27,6 +36,13 @@ export interface HistoryDocMeta {
   activeArtboardId: string
   bleed: number
   pageSize: { width: number; height: number }
+}
+
+/** Result of a CDR open/import operation. */
+export interface CdrImportResult {
+  pages: number
+  warnings: string[]
+  skippedPages: number
 }
 
 export class EditorEngine {
@@ -162,10 +178,22 @@ export class EditorEngine {
    */
   refreshArtboards(): void {
     const scope = this.scope
-    let layer = this.project.layers.find(
+    // Reuse the flagged layer; never rely on `layer.parent` (top-level
+    // Paper.js layers have no parent, so that check orphaned a fresh
+    // visuals layer on every call). Drop stale duplicates left by older
+    // revisions or snapshot restores.
+    const flagged = this.project.layers.filter(
       (l) => (l.data as any)?.isArtboardLayer
-    ) as paper.Layer | undefined
-    if (!layer || !layer.parent) {
+    ) as paper.Layer[]
+    let layer = flagged[0]
+    for (const dup of flagged.slice(1)) {
+      try {
+        dup.remove()
+      } catch {
+        // Best effort: a stuck duplicate is invisible, not fatal.
+      }
+    }
+    if (!layer) {
       layer = new scope.Layer()
       layer.name = 'artboards'
       layer.data.isUserLayer = false
@@ -1160,24 +1188,27 @@ export class EditorEngine {
    */
   private ensureGridLayer(): paper.Layer {
     const flagged = this.project.layers.filter((l) => (l.data as any)?.isGridLayer)
+    // Membership, not `parent`: top-level Paper.js layers never have one,
+    // so the old parent check rebuilt (and orphaned) the grid layer call
+    // after call. Consolidate duplicates the same way refreshArtboards does.
     let layer =
-      this.gridLayer && this.gridLayer.parent
+      this.gridLayer && this.project.layers.includes(this.gridLayer)
         ? this.gridLayer
         : (flagged[0] as paper.Layer | undefined) ?? null
     for (const dup of flagged) {
       if (dup !== layer) dup.remove()
     }
-    if (!layer || !layer.parent) {
+    if (!layer) {
       const prevActive = this.project.activeLayer
       layer = new this.scope.Layer()
       layer.name = 'grid'
       layer.locked = true
       layer.data.isUserLayer = false
       layer.data.isGridLayer = true
-      if (prevActive && prevActive.parent) prevActive.activate()
+      if (prevActive && this.project.layers.includes(prevActive)) prevActive.activate()
       else {
         const fallback = this.getActiveLayer()
-        if (fallback && fallback.parent) fallback.activate()
+        if (fallback && this.project.layers.includes(fallback)) fallback.activate()
       }
     }
     layer.name = 'grid'
@@ -2753,6 +2784,8 @@ export class EditorEngine {
     }
     // Same for bleed: absent means "none", not "whatever was open before".
     this.store.setBleed(Number.isFinite(parsed.bleed) ? Math.max(0, Number(parsed.bleed)) : 0)
+    // The key object id never survives a document switch: the old item is gone.
+    this.store.setKeyObject('')
     this.restoreArtboards(parsed.artboards, parsed.activeArtboardId, pageSize)
     this.pointActiveLayerAtRestoredStack()
     this.clearSelection()
@@ -2776,6 +2809,8 @@ export class EditorEngine {
     this.initLayers()
     this.pointActiveLayerAtRestoredStack()
     this.store.setPageSize(w, h)
+    this.store.setBleed(0)
+    this.store.setKeyObject('')
     const boardId = this.genId()
     this.store.setArtboards([
       { id: boardId, name: 'Artboard 1', x: 0, y: 0, width: w, height: h },
@@ -7294,6 +7329,245 @@ export class EditorEngine {
     this.scope.view.update()
     this.pushHistory(historyLabel)
     return true
+  }
+
+  // ===== CDR import (CDR -> SVG -> Paper.js) =====
+
+  /**
+   * Open a .cdr file as a new document (multi-page -> multi-artboard row).
+   * Parses locally via src/editor/cdr (ZIP CDR + 16-bit CDRX/CMX), converts
+   * each page to SVG at 96dpi and imports onto its own artboard.
+   * Replaces the current document; throws with an English message on failure.
+   */
+  async openCdrBytes(
+    input: Uint8Array | ArrayBuffer,
+    baseName = 'CDR',
+    onProgress?: ProgressReport
+  ): Promise<CdrImportResult> {
+    const bytes = input instanceof Uint8Array ? input : new Uint8Array(input)
+    if (bytes.length > 150 * 1024 * 1024) throw new Error('CDR file too large (150 MB max)')
+    const report = onProgress ?? ((): void => {})
+    let doc
+    try {
+      report(0.05, 'Extracting CDR…')
+      await yieldToUI()
+      // Parser takes 0-60%: unzip + object tree + per-page SVG conversion.
+      doc = await parseCdrBytes(bytes, (f) => report(0.05 + 0.55 * f, 'Parsing CDR objects…'))
+    } catch (err) {
+      throw new Error(err instanceof Error ? err.message : 'CDR parse failed')
+    }
+    if (!doc.pages.length) throw new Error('No convertible pages found')
+
+    const stem = (baseName || 'CDR').replace(/\.cdr$/i, '').slice(0, 80) || 'CDR'
+    // Snapshot first: per-page canvas import can still fail after the parse
+    // succeeded, and the old document must survive that path untouched.
+    const backup = this.snapshotProject()
+    const prevBoards = this.store.artboards.map((b) => ({ ...b }))
+    const prevActiveBoard = this.store.activeArtboardId
+    const prevPageSize = { ...this.store.pageSize }
+    this.clearIsolationState()
+    this.project.clear()
+    this.setupProject()
+    this.initLayers()
+    this.pointActiveLayerAtRestoredStack()
+
+    const GAP = 100
+    let cursorX = 0
+    const boards: ArtboardMeta[] = []
+    const allItems: paper.Item[] = []
+    let skippedPages = 0
+    let patternApprox = 0
+    for (let k = 0; k < doc.pages.length; k++) {
+      const page = doc.pages[k]
+      const wPx = Math.min(16384, Math.max(1, Math.round(cdrMmToPx(page.width))))
+      const hPx = Math.min(16384, Math.max(1, Math.round(cdrMmToPx(page.height))))
+      const board = {
+        id: this.genId(),
+        name: doc.pages.length > 1 ? `${stem} p${k + 1}` : stem,
+        x: Math.round(cursorX * 10) / 10,
+        y: 0,
+        width: wPx,
+        height: hPx,
+      }
+      try {
+        // Canvas import takes 60-90% (Paper.js importSVG is synchronous).
+        report(0.6 + (0.3 * k) / Math.max(1, doc.pages.length), `Importing page ${k + 1}…`)
+        await yieldToUI()
+        const items = this.importCdrPageSvg(page.svg, page.width, page.height, board.x, board.y)
+        // Only successful pages take a board and advance the row: failed
+        // pages leave neither a blank sheet nor a gap behind.
+        boards.push(board)
+        cursorX += wPx + GAP
+        allItems.push(...items)
+        // Pattern fills import as solid approximations (Paper.js has no
+        // <pattern> support and would render them opaque black instead).
+        patternApprox += countCdrUrlFills(page.svg)
+      } catch {
+        skippedPages++
+      }
+    }
+    if (allItems.length === 0) {
+      // Nothing convertible: restore the previous document instead of
+      // leaving an empty one behind (and never mark it as saved).
+      try {
+        this.restoreSnapshot(backup)
+      } catch {
+        // The backup came from our own exporter; keep the original error.
+      }
+      this.store.setArtboards(prevBoards)
+      this.store.setActiveArtboard(prevActiveBoard)
+      this.store.setPageSize(prevPageSize.width, prevPageSize.height)
+      this.pointActiveLayerAtRestoredStack()
+      this.syncLayersToStore()
+      this.clearSelection()
+      this.refreshArtboards()
+      this.refreshGrid()
+      this.refreshGuides()
+      this.scope.view.update()
+      this.emitViewChange()
+      throw new Error('No convertible pages found')
+    }
+    report(0.92, 'Arranging artboards…')
+    await yieldToUI()
+    const first = boards[0]
+    this.store.setPageSize(first.width, first.height)
+    this.store.setBleed(0)
+    this.store.setKeyObject('')
+    this.store.setArtboards(boards)
+    this.store.setActiveArtboard(first.id)
+    this.pointActiveLayerAtRestoredStack()
+    this.syncLayersToStore()
+    this.clearSelection()
+    allItems.forEach((item) => {
+      item.selected = true
+    })
+    this.syncSelectionToStore()
+    this.clipboardItems = []
+    this.pasteCount = 0
+    this.resetHistory('Open CDR')
+    this.store.setDocumentName(stem)
+    this.refreshArtboards()
+    this.refreshGrid()
+    this.refreshGuides()
+    this.scope.view.update()
+    this.zoomToArtboard()
+    this.emitViewChange()
+    const warnings = [...(doc.warnings ?? [])]
+    if (patternApprox > 0) warnings.push(`Pattern fills approximated as solid (${patternApprox})`)
+    return { pages: boards.length, warnings, skippedPages }
+  }
+
+  /**
+   * Import a .cdr file into the current document (multi-page appends one
+   * artboard per page in a row after existing boards). Unlike openCdrBytes
+   * the current artwork/history is kept; one history entry is pushed.
+   */
+  async importCdrBytes(
+    input: Uint8Array | ArrayBuffer,
+    baseName = 'CDR',
+    onProgress?: ProgressReport
+  ): Promise<CdrImportResult> {
+    const bytes = input instanceof Uint8Array ? input : new Uint8Array(input)
+    if (bytes.length > 150 * 1024 * 1024) throw new Error('CDR file too large (150 MB max)')
+    const report = onProgress ?? ((): void => {})
+    let doc
+    try {
+      report(0.05, 'Extracting CDR…')
+      await yieldToUI()
+      doc = await parseCdrBytes(bytes, (f) => report(0.05 + 0.55 * f, 'Parsing CDR objects…'))
+    } catch (err) {
+      throw new Error(err instanceof Error ? err.message : 'CDR parse failed')
+    }
+    if (!doc.pages.length) throw new Error('No convertible pages found')
+
+    const stem = (baseName || 'CDR').replace(/\.cdr$/i, '').slice(0, 80) || 'CDR'
+    const GAP = 100
+    let cursorX = 0
+    for (const b of this.store.artboards) {
+      cursorX = Math.max(cursorX, b.x + b.width + GAP)
+    }
+    const boards = this.store.artboards.slice()
+    const initialBoards = boards.length
+    const allItems: paper.Item[] = []
+    let skippedPages = 0
+    let patternApprox = 0
+    for (let k = 0; k < doc.pages.length; k++) {
+      const page = doc.pages[k]
+      const wPx = Math.min(16384, Math.max(1, Math.round(cdrMmToPx(page.width))))
+      const hPx = Math.min(16384, Math.max(1, Math.round(cdrMmToPx(page.height))))
+      const board = {
+        id: this.genId(),
+        name: doc.pages.length > 1 ? `${stem} p${k + 1}` : stem,
+        x: Math.round(cursorX * 10) / 10,
+        y: 0,
+        width: wPx,
+        height: hPx,
+      }
+      try {
+        report(0.6 + (0.3 * k) / Math.max(1, doc.pages.length), `Importing page ${k + 1}…`)
+        await yieldToUI()
+        const items = this.importCdrPageSvg(page.svg, page.width, page.height, board.x, board.y)
+        boards.push(board)
+        cursorX += wPx + GAP
+        allItems.push(...items)
+        patternApprox += countCdrUrlFills(page.svg)
+      } catch {
+        skippedPages++
+      }
+    }
+    if (allItems.length === 0) throw new Error('No convertible pages found')
+    this.store.setArtboards(boards)
+    this.syncLayersToStore()
+    this.clearSelection()
+    allItems.forEach((item) => {
+      item.selected = true
+    })
+    this.syncSelectionToStore()
+    report(0.92, 'Arranging artboards…')
+    await yieldToUI()
+    this.pushHistory('Import CDR')
+    this.refreshArtboards()
+    this.scope.view.update()
+    this.emitViewChange()
+    const warnings = [...(doc.warnings ?? [])]
+    if (patternApprox > 0) warnings.push(`Pattern fills approximated as solid (${patternApprox})`)
+    return { pages: boards.length - initialBoards, warnings, skippedPages }
+  }
+
+  /**
+   * Convert one CDR page SVG (CDR units viewBox, 300dpi header) to 96dpi and
+   * import onto the given board origin. Returns the placed top-level items.
+   */
+  private importCdrPageSvg(
+    pageSvg: string,
+    widthMm: number,
+    heightMm: number,
+    boardX: number,
+    boardY: number
+  ): paper.Item[] {
+    const svgText = cdrSvgToImportSvg(pageSvg, widthMm, heightMm)
+    // Paper.js bakes the viewBox scale into coordinates but keeps raw
+    // user-unit stroke widths: rescale them so CDR strokes (thousands of
+    // CDR units) do not render thousands of px wide and bury every fill.
+    const strokeScale = cdrViewBoxScale(svgText)
+    const imported = this.project.importSVG(svgText)
+    const layer = this.getActiveLayer()
+    const items = (Array.isArray(imported) ? imported : [imported]).filter(
+      Boolean
+    ) as paper.Item[]
+    if (items.length === 0) throw new Error('Empty CDR page')
+    const placed: paper.Item[] = []
+    for (const item of items) {
+      this.restampCloneTree(item)
+      if (!(item as any).data) (item as any).data = {}
+      ;((item as any).data as any).id = this.genId()
+      ;((item as any).data as any).isUserItem = true
+      layer.addChild(item)
+      scaleCdrImportedStrokes(item, strokeScale)
+      item.translate(new this.scope.Point(boardX, boardY))
+      placed.push(item)
+    }
+    return placed
   }
 
   /** OS clipboard handle, or null outside secure contexts. */

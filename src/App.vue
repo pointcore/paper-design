@@ -39,6 +39,7 @@
 
       <RightPanel v-if="store.ui.showPropertyPanel || store.ui.showLayerPanel" />
     </div>
+    <BusyOverlay />
   </div>
 </template>
 
@@ -55,6 +56,7 @@ import CanvasHost from './components/canvas/CanvasHost.vue'
 import DocTabs from './components/canvas/DocTabs.vue'
 import ColorBar from './components/canvas/ColorBar.vue'
 import RightPanel from './components/panels/RightPanel.vue'
+import BusyOverlay from './components/BusyOverlay.vue'
 
 const store = useEditorStore()
 const { tool } = storeToRefs(store)

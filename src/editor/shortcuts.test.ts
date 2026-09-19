@@ -372,6 +372,31 @@ describe('handleGlobalKeydown', () => {
     expect(store.updateView).toHaveBeenCalledWith({ showGuides: true })
   })
 
+  it('ignores every shortcut while the busy overlay owns the document', () => {
+    const engine = { undo: vi.fn(), downloadProjectFile: vi.fn() } as any
+    const busy = { busy: { active: true }, setStatusMessage: vi.fn() } as any
+    handleGlobalKeydown(
+      key({ key: 'z', code: 'KeyZ', ctrlKey: true, target: null }) as KeyboardEvent,
+      busy,
+      engine
+    )
+    handleGlobalKeydown(
+      key({ key: 's', code: 'KeyS', ctrlKey: true, target: null }) as KeyboardEvent,
+      busy,
+      engine
+    )
+    expect(engine.undo).not.toHaveBeenCalled()
+    expect(engine.downloadProjectFile).not.toHaveBeenCalled()
+    expect(busy.setStatusMessage).not.toHaveBeenCalled()
+    const idle = { busy: { active: false }, setStatusMessage: vi.fn() } as any
+    handleGlobalKeydown(
+      key({ key: 'z', code: 'KeyZ', ctrlKey: true, target: null }) as KeyboardEvent,
+      idle,
+      engine
+    )
+    expect(engine.undo).toHaveBeenCalledTimes(1)
+  })
+
   it('toggles rulers on Ctrl+R and leaves Ctrl+Shift+R to the browser', () => {
     const store = { view: { rulersVisible: false }, updateView: vi.fn() } as any
     handleGlobalKeydown(

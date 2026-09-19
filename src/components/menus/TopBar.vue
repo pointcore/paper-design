@@ -30,6 +30,8 @@
               <el-dropdown-item command="exportVectorPdf">Export PDF (Vector)</el-dropdown-item>
               <el-dropdown-item command="exportBoardsVectorPdf">Export All Boards PDF (Vector)</el-dropdown-item>
               <el-dropdown-item command="import">Import SVG...</el-dropdown-item>
+              <el-dropdown-item command="importCdr">Import CDR...</el-dropdown-item>
+              <el-dropdown-item command="openCdr">Open CDR...</el-dropdown-item>
               <el-dropdown-item command="place">Place Image...</el-dropdown-item>
             </el-dropdown-menu>
           </template>
@@ -1046,6 +1048,7 @@ import AppDialog from '../ui/AppDialog.vue'
 import { uniqueSelectionName, pruneSelectionIds } from '../../editor/selection/saved-selection'
 import { clearRecentProjects, listRecentProjects, loadRecentProjectText } from '../../editor/recent-files'
 import { useEditorStore } from '../../editor/store'
+import { withBusy, yieldToUI } from '../../editor/busy'
 import type { EditorEngine } from '../../editor/engine'
 import type { RulerUnit, RasterExportFormat, RasterExportArea, EnvelopePreset } from '../../editor/types'
 
@@ -1875,13 +1878,14 @@ async function onFileCmd(cmd: string) {
     if (!confirmDiscard()) return
     if (!e) return
     try {
-      const text = await loadRecentProjectText(cmd.slice(7))
-      if (!text) {
-        store.setStatusMessage('That recent file is gone (cleared or overwritten)')
-        return
-      }
-      e.importProjectFile(text)
       const meta = recentFiles.value.find((r) => r.id === cmd.slice(7))
+      await withBusy(store, `Opening ${meta?.name ?? 'project'}…`, async (report) => {
+        const text = await loadRecentProjectText(cmd.slice(7))
+        if (!text) throw new Error('That recent file is gone (cleared or overwritten)')
+        report(0.4, 'Opening project…')
+        await yieldToUI()
+        e.importProjectFile(text)
+      })
       store.setDocumentName(meta?.name ?? '')
       store.setStatusMessage('Project opened')
     } catch (err) {
@@ -1930,14 +1934,29 @@ async function onFileCmd(cmd: string) {
       if (!confirmDiscard()) break
       const input = document.createElement('input')
       input.type = 'file'
-      input.accept = '.json,.vec.json,application/json'
+      input.accept = '.json,.vec.json,.cdr,application/json'
       input.onchange = async () => {
         const file = input.files?.[0]
         if (!file || !e) return
         try {
-          const text = await file.text()
-          e.importProjectFile(text)
-          store.setStatusMessage('Project opened')
+          if (/\.cdr$/i.test(file.name)) {
+            const result = await withBusy(store, `Opening ${file.name}…`, async (report) => {
+              const bytes = new Uint8Array(await file.arrayBuffer())
+              return e.openCdrBytes(bytes, file.name, report)
+            })
+            const warn = result.warnings.length ? ` (${result.warnings.length} warnings)` : ''
+            const skipped = result.skippedPages > 0 ? `, ${result.skippedPages} skipped` : ''
+            store.setStatusMessage(`CDR opened: ${result.pages} page${result.pages > 1 ? 's' : ''}${skipped}${warn}`)
+            if (result.warnings.length) console.warn('[CDR open warnings]', result.warnings)
+          } else {
+            await withBusy(store, `Opening ${file.name}…`, async (report) => {
+              const text = await file.text()
+              report(0.4, 'Opening project…')
+              await yieldToUI()
+              e.importProjectFile(text)
+            })
+            store.setStatusMessage('Project opened')
+          }
         } catch (err) {
           store.setStatusMessage(err instanceof Error ? err.message : 'Project open failed')
         }
@@ -2040,9 +2059,14 @@ async function onFileCmd(cmd: string) {
       input.onchange = async () => {
         const file = input.files?.[0]
         if (file && e) {
-          const text = await file.text()
           try {
-            if (e.importSVGText(text, 'Import SVG')) {
+            const ok = await withBusy(store, `Importing ${file.name}…`, async (report) => {
+              const text = await file.text()
+              report(0.4, 'Importing SVG…')
+              await yieldToUI()
+              return e.importSVGText(text, 'Import SVG')
+            })
+            if (ok) {
               store.setStatusMessage('SVG imported')
             } else {
               store.setStatusMessage('SVG import failed')
@@ -2050,6 +2074,61 @@ async function onFileCmd(cmd: string) {
           } catch (err) {
             store.setStatusMessage('SVG import failed')
           }
+        }
+      }
+      input.click()
+      break
+    }
+    case 'importCdr': {
+      if (!e) break
+      const input = document.createElement('input')
+      input.type = 'file'
+      input.accept = '.cdr'
+      input.onchange = async () => {
+        const file = input.files?.[0]
+        if (!file || !e) return
+        try {
+          const result = await withBusy(store, `Importing ${file.name}…`, async (report) => {
+            const bytes = new Uint8Array(await file.arrayBuffer())
+            return e.importCdrBytes(bytes, file.name, report)
+          })
+          const warn = result.warnings.length ? ` (${result.warnings.length} warnings)` : ''
+          const skipped = result.skippedPages > 0 ? `, ${result.skippedPages} skipped` : ''
+          store.setStatusMessage(
+            result.pages > 0
+              ? `CDR imported: ${result.pages} page${result.pages > 1 ? 's' : ''}${skipped}${warn}`
+              : 'CDR import failed'
+          )
+          if (result.warnings.length) console.warn('[CDR import warnings]', result.warnings)
+        } catch (err) {
+          store.setStatusMessage(err instanceof Error ? err.message : 'CDR import failed')
+        }
+      }
+      input.click()
+      break
+    }
+    case 'openCdr': {
+      if (!e) break
+      if (!confirmDiscard()) break
+      const input = document.createElement('input')
+      input.type = 'file'
+      input.accept = '.cdr'
+      input.onchange = async () => {
+        const file = input.files?.[0]
+        if (!file || !e) return
+        try {
+          const result = await withBusy(store, `Opening ${file.name}…`, async (report) => {
+            const bytes = new Uint8Array(await file.arrayBuffer())
+            return e.openCdrBytes(bytes, file.name, report)
+          })
+          const warn = result.warnings.length ? ` (${result.warnings.length} warnings)` : ''
+          const skipped = result.skippedPages > 0 ? `, ${result.skippedPages} skipped` : ''
+          store.setStatusMessage(
+            `CDR opened: ${result.pages} page${result.pages > 1 ? 's' : ''}${skipped}${warn}`
+          )
+          if (result.warnings.length) console.warn('[CDR open warnings]', result.warnings)
+        } catch (err) {
+          store.setStatusMessage(err instanceof Error ? err.message : 'CDR open failed')
         }
       }
       input.click()
@@ -2071,13 +2150,21 @@ async function onFileCmd(cmd: string) {
         }
         try {
           if (/\.svg$/i.test(file.name) || file.type === 'image/svg+xml') {
-            if (e.importSVGText(await file.text(), 'Place SVG')) {
+            const ok = await withBusy(store, `Placing ${file.name}…`, async (report) => {
+              const text = await file.text()
+              report(0.4, 'Placing SVG…')
+              await yieldToUI()
+              return e.importSVGText(text, 'Place SVG')
+            })
+            if (ok) {
               store.setStatusMessage('SVG placed')
             } else {
               store.setStatusMessage('SVG placement failed')
             }
           } else {
-            e.placeImage(await readFileAsDataURL(file))
+            await withBusy(store, `Placing ${file.name}…`, async () => {
+              e.placeImage(await readFileAsDataURL(file))
+            })
             store.setStatusMessage('Image placed')
           }
         } catch (err) {

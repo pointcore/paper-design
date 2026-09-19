@@ -12,7 +12,7 @@ import { isEditableTarget } from '../shortcuts'
 import { AnchorChrome } from '../path-drawing/anchor-chrome'
 import { remainingRuns, roundCornerHandle } from '../geometry'
 import type { AlignMode, DistributeAxis } from '../types'
-import { selectionColorForItem, selectionColorForItems } from './selection-style'
+import { selectionColorForItem, selectionColorForItems, SELECT_OUTLINE_LEAF_BUDGET, countOutlineLeaves } from './selection-style'
 import { GuideController } from '../guides/guide-controller'
 import { SnapService } from '../snap/snap-service'
 import { applyToolCursor, cursorForTool, CURSOR_ROTATE, arrowResizeCursor } from '../cursors'
@@ -97,6 +97,13 @@ export class SelectController {
   snapService: SnapService = new SnapService()
 
   private isDragging = false
+  // requestAnimationFrame coalescing for object drags: pointer moves can
+  // arrive far faster than a heavy scene redraws. Only the latest point is
+  // kept; one step runs per frame so the artwork tracks the cursor instead
+  // of queueing seconds of trailing moves.
+  private dragFrameQueued = false
+  private queuedDragPoint: paper.Point | null = null
+  private queuedDragModifiers: any = null
   private isMarquee = false
   private dragStart: { x: number; y: number } = { x: 0, y: 0 }
   private dragItems: paper.Item[] = []
@@ -188,15 +195,47 @@ export class SelectController {
 
   /** Disable paper.js's native selected decoration on one item. */
   private suppressNativeSelection(item: paper.Item) {
-    if (!item.selected || (item as any)._drawSelected === false) return
-    ;(item as any)._drawSelected = false
-    this.chromeSuppressed.add(item)
+    if (!item.selected) return
+    const anyItem = item as any
+    if (anyItem._drawSelected !== false) {
+      anyItem._drawSelected = false
+      this.chromeSuppressed.add(item)
+    }
+    // Texts/rasters/symbols paint a native bounds rect through
+    // _selectBounds even with _drawSelected off — shadow that flag too
+    // (delete restores the prototype default). Our chrome owns all
+    // selection visuals while the item stays selected.
+    if (anyItem._selectBounds !== false) {
+      anyItem._selectBounds = false
+      this.chromeSuppressed.add(item)
+    }
+  }
+
+  /**
+   * Disable native selection decoration on an item and its whole subtree.
+   * Paper.js otherwise repaints its blue outline for every selected
+   * descendant on each frame — with a whole imported page selected that is
+   * hundreds of extra strokes per redraw. Restores pair with the existing
+   * set-driven restore logic.
+   */
+  private suppressNativeSelectionTree(item: paper.Item) {
+    const stack: paper.Item[] = [item]
+    while (stack.length > 0) {
+      const node = stack.pop()
+      if (!node) continue
+      this.suppressNativeSelection(node)
+      const children = (node as any).children as paper.Item[] | undefined
+      if (children) {
+        for (const c of children) stack.push(c)
+      }
+    }
   }
 
   /** Re-enable paper.js's native selected decoration on one item. */
   private restoreNativeSelection(item: paper.Item) {
     if (!this.chromeSuppressed.has(item)) return
     delete (item as any)._drawSelected
+    delete (item as any)._selectBounds
     this.chromeSuppressed.delete(item)
   }
 
@@ -758,8 +797,14 @@ export class SelectController {
     scope.tool.onMouseDrag = (event: paper.ToolEvent) => {
       const store = engine.store
       this.lastPoint = event.point.clone()
+      // Branches that repaint internally (transform, marquee, object drag)
+      // skip the tail refresh below; running it again would redraw the
+      // whole scene twice per move. Priority order is unchanged from
+      // before: transform > guide > anchor > handle > segment > marquee.
+      let selfPainted = false
       if (this.grab === 'transform') {
         this.dragTransform(event.point, event.modifiers)
+        selfPainted = true
       } else if (this.grab === 'guide' && this.grabGuide) {
         this.dragGuide(event.point)
       } else if (this.mode === 'direct-select' && (this.grab === 'anchor' || this.grab === 'anchor-group')) {
@@ -770,12 +815,19 @@ export class SelectController {
         this.dragSegment(event.point, event.modifiers)
       } else if (this.isMarquee) {
         this.updateMarquee(event.point.x, event.point.y)
+        selfPainted = true
       } else if (this.isDragging && this.dragItems.length > 0) {
-        this.dragObjects(event.point, event.modifiers)
+        // Coalesced to one step per frame: pointer moves can flood much
+        // faster than a heavy scene redraws, and every queued step would
+        // otherwise pile up seconds of trailing behind the cursor.
+        this.queueObjectDrag(event.point, event.modifiers)
+        selfPainted = true
       }
       store.setCursorPos(event.point.x, event.point.y)
-      this.refreshChrome()
-      scope.view.update()
+      if (!selfPainted) {
+        this.refreshChrome()
+        scope.view.update()
+      }
     }
 
     const finishMouseUp = (event: paper.ToolEvent) => {
@@ -797,6 +849,9 @@ export class SelectController {
         this.anchorMarquee = false
         this.removeMarquee()
       } else if (this.isDragging && this.grab === 'object') {
+        // Apply any pointer move still waiting for its frame first, so the
+        // recorded end position (and the history entry below) is exact.
+        this.flushQueuedDrag()
         this.isDragging = false
         this.reflowEditedPaths()
         // Total drag delta from the tracked start positions feeds
@@ -902,6 +957,10 @@ export class SelectController {
           this.clearAnchorSelection()
           this.clearCurveSelection()
           engine.clearSelection()
+          // Drop a drag step still waiting for its frame: the gesture is
+          // over, so the queued point must not land on deselected items.
+          this.dragFrameQueued = false
+          this.queuedDragPoint = null
           this.refreshChrome()
           break
         case 'arrowleft':
@@ -2675,13 +2734,26 @@ export class SelectController {
     for (const stale of Array.from(this.chromeSuppressed)) {
       if (!items.includes(stale)) this.restoreNativeSelection(stale)
     }
-    for (const item of items) this.suppressNativeSelection(item)
+    for (const item of items) this.suppressNativeSelectionTree(item)
+    // Huge selections (whole imported pages) trace every path leaf: fall
+    // back to one bounds rect per top-level item so clicks and drags stay
+    // interactive. Small selections keep the per-path centerlines.
+    const detailed = countOutlineLeaves(items) <= SELECT_OUTLINE_LEAF_BUDGET
+    const outlineItem = (item: paper.Item) => {
+      const color = selectionColorForItem(engine, item)
+      if (detailed) {
+        this.chrome.drawItemOutline(item, color)
+        return
+      }
+      const bounds = (item as any).bounds as paper.Rectangle | undefined
+      if (bounds && bounds.width > 0 && bounds.height > 0) {
+        this.chrome.drawBounds(bounds, color)
+      }
+    }
     // AI Hide Bounding Box: keep the per-object outlines, drop the frame
     // and its handles so the selection reads as outlines only.
     if (engine.store.view.showBoundingBox === false) {
-      for (const item of items) {
-        this.chrome.drawItemOutline(item, selectionColorForItem(engine, item))
-      }
+      for (const item of items) outlineItem(item)
       return
     }
     // The oriented frame persists across rotation (never snaps back); it
@@ -2691,9 +2763,7 @@ export class SelectController {
     if (!f) return
     // Per-object outlines keep their own layer color (AI); the frame uses
     // the first item's layer color.
-    for (const item of items) {
-      this.chrome.drawItemOutline(item, selectionColorForItem(engine, item))
-    }
+    for (const item of items) outlineItem(item)
     const bboxColor = selectionColorForItems(engine, items)
     const order: FrameHandle[] = [
       'topLeft', 'topCenter', 'topRight',
@@ -2716,6 +2786,42 @@ export class SelectController {
       this.chrome.drawPivotMarker(this.transformRotatePivot, bboxColor)
     }
     engine.scope.view.update()
+  }
+
+  /**
+   * Queue one coalesced object-drag step (see dragFrameQueued). The move
+   * itself runs in dragObjects; without coalescing, a flood of pointer
+   * moves on a heavy scene queues up and the artwork trails the cursor.
+   */
+  private queueObjectDrag(point: paper.Point, modifiers: any) {
+    this.queuedDragPoint = point.clone()
+    // Paper may recycle the event object — snapshot the flags we need.
+    this.queuedDragModifiers = modifiers ? { ...modifiers } : modifiers
+    if (this.dragFrameQueued) return
+    this.dragFrameQueued = true
+    const tick = () => {
+      this.dragFrameQueued = false
+      const p = this.queuedDragPoint
+      this.queuedDragPoint = null
+      if (!p || !this.isDragging || this.dragItems.length === 0) return
+      this.dragObjects(p, this.queuedDragModifiers)
+      this.queuedDragModifiers = null
+    }
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(tick)
+    else tick()
+  }
+
+  /** Apply a still-queued drag step synchronously (mouse-up flush). */
+  private flushQueuedDrag() {
+    if (!this.dragFrameQueued) return
+    this.dragFrameQueued = false
+    const p = this.queuedDragPoint
+    this.queuedDragPoint = null
+    // A late rAF tick finds nothing queued and no-ops.
+    if (p && this.isDragging && this.dragItems.length > 0) {
+      this.dragObjects(p, this.queuedDragModifiers)
+      this.queuedDragModifiers = null
+    }
   }
 
   /**

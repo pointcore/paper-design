@@ -216,6 +216,11 @@ export const useEditorStore = defineStore('editor', {
     cursorPos: { x: 0, y: 0 },
     /** Status bar message */
     statusMessage: '',
+    /**
+     * Global busy indicator for long file operations (open/import).
+     * progress is 0-100 when determinate, null for an indeterminate spinner.
+     */
+    busy: { active: false, message: '', progress: null as number | null },
     /** Document display name (Save As / recent open; shown in the title bar) */
     documentName: '',
     /** AI "Paste Remembers Layers": paste back onto the copied-from layer */
@@ -408,6 +413,21 @@ export const useEditorStore = defineStore('editor', {
         statusTimer = undefined
         this.statusMessage = ''
       }, STATUS_MESSAGE_TTL_MS)
+    },
+
+    /**
+     * Show/hide the global loading overlay. Progress is 0-100 for
+     * determinate operations, null for an indeterminate spinner.
+     */
+    setBusy(active: boolean, message = '', progress: number | null = null) {
+      this.busy = {
+        active,
+        message,
+        progress:
+          progress === null || !Number.isFinite(progress)
+            ? null
+            : Math.min(100, Math.max(0, Math.round(progress))),
+      }
     },
 
     /** Update view settings */

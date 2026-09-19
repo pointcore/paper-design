@@ -239,6 +239,10 @@ export function handleGlobalKeydown(
   engine: EditorEngine | null
 ): void {
   if (isEditableTarget(e)) return
+  // While a file operation owns the busy overlay the document may be
+  // half-built (yields between import phases): ignore every shortcut so
+  // Delete/undo/tools/save cannot touch or persist the intermediate state.
+  if (store.busy?.active) return
 
   if (e.ctrlKey || e.metaKey) {
     const key = e.key.toLowerCase()

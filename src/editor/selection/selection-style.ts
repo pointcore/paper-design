@@ -42,3 +42,36 @@ export function selectionColorForItems(engine: EditorEngine, items: paper.Item[]
   if (items.length === 0) return FALLBACK_SELECTION_COLOR
   return selectionColorForItem(engine, items[0])
 }
+
+/**
+ * Per-path outline budget for select-mode chrome. Tracing every path leaf
+ * clones all of its segments (~0.35ms/leaf), so a whole imported page
+ * (600+ leaves) freezes selection for hundreds of ms per click — and per
+ * mousemove while dragging. Past this leaf count the chrome falls back to
+ * one bounds rect per top-level item (AI group-selection parity), which is
+ * O(top-level) instead of O(segments).
+ */
+export const SELECT_OUTLINE_LEAF_BUDGET = 60
+
+/**
+ * Count path leaves under the given items (compound children included).
+ * Duck-typed: only className/children are read, so tests can pass fakes
+ * without a Paper.js canvas.
+ */
+export function countOutlineLeaves(items: Array<{ className?: string; children?: unknown[] }>): number {
+  let n = 0
+  const stack: Array<{ className?: string; children?: unknown[] }> = items.slice()
+  while (stack.length > 0) {
+    const node = stack.pop()
+    if (!node) continue
+    if (node.className === 'Path') n++
+    else if (node.className === 'CompoundPath') {
+      for (const c of node.children || []) {
+        if ((c as { className?: string })?.className === 'Path') n++
+      }
+    } else if (node.children) {
+      for (const c of node.children) stack.push(c as { className?: string; children?: unknown[] })
+    }
+  }
+  return n
+}
