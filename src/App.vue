@@ -117,7 +117,10 @@ const artboardLabel = computed(() => {
   const idx = boards.findIndex((b) => b.id === store.activeArtboardId)
   return `Board ${(idx < 0 ? 0 : idx) + 1}/${boards.length}`
 })
-const proofLabel = computed(() => store.view.proofMode === 'cmyk' ? 'CMYK' : 'RGB')
+const proofLabel = computed(() => {
+  const proof = store.view.proofMode === 'cmyk' ? 'CMYK' : 'RGB'
+  return store.view.pixelPreview ? `${proof} · PX${store.view.pixelRatio}x` : proof
+})
 function toggleProof() {
   const next = store.view.proofMode === 'cmyk' ? 'rgb' : 'cmyk'
   store.updateView({ proofMode: next })

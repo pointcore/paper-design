@@ -110,6 +110,7 @@
               <el-dropdown-item command="setDefaults" :disabled="!store.hasSelection">Set Style Defaults</el-dropdown-item>
               <el-dropdown-item command="clearAppearance" :disabled="!store.hasSelection">Clear Appearance</el-dropdown-item>
               <el-dropdown-item command="rasterize" :disabled="!store.hasSelection">Rasterize Selection (2x)</el-dropdown-item>
+              <el-dropdown-item command="alignPixel" :disabled="!store.hasSelection">Align to Pixel</el-dropdown-item>
               <el-dropdown-item command="extractImage" :disabled="!store.hasSelection">Extract Image...</el-dropdown-item>
               <el-dropdown-item command="adjustImage" :disabled="!store.hasSelection">Adjust Image...</el-dropdown-item>
               <el-dropdown-item command="downsample" :disabled="!store.hasSelection">Downsample Images...</el-dropdown-item>
@@ -189,6 +190,12 @@
               </el-dropdown-item>
               <el-dropdown-item command="boundingBox" :icon="store.view.showBoundingBox ? Check : undefined">
                 Bounding Box
+              </el-dropdown-item>
+              <el-dropdown-item command="pixelPreview" :icon="store.view.pixelPreview ? Check : undefined">
+                Pixel Preview
+              </el-dropdown-item>
+              <el-dropdown-item command="pixelRatio">
+                Pixel Ratio: {{ store.view.pixelRatio }}x
               </el-dropdown-item>
               <el-dropdown-item command="presentation" :icon="store.ui.zenMode ? Check : undefined">
                 Presentation (Tab)
@@ -2846,6 +2853,13 @@ function onObjectCmd(cmd: string) {
         store.setStatusMessage('Rasterize needs unlocked artwork')
       }
       break
+    case 'alignPixel': {
+      const ratio = store.view.pixelRatio === 2 ? 2 : 1
+      const n = e.alignSelectionToPixel(ratio)
+      if (n > 0) e.pushHistory('Align to Pixel')
+      else store.setStatusMessage('Already on pixel')
+      break
+    }
     case 'extractImage': {
       const hit = e.extractSelectedImage()
       if (!hit) {
@@ -3024,6 +3038,18 @@ function onViewCmd(cmd: string) {
       try {
         select?.refreshSelectionChrome?.()
       } catch { /* chrome repaint is best effort */ }
+      break
+    }
+    case 'pixelPreview': {
+      const next = !store.view.pixelPreview
+      store.updateView({ pixelPreview: next })
+      store.setStatusMessage(next ? `Pixel preview on (${store.view.pixelRatio}x)` : 'Pixel preview off')
+      break
+    }
+    case 'pixelRatio': {
+      const next = store.view.pixelRatio === 2 ? 1 : 2
+      store.updateView({ pixelRatio: next })
+      store.setStatusMessage(`Pixel ratio ${next}x`)
       break
     }
     case 'navigator':

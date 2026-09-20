@@ -484,6 +484,10 @@ export interface ViewSettings {
   transparentBackground: boolean
   /** Print proof readout: rgb (default) or cmyk numeric preview + gamut flags */
   proofMode: 'rgb' | 'cmyk'
+  /** Pixel preview for web/slice work (crisp device-pixel grid readout) */
+  pixelPreview: boolean
+  /** Preview density: 1 = whole pixels, 2 = halves */
+  pixelRatio: 1 | 2
 }
 
 /** Export format */

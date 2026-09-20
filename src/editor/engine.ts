@@ -24,6 +24,7 @@ import {
   scaleCdrImportedStrokes,
 } from './cdr/cdr-to-svg'
 import { yieldToUI, type ProgressReport } from './busy'
+import { alignToPixel } from './pixel'
 
 /** Identifier stamped into every saved project file. */
 const PROJECT_FILE_APP = 'vue-vector-editor'
@@ -1943,6 +1944,30 @@ export class EditorEngine {
       }
     }
     if (n > 0) this.scope.view.update()
+    return n
+  }
+
+  /**
+   * Snap the unlocked selection onto the device-pixel grid (D2).
+   * Positions move by whole device pixels; geometry is untouched.
+   * Ratio defaults to the pixel-preview density. Returns moved items.
+   */
+  alignSelectionToPixel(ratio?: 1 | 2): number {
+    const r = (ratio === 2 || ratio === 1 ? ratio : this.store.view.pixelRatio === 2 ? 2 : 1) as 1 | 2
+    let n = 0
+    for (const item of this.getSelection() as any[]) {
+      if (item.locked || !item.position) continue
+      const nx = alignToPixel(item.position.x, r)
+      const ny = alignToPixel(item.position.y, r)
+      if (nx !== item.position.x || ny !== item.position.y) {
+        item.position = new this.scope.Point(nx, ny)
+        n++
+      }
+    }
+    if (n > 0) {
+      this.scope.view.update()
+      this.syncSelectionToStore()
+    }
     return n
   }
 

@@ -148,6 +148,8 @@ export const useEditorStore = defineStore('editor', {
       showBoundingBox: true,
       transparentBackground: false,
       proofMode: 'rgb',
+      pixelPreview: false,
+      pixelRatio: 1,
     } as ViewSettings,
     /** Snap settings */
     snap: {
