@@ -6,7 +6,7 @@ import { PaperOffset } from 'paperjs-offset'
 import type { ToolName, StyleState, LayerMeta, LayerItemNode, ArtboardMeta, SymbolEntry, HistoryEntry, GuideOrientation, ProjectFileData, ReferencePoint, AlignMode, DistributeAxis, BooleanOperation, RasterExportOptions, GradientState, PatternFillState, EnvelopePreset, AppearanceState, AppearanceFill, AppearanceStroke, OpacityMaskState, MeshGradientState, MeshGradientVertex } from './types'
 import { createDefaultStyle } from './store'
 import { cursorForTool } from './cursors'
-import { gradientAngleFromVector, linearGradientEndpoints, normalizeAngleDeg } from './geometry'
+import { chooseJoinEnds, gradientAngleFromVector, linearGradientEndpoints, normalizeAngleDeg } from './geometry'
 import { changeCaseText } from './text/text-case'
 import { alignSampledPoints, lerp, lerpRgba, rgbaToCss, sampleCountFor } from './blend/blend'
 import type { Rgba } from './color'
@@ -6172,24 +6172,12 @@ export class EditorEngine {
     const [first, second] = ordered
     const aEnds = [first.segments[0].point, first.segments[first.segments.length - 1].point]
     const bEnds = [second.segments[0].point, second.segments[second.segments.length - 1].point]
-    // [aEnd, bEnd, aUsesFirst, bUsesFirst]
-    const pairs: Array<[paper.Point, paper.Point, boolean, boolean]> = [
-      [aEnds[1], bEnds[0], false, true],
-      [aEnds[1], bEnds[1], false, false],
-      [aEnds[0], bEnds[0], true, true],
-      [aEnds[0], bEnds[1], true, false],
-    ]
-    let best = pairs[0]
-    let bestDist = Infinity
-    for (const pair of pairs) {
-      const dist = pair[0].getDistance(pair[1])
-      if (dist < bestDist) {
-        bestDist = dist
-        best = pair
-      }
-    }
+    // Closest endpoint pair wins (ties keep the first); each path walks so
+    // the joined ends meet. The decision core lives in geometry.ts under
+    // unit-test lock; this stays a thin paper bridge.
+    const ends = chooseJoinEnds(aEnds[0], aEnds[1], bEnds[0], bEnds[1])
     const style = this.getStyleFromItem(first)
-    return this.mergePathsEndToEnd(first, second, best[2], best[3], style)
+    return this.mergePathsEndToEnd(first, second, ends.firstUsesFirst, ends.secondUsesFirst, style)
   }
 
   /**

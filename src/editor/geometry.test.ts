@@ -2,7 +2,7 @@
  * Unit tests for shared geometry helpers — run with `vitest run`.
  */
 import { describe, expect, it } from 'vitest'
-import { gradientAngleFromVector, linearGradientEndpoints, normalizeAngleDeg, remainingRuns, reshapeFalloff, roundCornerHandle, rulerUnitFactor, snap45 } from './geometry'
+import { chooseJoinEnds, gradientAngleFromVector, linearGradientEndpoints, normalizeAngleDeg, remainingRuns, reshapeFalloff, roundCornerHandle, rulerUnitFactor, snap45 } from './geometry'
 
 /** Minimal PaperScope stand-in (snap45 only news up points). */
 const scope = {
@@ -176,5 +176,74 @@ describe('remainingRuns', () => {
 
   it('returns no runs when every curve is gone', () => {
     expect(remainingRuns(true, 3, new Set([0, 1, 2]))).toEqual([])
+  })
+})
+
+describe('chooseJoinEnds', () => {
+  const pt = (x: number, y: number) => ({ x, y })
+
+  it('joins head-to-tail for adjacent paths', () => {
+    // A ends where B starts: no walk flips.
+    expect(chooseJoinEnds(pt(0, 0), pt(10, 0), pt(10, 0), pt(20, 0))).toEqual({
+      firstUsesFirst: false,
+      secondUsesFirst: true,
+    })
+  })
+
+  it('joins tail-to-tail when the far ends touch', () => {
+    expect(chooseJoinEnds(pt(0, 0), pt(10, 0), pt(20, 0), pt(10, 0))).toEqual({
+      firstUsesFirst: false,
+      secondUsesFirst: false,
+    })
+  })
+
+  it('joins head-to-head when the starts touch', () => {
+    expect(chooseJoinEnds(pt(10, 0), pt(0, 0), pt(10, 0), pt(20, 0))).toEqual({
+      firstUsesFirst: true,
+      secondUsesFirst: true,
+    })
+  })
+
+  it('flips both walks when A starts nearest B ends', () => {
+    // aFirst (0,0) sits 1 unit from bLast (1,0); every other pair is far.
+    expect(chooseJoinEnds(pt(0, 0), pt(50, 0), pt(100, 0), pt(1, 0))).toEqual({
+      firstUsesFirst: true,
+      secondUsesFirst: false,
+    })
+  })
+
+  it('bridges a gap through the nearest pair', () => {
+    // A runs 0→10, B runs 30→40 on the same line: tails meet across the gap.
+    expect(chooseJoinEnds(pt(0, 0), pt(10, 0), pt(30, 0), pt(40, 0))).toEqual({
+      firstUsesFirst: false,
+      secondUsesFirst: true,
+    })
+  })
+
+  it('keeps the first pair on ties for determinism', () => {
+    // Both head-to-tail and tail-to-head measure zero here.
+    expect(chooseJoinEnds(pt(0, 0), pt(10, 0), pt(10, 0), pt(0, 0))).toEqual({
+      firstUsesFirst: false,
+      secondUsesFirst: true,
+    })
+    // Fully coincident ends collapse to the same first pair.
+    expect(chooseJoinEnds(pt(5, 5), pt(5, 5), pt(5, 5), pt(5, 5))).toEqual({
+      firstUsesFirst: false,
+      secondUsesFirst: true,
+    })
+  })
+
+  it('never lets non-finite coordinates win', () => {
+    const nan = Number.NaN
+    expect(
+      chooseJoinEnds(pt(0, 0), pt(nan, nan), pt(100, 0), pt(1, 0))
+    ).toEqual({ firstUsesFirst: true, secondUsesFirst: false })
+  })
+
+  it('falls back to the first pair when everything is degenerate', () => {
+    const nan = Number.NaN
+    expect(
+      chooseJoinEnds(pt(nan, nan), pt(nan, nan), pt(nan, nan), pt(nan, nan))
+    ).toEqual({ firstUsesFirst: false, secondUsesFirst: true })
   })
 })

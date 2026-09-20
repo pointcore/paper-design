@@ -94,6 +94,53 @@ export function rulerUnitFactor(unit: RulerUnit): number {
 }
 
 /**
+ * Minimal 2D point (paper.Point satisfies this structurally, so engine
+ * segment points pass without conversion).
+ */
+export interface Xy {
+  x: number
+  y: number
+}
+
+/**
+ * Which ends two open paths join at: each side walks so the joined ends
+ * meet (`usesFirst` reverses the walk, swapping handles).
+ */
+export interface JoinEnds {
+  firstUsesFirst: boolean
+  secondUsesFirst: boolean
+}
+
+/**
+ * Pick the closest endpoint pair joining two open paths A and B.
+ * Four candidates run in fixed priority order (aLast→bFirst,
+ * aLast→bLast, aFirst→bFirst, aFirst→bLast) with strict less-than, so
+ * ties deterministically keep the first and non-finite coordinates
+ * (scoring Infinity) never beat a real measurement. An all-degenerate
+ * input falls back to the first pair, matching the historical inline
+ * loop in engine.joinPaths.
+ */
+export function chooseJoinEnds(aFirst: Xy, aLast: Xy, bFirst: Xy, bLast: Xy): JoinEnds {
+  const dist = (p: Xy, q: Xy): number => {
+    if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(q.x) || !Number.isFinite(q.y)) {
+      return Infinity
+    }
+    return Math.hypot(p.x - q.x, p.y - q.y)
+  }
+  const pairs: Array<[number, JoinEnds]> = [
+    [dist(aLast, bFirst), { firstUsesFirst: false, secondUsesFirst: true }],
+    [dist(aLast, bLast), { firstUsesFirst: false, secondUsesFirst: false }],
+    [dist(aFirst, bFirst), { firstUsesFirst: true, secondUsesFirst: true }],
+    [dist(aFirst, bLast), { firstUsesFirst: true, secondUsesFirst: false }],
+  ]
+  let best = pairs[0]
+  for (const pair of pairs) {
+    if (pair[0] < best[0]) best = pair
+  }
+  return best[1]
+}
+
+/**
  * Anchor runs surviving a curve deletion (curve i spans anchors
  * i → i+1, wrapping on closed paths). Open paths split at removed
  * curves; closed paths rotate to start after a removed curve so the
