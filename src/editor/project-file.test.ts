@@ -7,26 +7,37 @@ import { MAX_PROJECT_FILE_BYTES, parseProjectFile } from './project-file'
 
 const MAX_VERSION = 2
 
+/** Paper's native project format: an array of ["Class", {...}] tuples. */
+function realSnapshot(): unknown[][] {
+  return [
+    ['Layer', { name: 'grid', visible: false, children: [] }],
+    ['Layer', { name: 'Layer 1', children: [] }],
+  ]
+}
+
 function envelope(overrides: Record<string, unknown> = {}): string {
   return JSON.stringify({
     app: 'vue-vector-editor',
     version: 2,
     pageSize: { width: 1920, height: 1080 },
-    snapshot: { layers: [[]] },
+    snapshot: realSnapshot(),
     artboards: [],
     ...overrides,
   })
 }
 
 describe('parseProjectFile', () => {
-  it('accepts v2 object snapshots', () => {
+  it('accepts v2 tuple-array snapshots (the engine native format)', () => {
     const parsed = parseProjectFile(envelope(), MAX_VERSION)
     expect(parsed.version).toBe(2)
-    expect(typeof parsed.snapshot).toBe('object')
+    expect(Array.isArray(parsed.snapshot)).toBe(true)
   })
 
   it('accepts v1 string snapshots', () => {
-    const parsed = parseProjectFile(envelope({ version: 1, snapshot: '{"layers":[]}' }), MAX_VERSION)
+    const parsed = parseProjectFile(
+      envelope({ version: 1, snapshot: JSON.stringify(realSnapshot()) }),
+      MAX_VERSION
+    )
     expect(typeof parsed.snapshot).toBe('string')
   })
 
@@ -61,6 +72,15 @@ describe('parseProjectFile', () => {
       'Invalid project file: missing snapshot'
     )
     expect(() => parseProjectFile(envelope({ snapshot: [] }), MAX_VERSION)).toThrow(
+      'Invalid project file: missing snapshot'
+    )
+    expect(() => parseProjectFile(envelope({ snapshot: [[]] }), MAX_VERSION)).toThrow(
+      'Invalid project file: missing snapshot'
+    )
+    expect(() => parseProjectFile(envelope({ snapshot: [['Layer']] }), MAX_VERSION)).toThrow(
+      'Invalid project file: missing snapshot'
+    )
+    expect(() => parseProjectFile(envelope({ snapshot: ['just-a-string'] }), MAX_VERSION)).toThrow(
       'Invalid project file: missing snapshot'
     )
     expect(() => parseProjectFile(envelope({ snapshot: { layers: [] } }), MAX_VERSION)).toThrow(

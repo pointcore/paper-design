@@ -34,20 +34,36 @@ export function parseProjectFile(fileText: string, maxVersion: number): ProjectF
 }
 
 /**
- * A snapshot must actually describe a Paper project. Accepting any non-null
- * object let `{"version":2,"snapshot":{}}` through: Paper imports it without
- * throwing, so the open document was replaced by an empty scene and the
- * engine's rollback (which only fires on a throw) never ran.
+ * A snapshot must actually describe a Paper project. Paper's native JSON
+ * is an array of `["Class", {...}]` tuples (one per layer) — there is no
+ * top-level `layers` key, so probing for one rejects every real file the
+ * app itself writes (save→reopen and crash-recovery restore included).
+ * Accept the native tuple array (v2 object, v1 as its JSON string) while
+ * still rejecting empty or malformed payloads, which Paper sometimes
+ * imports without throwing (wiping the open document with no way back,
+ * since the engine's rollback only fires on a throw).
  */
 function looksLikeProjectSnapshot(value: unknown): boolean {
   if (typeof value === 'string') {
-    // Cheap substring probe instead of JSON.parse: the engine is about to
-    // hand this (possibly 150 MB) string to Paper and parse it itself.
-    return value.includes('"layers"')
+    // Cheap probe instead of JSON.parse: the engine is about to hand this
+    // (possibly 150 MB) string to Paper and parse it itself. A serialized
+    // `["Class", {...}]` tuple survives stringification either way.
+    return /\["[A-Za-z]+",/.test(value)
+  }
+  if (Array.isArray(value)) {
+    // Paper's native project format: non-empty array of [class, props]
+    // tuples, one per layer. Empty or malformed arrays must not pass:
+    // Paper imports some of them without throwing, which used to wipe the
+    // open document with no way back (the engine rollback only fires on a
+    // throw) — same guard as the object branch below.
+    return (
+      value.length > 0 &&
+      value.every((el) => Array.isArray(el) && el.length >= 2 && typeof el[0] === 'string')
+    )
   }
   if (!value || typeof value !== 'object') return false
   const layers = (value as Record<string, unknown>).layers
-  // The engine always keeps grid/user/overlay/annotation/guide layers, so a
-  // legitimate export never carries an empty stack.
+  // A hand-made envelope may still carry the object shape; it must hold a
+  // non-empty layer stack for the same no-silent-wipe reason.
   return Array.isArray(layers) && layers.length > 0
 }

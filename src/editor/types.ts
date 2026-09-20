@@ -517,8 +517,12 @@ export interface ProjectFileData {
   pageSize: { width: number; height: number }
   /** Print bleed in document units (absent/legacy means 0). */
   bleed?: number
-  /** Paper.js project snapshot: nested object since v2, JSON string in v1. */
-  snapshot: string | Record<string, unknown>
+  /**
+   * Paper.js project snapshot in its native format: an array of
+   * `["Class", {...}]` tuples (nested since v2, JSON string in v1).
+   * There is no top-level `layers` key — see project-file validation.
+   */
+  snapshot: string | Record<string, unknown> | unknown[]
   /** Artboards (absent in files predating multi-artboard support). */
   artboards?: ArtboardMeta[]
   activeArtboardId?: string

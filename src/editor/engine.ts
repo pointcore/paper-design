@@ -2555,9 +2555,9 @@ export class EditorEngine {
   private historyImageStore = new Map<string, string>()
 
   /** Snapshot as a plain object for v2 project files (no double encoding). */
-  snapshotProjectObject(): Record<string, unknown> {
+  snapshotProjectObject(): Record<string, unknown> | unknown[] {
     return this.withCleanScene(
-      () => (this.project as any).exportJSON({ asString: false }) as Record<string, unknown>
+      () => (this.project as any).exportJSON({ asString: false }) as Record<string, unknown> | unknown[]
     )
   }
 
@@ -2607,7 +2607,7 @@ export class EditorEngine {
     }
   }
 
-  restoreSnapshot(snapshot: string | Record<string, unknown>) {
+  restoreSnapshot(snapshot: string | Record<string, unknown> | unknown[]) {
     this.restoreSnapshotWithMeta(snapshot, null)
   }
 
@@ -2617,7 +2617,7 @@ export class EditorEngine {
    * participate in undo/redo like artwork ops do.
    */
   private restoreSnapshotWithMeta(
-    snapshot: string | Record<string, unknown>,
+    snapshot: string | Record<string, unknown> | unknown[],
     meta: HistoryDocMeta | null
   ) {
     // Project#importJSON appends a fresh layer stack whenever it runs (its
@@ -2863,9 +2863,9 @@ export class EditorEngine {
     // back. Roll back to a backup snapshot when the file is unreadable.
     const backup = this.snapshotProject()
     try {
-      // v1 snapshots are JSON strings, v2+ are nested objects; Paper
+      // v1 snapshots are JSON strings, v2+ are nested Paper tuples; Paper
       // imports both, so old files keep opening.
-      this.restoreSnapshot(rawSnapshot as string | Record<string, unknown>)
+      this.restoreSnapshot(rawSnapshot as string | Record<string, unknown> | unknown[])
     } catch {
       try {
         this.restoreSnapshot(backup)
