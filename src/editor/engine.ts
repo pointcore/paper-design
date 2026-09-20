@@ -2646,30 +2646,9 @@ export class EditorEngine {
     this.scope.view.update()
   }
 
-  /**
-   * Select every visible unlocked top-level user item except the current
-   * selection. Locked and hidden artwork stays out so follow-up commands
-   * cannot touch it by accident. Selection-only change: no history entry.
-   */
+  /** See engine-select.ts. */
   invertSelection(): void {
-    const candidates: paper.Item[] = []
-    for (const layer of this.project.layers) {
-      if (!(layer.data as any)?.isUserLayer || !layer.visible || layer.locked) continue
-      for (const child of layer.children) {
-        const item = child as paper.Item
-        const data = (item.data as any) ?? {}
-        if (!item.visible || (item as any).locked) continue
-        if (data.isPreview || data.isChrome) continue
-        candidates.push(item)
-      }
-    }
-    const selected = new Set(this.getSelection())
-    this.project.deselectAll()
-    candidates.forEach((item) => {
-      if (!selected.has(item)) item.selected = true
-    })
-    this.syncSelectionToStore()
-    this.scope.view.update()
+    select.invertSelection(this)
   }
 
   /** Toggle one object-tree entry visibility. */
@@ -4705,20 +4684,9 @@ export class EditorEngine {
     }
   }
 
-  /**
-   * Lock or unlock the current selection (locked items skip most tools).
-   * Uses the raw flagged set (not the top-most selection): lock checks
-   * throughout the tools are per-item, so group members need their own
-   * flags to actually stay unselectable.
-   */
+  /** See engine-select.ts. */
   setSelectedLocked(locked: boolean): void {
-    const items = this.project.selectedItems as paper.Item[]
-    if (items.length === 0) return
-    items.forEach((item) => {
-      item.locked = locked
-    })
-    this.pushHistory(locked ? 'Lock' : 'Unlock')
-    this.scope.view.update()
+    select.setSelectedLocked(this, locked)
   }
 
   /** Unlock every user item in the document. */
@@ -4734,92 +4702,19 @@ export class EditorEngine {
     this.scope.view.update()
   }
 
-  /** Hide or show the current selection. */
+  /** See engine-select.ts. */
   setSelectedVisible(visible: boolean): void {
-    const items = this.getSelection()
-    if (items.length === 0) return
-    items.forEach((item) => {
-      item.visible = visible
-    })
-    this.pushHistory(visible ? 'Show' : 'Hide')
-    this.scope.view.update()
+    select.setSelectedVisible(this, visible)
   }
 
-  /**
-   * Lock every unlocked top-level user item outside the selection
-   * (Unlock All restores). Returns newly locked count; one history.
-   */
+  /** See engine-select.ts. */
   lockOthers(): number {
-    const selection = this.getSelection()
-    if (selection.length === 0) return 0
-    const keep = new Set<paper.Item>()
-    for (const item of selection) {
-      let at: paper.Item | null = item
-      while (at) {
-        keep.add(at)
-        at = at.parent
-      }
-    }
-    let locked = 0
-    for (const layer of this.project.layers) {
-      if (!(layer.data as any)?.isUserLayer || !layer.visible || layer.locked) continue
-      for (const child of layer.children) {
-        const c = child as paper.Item
-        if (keep.has(c) || (c as any).locked) continue
-        c.locked = true
-        locked++
-      }
-    }
-    if (locked > 0) {
-      this.pushHistory('Lock Others')
-      this.scope.view.update()
-    }
-    return locked
+    return select.lockOthers(this)
   }
 
-  /**
-   * Reverse the stacking order of the unlocked selection (keeps every
-   * item in its own parent; cross-layer order untouched). One history.
-   */
+  /** See engine-select.ts. */
   reverseOrder(): number {
-    const items = this.getSelection().filter((item) => !item.locked && item.parent)
-    if (items.length < 2) return 0
-    const byParent = new Map<paper.Item, paper.Item[]>()
-    for (const item of items) {
-      const parent = item.parent as paper.Item
-      const list = byParent.get(parent) ?? []
-      list.push(item)
-      byParent.set(parent, list)
-    }
-    let moved = 0
-    for (const [parent, group] of byParent) {
-      if (group.length < 2) continue
-      const kids = ((parent as any).children as paper.Item[]).slice()
-      const slots = group
-        .map((g) => kids.indexOf(g))
-        .filter((s) => s >= 0)
-        .sort((a, b) => a - b)
-      if (slots.length < 2) continue
-      const reversed = group
-        .slice()
-        .sort((a, b) => kids.indexOf(a) - kids.indexOf(b))
-        .reverse()
-      for (const g of group) {
-        try {
-          g.remove()
-        } catch { /* already gone */ }
-      }
-      slots.forEach((slot, i) => {
-        ;(parent as any).insertChild(Math.min(slot, (parent as any).children.length), reversed[i])
-        moved++
-      })
-    }
-    if (moved > 0) {
-      this.pushHistory('Reverse Order')
-      this.scope.view.update()
-      return moved
-    }
-    return 0
+    return select.reverseOrder(this)
   }
 
   /** Show every user item in the document. */

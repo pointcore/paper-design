@@ -58,6 +58,134 @@ export function selectAllOnActiveArtboard(e: EditorEngine): number {
 }
 
 /**
+ * Select every visible unlocked top-level user item except the current
+ * selection. Locked and hidden artwork stays out so follow-up commands
+ * cannot touch it by accident. Selection-only change: no history entry.
+ */
+export function invertSelection(e: EditorEngine): void {
+  const candidates: paper.Item[] = []
+  for (const layer of e.project.layers) {
+    if (!(layer.data as any)?.isUserLayer || !layer.visible || layer.locked) continue
+    for (const child of layer.children) {
+      const item = child as paper.Item
+      const data = (item.data as any) ?? {}
+      if (!item.visible || (item as any).locked) continue
+      if (data.isPreview || data.isChrome) continue
+      candidates.push(item)
+    }
+  }
+  const selected = new Set(e.getSelection())
+  e.project.deselectAll()
+  candidates.forEach((item) => {
+    if (!selected.has(item)) item.selected = true
+  })
+  e.syncSelectionToStore()
+  e.scope.view.update()
+}
+
+/**
+ * Lock or unlock the current selection (locked items skip most tools).
+ * Uses the raw flagged set (not the top-most selection): lock checks
+ * throughout the tools are per-item, so group members need their own
+ * flags to actually stay unselectable.
+ */
+export function setSelectedLocked(e: EditorEngine, locked: boolean): void {
+  const items = e.project.selectedItems as paper.Item[]
+  if (items.length === 0) return
+  items.forEach((item) => {
+    item.locked = locked
+  })
+  e.pushHistory(locked ? 'Lock' : 'Unlock')
+  e.scope.view.update()
+}
+
+/** Hide or show the current selection. */
+export function setSelectedVisible(e: EditorEngine, visible: boolean): void {
+  const items = e.getSelection()
+  if (items.length === 0) return
+  items.forEach((item) => {
+    item.visible = visible
+  })
+  e.pushHistory(visible ? 'Show' : 'Hide')
+  e.scope.view.update()
+}
+
+/**
+ * Lock every unlocked top-level user item outside the selection
+ * (Unlock All restores). Returns newly locked count; one history.
+ */
+export function lockOthers(e: EditorEngine): number {
+  const selection = e.getSelection()
+  if (selection.length === 0) return 0
+  const keep = new Set<paper.Item>()
+  for (const item of selection) {
+    let at: paper.Item | null = item
+    while (at) {
+      keep.add(at)
+      at = at.parent
+    }
+  }
+  let locked = 0
+  for (const layer of e.project.layers) {
+    if (!(layer.data as any)?.isUserLayer || !layer.visible || layer.locked) continue
+    for (const child of layer.children) {
+      const c = child as paper.Item
+      if (keep.has(c) || (c as any).locked) continue
+      c.locked = true
+      locked++
+    }
+  }
+  if (locked > 0) {
+    e.pushHistory('Lock Others')
+    e.scope.view.update()
+  }
+  return locked
+}
+
+/**
+ * Reverse the stacking order of the unlocked selection (keeps every
+ * item in its own parent; cross-layer order untouched). One history.
+ */
+export function reverseOrder(e: EditorEngine): number {
+  const items = e.getSelection().filter((item) => !item.locked && item.parent)
+  if (items.length < 2) return 0
+  const byParent = new Map<paper.Item, paper.Item[]>()
+  for (const item of items) {
+    const parent = item.parent as paper.Item
+    const list = byParent.get(parent) ?? []
+    list.push(item)
+    byParent.set(parent, list)
+  }
+  let moved = 0
+  for (const [parent, group] of byParent) {
+    if (group.length < 2) continue
+    const kids = ((parent as any).children as paper.Item[]).slice()
+    const slots = group
+      .map((g) => kids.indexOf(g))
+      .filter((s) => s >= 0)
+      .sort((a, b) => a - b)
+    if (slots.length < 2) continue
+    const reversed = group
+      .slice()
+      .sort((a, b) => kids.indexOf(a) - kids.indexOf(b))
+      .reverse()
+    for (const g of group) {
+      try {
+        g.remove()
+      } catch { /* already gone */ }
+    }
+    slots.forEach((slot, i) => {
+      ;(parent as any).insertChild(Math.min(slot, (parent as any).children.length), reversed[i])
+      moved++
+    })
+  }
+  if (moved > 0) {
+    e.pushHistory('Reverse Order')
+    e.scope.view.update()
+  }
+  return moved
+}
+/**
  * AI Arrange > Send to Current Layer: move every selected item's
  * top-level ancestor into the active layer, stacked on top in their
  * original order. Returns the moved count (0 when nothing can move).
