@@ -13,10 +13,13 @@ import { fileURLToPath } from 'node:url'
 const rootDir = join(fileURLToPath(import.meta.url), '..', '..')
 
 // Baselines — bump deliberately, not silently.
+// 2026-09-20: total 700 -> 720 KB for the D1-D4 feature batch (command
+// palette async chunk, global colors, text presets, pixel tools, export
+// presets). Main bundle stays at 420 KB.
 const MIN_TEST_FILES = 10
 const MIN_TEST_LINES = 1000
 const MAIN_BUNDLE_GZIP_KB = 420
-const TOTAL_JS_GZIP_KB = 700
+const TOTAL_JS_GZIP_KB = 720
 
 function collect(dir, re) {
   const out = []

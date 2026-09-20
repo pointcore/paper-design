@@ -41,6 +41,24 @@
     </div>
 
     <div class="panel-section">
+      <div class="sec-title">Export Presets <span class="sec-hint">one-click hand-off</span></div>
+      <div class="row">
+        <el-select v-model="presetId" size="small" style="flex: 1" placeholder="Choose a preset">
+          <el-option v-for="p in allPresets" :key="p.id" :value="p.id" :label="`${p.name} · ${describeExportPreset(p)}`" />
+        </el-select>
+        <el-button size="small" class="grid-btn" @click="runPreset">Run</el-button>
+      </div>
+      <div class="row">
+        <el-input v-model="presetName" size="small" placeholder="Save current area + format as preset" @keyup.enter="savePreset" />
+        <el-button size="small" class="grid-btn" @click="savePreset">Save</el-button>
+      </div>
+      <div v-for="p in customPresets" :key="p.id" class="sc-row">
+        <span class="sc-tool">{{ p.name }} · {{ describeExportPreset(p) }}</span>
+        <el-button size="small" type="danger" plain @click="removePreset(p.id)">×</el-button>
+      </div>
+    </div>
+
+    <div class="panel-section">
       <div class="sec-title">N-up Imposition</div>
       <div class="row">
         <el-select v-model="nUpCount" size="small" style="width: 100px">
@@ -79,12 +97,18 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch, inject, type Ref } from 'vue'
+import { computed, ref, watch, inject, onMounted, type Ref } from 'vue'
 import JSZip from 'jszip'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
 import type { RasterExportArea, RasterExportFormat, WorkspacePreset } from '../../editor/types'
 import { COMMAND_SHORTCUTS, TOOL_SHORTCUTS } from '../../editor/shortcuts'
+import {
+  cleanExportPresets,
+  defaultExportPresets,
+  describeExportPreset,
+  type ExportPreset,
+} from '../../editor/export-presets'
 
 const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
@@ -176,7 +200,7 @@ function exportOne(scale: number) {
     store.setStatusMessage(`Asset exported (${format.value.toUpperCase()} ${scale}x)`)
   } catch { store.setStatusMessage('Raster export failed') }
 }
-async function exportAll() {
+async function exportAll(scales: number[] = [1, 2, 3]) {
   const e = engineRef?.value
   if (!e) return
   if (area.value === 'selection' && !store.hasSelection) {
@@ -185,7 +209,7 @@ async function exportAll() {
   }
   const zip = new JSZip()
   let exported = 0
-  for (const s of [1, 2, 3]) {
+  for (const s of scales) {
     const url = e.exportRaster({ format: format.value, scale: s, area: area.value })
     if (!url) continue
     const label = area.value === 'page'
@@ -208,6 +232,60 @@ async function exportAll() {
 }
 
 const commandShortcuts = COMMAND_SHORTCUTS
+
+// Named export presets: built-ins plus user customs (persisted).
+const builtInPresets = defaultExportPresets()
+const customPresets = ref<ExportPreset[]>([])
+const allPresets = computed<ExportPreset[]>(() => [...customPresets.value, ...builtInPresets])
+const presetId = ref(builtInPresets[0].id)
+const presetName = ref('')
+
+function persistPresets() {
+  try {
+    localStorage.setItem('vve.exportPresets', JSON.stringify(customPresets.value))
+  } catch { /* private mode */ }
+}
+
+function savePreset() {
+  const clean = presetName.value.trim().slice(0, 40) || `Preset ${customPresets.value.length + 1}`
+  const id = `preset-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`
+  customPresets.value = [
+    { id, name: clean, area: area.value, format: format.value, scales: [1] },
+    ...customPresets.value,
+  ].slice(0, 24)
+  presetId.value = id
+  presetName.value = ''
+  persistPresets()
+  store.setStatusMessage(`Export preset "${clean}" saved`)
+}
+
+function removePreset(id: string) {
+  customPresets.value = customPresets.value.filter((p) => p.id !== id)
+  if (presetId.value === id) presetId.value = builtInPresets[0].id
+  persistPresets()
+}
+
+function runPreset() {
+  const preset = allPresets.value.find((p) => p.id === presetId.value)
+  if (!preset) {
+    store.setStatusMessage('Choose an export preset')
+    return
+  }
+  area.value = preset.area
+  format.value = preset.format
+  if (preset.scales.length === 1) {
+    exportOne(preset.scales[0])
+  } else {
+    exportAll([...preset.scales])
+  }
+}
+
+onMounted(() => {
+  try {
+    const raw = localStorage.getItem('vve.exportPresets')
+    if (raw) customPresets.value = cleanExportPresets(JSON.parse(raw))
+  } catch { /* corrupt storage: defaults stand */ }
+})
 
 const shortcuts = computed(() =>
   (Object.entries(TOOL_SHORTCUTS) as Array<[string, { label: string } | null]>)
