@@ -70,8 +70,11 @@
           <span class="layer-target" :class="{ on: layer.id === store.activeLayerId }" title="Target: click selects all layer artwork" @click.stop="targetLayer(layer.id)"></span>
           <span class="layer-sel" :class="{ on: layersWithSelection.has(layer.id) }" :style="layersWithSelection.has(layer.id) ? { background: layerColor(layer.id) } : undefined"></span>
         </div>
-        <div class="layer-children" v-if="layer.expand">
-          <div v-for="entry in filteredLayerItems(layer.id)" :key="entry.id"
+        <div class="layer-children" v-if="layer.expand"
+             :class="{ 'tree-window': layerView(layer.id).windowed }"
+             @scroll="onTreeChildrenScroll(layer.id, $event)">
+          <div v-if="layerView(layer.id).windowed" class="tree-spacer" :style="{ height: layerView(layer.id).top + 'px' }"></div>
+          <div v-for="entry in layerView(layer.id).rows" :key="entry.id"
                class="tree-item"
                :class="treeRowClass(entry)"
                draggable="true"
@@ -110,6 +113,7 @@
             <span class="tree-target" :class="{ on: store.selectedItemIds.includes(entry.id) }"></span>
             <span class="tree-sel"></span>
           </div>
+          <div v-if="layerView(layer.id).windowed" class="tree-spacer" :style="{ height: layerView(layer.id).bottom + 'px' }"></div>
         </div>
       </div>
       <div class="drop-end" :class="{ active: dropIndex === displayedLayers.length }"
@@ -152,6 +156,7 @@ import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
 import type { LayerItemNode } from '../../editor/types'
 import { LAYER_COLORS } from '../../editor/selection/selection-style'
+import { TREE_ROW_HEIGHT, TREE_WINDOW_THRESHOLD, calcTreeWindow } from '../../editor/tree-window'
 
 const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
@@ -221,9 +226,73 @@ function filteredLayerItems(id: string): LayerItemNode[] {
 }
 
 /**
+ * Windowing for 1000+ node layers (C6): expanded lists above
+ * TREE_WINDOW_THRESHOLD render only the scrolled window (top/bottom
+ * spacers keep the scrollbar), shorter lists render fully exactly as
+ * before. The view is rebuilt on document changes (treeKey), scroll
+ * (treeWindowTick) and search; drop the scroll memory when the query
+ * changes so a filtered list never starts mid-air.
+ */
+const treeWindowScroll = ref<Record<string, number>>({})
+const treeWindowTick = ref(0)
+
+interface LayerItemView {
+  windowed: boolean
+  top: number
+  bottom: number
+  rows: LayerItemNode[]
+}
+
+const layerItemViews = computed(() => {
+  void treeKey.value
+  void treeWindowTick.value
+  const map = new Map<string, LayerItemView>()
+  const e = getEngine()
+  if (!e) return map
+  for (const layer of displayedLayers.value) {
+    const full = filteredLayerItems(layer.id)
+    if (full.length > TREE_WINDOW_THRESHOLD) {
+      const { start, end } = calcTreeWindow(full.length, treeWindowScroll.value[layer.id] ?? 0)
+      map.set(layer.id, {
+        windowed: true,
+        top: start * TREE_ROW_HEIGHT,
+        bottom: (full.length - end) * TREE_ROW_HEIGHT,
+        rows: full.slice(start, end),
+      })
+    } else {
+      map.set(layer.id, { windowed: false, top: 0, bottom: 0, rows: full })
+    }
+  }
+  return map
+})
+
+const emptyItemView: LayerItemView = { windowed: false, top: 0, bottom: 0, rows: [] }
+
+function layerView(layerId: string): LayerItemView {
+  return layerItemViews.value.get(layerId) ?? emptyItemView
+}
+
+function onTreeChildrenScroll(layerId: string, e: Event) {
+  const view = layerItemViews.value.get(layerId)
+  if (!view?.windowed) return
+  const el = e.currentTarget as HTMLElement | null
+  const top = Math.max(0, el ? el.scrollTop : 0)
+  if (treeWindowScroll.value[layerId] === top) return
+  treeWindowScroll.value[layerId] = top
+  treeWindowTick.value++
+}
+
+watch(searchText, () => {
+  treeWindowScroll.value = {}
+  treeWindowTick.value++
+})
+
+/**
  * Thumbnail data URLs for the displayed rows. The engine caches per
  * document version, so selection-only rebuilds are plain map lookups;
  * unrenderable entries resolve to '' and show the type glyph instead.
+ * Only rendered rows are generated (windowed layers skip off-screen
+ * entries entirely); the budget backstops pathological small-list cases.
  */
 const thumbUrls = computed(() => {
   void treeKey.value
@@ -233,7 +302,7 @@ const thumbUrls = computed(() => {
   let budget = 150
   for (const layer of displayedLayers.value) {
     if (budget <= 0) break
-    for (const entry of filteredLayerItems(layer.id)) {
+    for (const entry of layerView(layer.id).rows) {
       if (budget <= 0) break
       budget--
       map.set(entry.id, e.thumbnailForItem(entry.id) ?? '')
@@ -1006,6 +1075,26 @@ watch(() => store.layers.map((l) => `${l.id}:${l.opacity}`).join(','), syncOpaci
   background: #4a4a4a;
   border-radius: 4px;
   border: 2px solid #252526;
+}
+
+/* Windowed object list for 1000+ node layers (C6): only applied past
+   TREE_WINDOW_THRESHOLD, so smaller lists keep the plain flow. The
+   max-height mirrors TREE_WINDOW_VIEWPORT in tree-window.ts. */
+.layer-children.tree-window {
+  max-height: 360px;
+  overflow-y: auto;
+}
+.layer-children.tree-window::-webkit-scrollbar {
+  width: 8px;
+}
+.layer-children.tree-window::-webkit-scrollbar-thumb {
+  background: #4a4a4a;
+  border-radius: 4px;
+  border: 2px solid #252526;
+}
+.tree-spacer {
+  width: 100%;
+  flex-shrink: 0;
 }
 
 .layer-item {
