@@ -13,38 +13,22 @@ import { AnchorChrome } from '../path-drawing/anchor-chrome'
 import { remainingRuns, roundCornerHandle } from '../geometry'
 import type { AlignMode, DistributeAxis } from '../types'
 import { selectionColorForItem, selectionColorForItems, SELECT_OUTLINE_LEAF_BUDGET, countOutlineLeaves } from './selection-style'
+import {
+  isCornerHandle,
+  localHandlePoint,
+  nearestCorner,
+  oppositeHandle,
+  pointerAngle,
+  type FrameHandle,
+  type SelectionFrame,
+  type TransformHandle,
+} from './frame-geometry'
 import { GuideController } from '../guides/guide-controller'
 import { SnapService } from '../snap/snap-service'
 import { applyToolCursor, cursorForTool, CURSOR_ROTATE, arrowResizeCursor } from '../cursors'
 import type { TextController } from '../text/text-controller'
 
 type EditMode = 'select' | 'direct-select'
-
-/** Bounding-box transform handle in select mode (corners double as rotate zones). */
-type TransformHandle =
-  | 'none'
-  | 'topLeft' | 'topCenter' | 'topRight'
-  | 'middleLeft' | 'middleRight'
-  | 'bottomLeft' | 'bottomCenter' | 'bottomRight'
-  | 'rotate'
-
-/** Scale-handle names (everything except none / rotate). */
-type FrameHandle = Exclude<TransformHandle, 'none' | 'rotate'>
-
-/**
- * Persistent oriented selection frame: center + size + clockwise degrees.
- * Unlike the axis-aligned bounds, it survives rotation — the box never
- * snaps back upright while the selection is intact.
- */
-interface SelectionFrame {
-  cx: number
-  cy: number
-  w: number
-  h: number
-  angle: number
-  selKey: string
-  version: number
-}
 
 /** Normalize degrees into (-180, 180]. */
 function normAngle180(deg: number): number {
@@ -389,25 +373,6 @@ export class SelectController {
   private frameToLocal(p: paper.Point, f: SelectionFrame): paper.Point {
     const scope = this.engine!.scope
     return p.clone().rotate(-f.angle, new scope.Point(f.cx, f.cy))
-  }
-
-  /** Local (axis-aligned) position of a named handle at grab time. */
-  private localHandlePoint(
-    base: { cx: number; cy: number; w: number; h: number },
-    name: FrameHandle
-  ): { x: number; y: number } {
-    const hw = base.w / 2
-    const hh = base.h / 2
-    switch (name) {
-      case 'topLeft': return { x: base.cx - hw, y: base.cy - hh }
-      case 'topCenter': return { x: base.cx, y: base.cy - hh }
-      case 'topRight': return { x: base.cx + hw, y: base.cy - hh }
-      case 'middleLeft': return { x: base.cx - hw, y: base.cy }
-      case 'middleRight': return { x: base.cx + hw, y: base.cy }
-      case 'bottomLeft': return { x: base.cx - hw, y: base.cy + hh }
-      case 'bottomCenter': return { x: base.cx, y: base.cy + hh }
-      case 'bottomRight': return { x: base.cx + hw, y: base.cy + hh }
-    }
   }
 
   attachEngine(engine: EditorEngine) {
@@ -2336,29 +2301,6 @@ export class SelectController {
   // tilted selection keeps tilted handles.
   // ------------------------------------------------------------------
 
-  /** Opposite pivot name for a scale handle (the corner that stays fixed). */
-  private oppositeHandle(handle: FrameHandle): FrameHandle {
-    switch (handle) {
-      case 'topLeft': return 'bottomRight'
-      case 'topRight': return 'bottomLeft'
-      case 'bottomLeft': return 'topRight'
-      case 'bottomRight': return 'topLeft'
-      case 'topCenter': return 'bottomCenter'
-      case 'bottomCenter': return 'topCenter'
-      case 'middleLeft': return 'middleRight'
-      case 'middleRight': return 'middleLeft'
-    }
-  }
-
-  private isCornerHandle(handle: TransformHandle): boolean {
-    return (
-      handle === 'topLeft' ||
-      handle === 'topRight' ||
-      handle === 'bottomLeft' ||
-      handle === 'bottomRight'
-    )
-  }
-
   /**
    * Handle under a point within tolerance, measured on the oriented frame.
    * AI-aligned: exactly on a handle scales; just outside a corner (wider
@@ -2400,31 +2342,6 @@ export class SelectController {
     return 'none'
   }
 
-  /** Nearest frame corner to a point (labels a corner-started rotate drag). */
-  private nearestCorner(
-    point: paper.Point,
-    positions: Record<FrameHandle, paper.Point>
-  ): FrameHandle {
-    const corners: FrameHandle[] = [
-      'topLeft', 'topRight', 'bottomLeft', 'bottomRight',
-    ]
-    let best = corners[0]
-    let bestDist = point.getDistance(positions[best])
-    for (const corner of corners) {
-      const d = point.getDistance(positions[corner])
-      if (d < bestDist) {
-        best = corner
-        bestDist = d
-      }
-    }
-    return best
-  }
-
-  /** Clockwise pointer angle in degrees around a center point. */
-  private pointerAngle(point: paper.Point, center: paper.Point): number {
-    return (Math.atan2(point.y - center.y, point.x - center.x) * 180) / Math.PI
-  }
-
   /** Begin a bbox transform drag when a handle is grabbed. */
   private tryGrabTransformHandle(event: paper.ToolEvent): boolean {
     const engine = this.engine
@@ -2441,7 +2358,7 @@ export class SelectController {
       // AI corner rotation: the grab started just outside this corner; the
       // corner handle itself is highlighted while the reference pivot stays
       // the rotation origin. The live frame follows via engine.rotateSelection.
-      this.transformHandle = this.nearestCorner(event.point, positions)
+      this.transformHandle = nearestCorner(event.point, positions)
       this.transformScaleBase = null
       this.transformStartPoint = null
       this.transformLastTotalFx = 1
@@ -2455,7 +2372,7 @@ export class SelectController {
       const pivot = engine.selectionReferencePivot() ?? new engine.scope.Point(f.cx, f.cy)
       this.transformRotatePivot = pivot.clone()
       this.transformCenter = pivot.clone()
-      const startRaw = this.pointerAngle(event.point, pivot)
+      const startRaw = pointerAngle(event.point, pivot)
       this.transformRotateLastRaw = startRaw
       this.transformRotateAccum = 0
       this.transformRotateApplied = 0
@@ -2465,7 +2382,7 @@ export class SelectController {
       // fixed. Base frame + pivots freeze at grab time; Alt toggles mid-drag
       // re-baseline onto the live frame so the switch never jumps.
       this.transformScaleBase = { cx: f.cx, cy: f.cy, w: f.w, h: f.h, angle: f.angle }
-      this.transformOpposite = positions[this.oppositeHandle(handle)].clone()
+      this.transformOpposite = positions[oppositeHandle(handle)].clone()
       this.transformCenter = new engine.scope.Point(f.cx, f.cy)
       this.transformUseCenter = !!(event.modifiers as any)?.alt
       this.transformPivot = (this.transformUseCenter ? this.transformCenter : this.transformOpposite).clone()
@@ -2506,7 +2423,7 @@ export class SelectController {
     const engine = this.engine
     const pivot = this.transformRotatePivot
     if (!engine || !pivot) return
-    const raw = this.pointerAngle(point, pivot)
+    const raw = pointerAngle(point, pivot)
     const stepRaw = ((raw - this.transformRotateLastRaw + 540) % 360) - 180
     this.transformRotateAccum += stepRaw
     this.transformRotateLastRaw = raw
@@ -2549,7 +2466,7 @@ export class SelectController {
       const f = this.frame
       this.transformScaleBase = { cx: f.cx, cy: f.cy, w: f.w, h: f.h, angle: f.angle }
       const corners = this.frameCorners(f)
-      this.transformOpposite = corners[this.oppositeHandle(this.transformHandle)].clone()
+      this.transformOpposite = corners[oppositeHandle(this.transformHandle)].clone()
       this.transformCenter = new engine.scope.Point(f.cx, f.cy)
       this.transformUseCenter = wantCenter
       this.transformPivot = (wantCenter ? this.transformCenter : this.transformOpposite).clone()
@@ -2566,12 +2483,12 @@ export class SelectController {
     const pivotW = wantCenter ? this.transformCenter : this.transformOpposite
     const pL = wantCenter
       ? { x: base.cx, y: base.cy }
-      : this.localHandlePoint(base, this.oppositeHandle(this.transformHandle))
+      : localHandlePoint(base, oppositeHandle(this.transformHandle))
     const sL = toLocal(new scope.Point(this.transformStartPoint.x, this.transformStartPoint.y))
     const qL = toLocal(point.clone())
     const dxs = sL.x - pL.x
     const dys = sL.y - pL.y
-    const corner = this.isCornerHandle(this.transformHandle)
+    const corner = isCornerHandle(this.transformHandle)
     const horizontalEdge = this.transformHandle === 'middleLeft' || this.transformHandle === 'middleRight'
     const verticalEdge = this.transformHandle === 'topCenter' || this.transformHandle === 'bottomCenter'
 
@@ -2677,7 +2594,7 @@ export class SelectController {
     if (handle === 'rotate') return CURSOR_ROTATE
     const tilt = this.frame ? this.frame.angle : 0
     const heading = HANDLE_HEADINGS[handle] + tilt
-    if (this.isCornerHandle(handle)) {
+    if (isCornerHandle(handle)) {
       const native = diagonalCursorForHeading(heading)
       const folded = ((heading % 180) + 180) % 180
       const nearDiag = Math.min(Math.abs(folded - 45), Math.abs(folded - 135))
