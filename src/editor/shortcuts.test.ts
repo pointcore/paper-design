@@ -413,4 +413,34 @@ describe('handleGlobalKeydown', () => {
     )
     expect(store.updateView).not.toHaveBeenCalled()
   })
+
+  it('opens the command palette on Ctrl+Shift+P', () => {
+    const store = { busy: { active: false }, hasSelection: false, setCommandPaletteOpen: vi.fn() } as any
+    handleGlobalKeydown(
+      key({ key: 'P', code: 'KeyP', ctrlKey: true, shiftKey: true, target: null }) as KeyboardEvent,
+      store,
+      null
+    )
+    expect(store.setCommandPaletteOpen).toHaveBeenCalledWith(true)
+  })
+
+  it('opens the palette on Ctrl+K only with an empty selection (CDR break-apart keeps the key)', () => {
+    const empty = { busy: { active: false }, hasSelection: false, setCommandPaletteOpen: vi.fn() } as any
+    handleGlobalKeydown(
+      key({ key: 'k', code: 'KeyK', ctrlKey: true, target: null }) as KeyboardEvent,
+      empty,
+      null
+    )
+    expect(empty.setCommandPaletteOpen).toHaveBeenCalledWith(true)
+
+    const engine = { getSelection: () => [{ id: 'a' }], releaseCompoundPath: vi.fn(() => true) } as any
+    const full = { busy: { active: false }, hasSelection: true, setCommandPaletteOpen: vi.fn() } as any
+    handleGlobalKeydown(
+      key({ key: 'k', code: 'KeyK', ctrlKey: true, target: null }) as KeyboardEvent,
+      full,
+      engine
+    )
+    expect(full.setCommandPaletteOpen).not.toHaveBeenCalled()
+    expect(engine.releaseCompoundPath).toHaveBeenCalledTimes(1)
+  })
 })

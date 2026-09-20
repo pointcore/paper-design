@@ -151,6 +151,7 @@ export const COMMAND_SHORTCUTS: Array<{ label: string; desc: string }> = [
   { label: 'Ctrl+"', desc: 'Toggle Grid' },
   { label: 'Ctrl+Shift+B', desc: 'Toggle Bounding Box' },
   { label: 'X / Shift+X', desc: 'Flip Paint Target / Swap Fill + Stroke' },
+  { label: 'Ctrl+Shift+P / Ctrl+K', desc: 'Command Palette (Ctrl+K needs empty selection)' },
   { label: '[ / ] on brush tools', desc: 'Brush Footprint (Shift = x5)' },
   { label: 'Arrow Keys', desc: 'Nudge (Shift x10, Ctrl tenth)' },
   { label: 'Alt+Arrow', desc: 'Duplicate and Offset the Copy (AI)' },
@@ -246,6 +247,23 @@ export function handleGlobalKeydown(
 
   if (e.ctrlKey || e.metaKey) {
     const key = e.key.toLowerCase()
+    // Command palette: Ctrl+Shift+P always; Ctrl+K only with an empty
+    // selection so CDR break-apart (Ctrl+K on a compound path) keeps working.
+    // Selection is read from the engine (like the break-apart branch below)
+    // with the store flag as fallback, so bare mock stores keep working.
+    const selCount = (() => {
+      try {
+        const n = engine?.getSelection?.()?.length
+        if (typeof n === 'number') return n
+      } catch { /* fall through to the store flag */ }
+      return store.hasSelection ? 1 : 0
+    })()
+    if ((key === 'p' && e.shiftKey && !e.altKey) ||
+        (key === 'k' && !e.shiftKey && !e.altKey && selCount === 0)) {
+      ;(store as { setCommandPaletteOpen?: (v: boolean) => void }).setCommandPaletteOpen?.(true)
+      e.preventDefault()
+      return
+    }
     if (e.key.startsWith('Arrow')) {
       // CDR micro nudge: Ctrl/Cmd+Arrow moves a tenth of the increment
       // (Shift still scales it up).

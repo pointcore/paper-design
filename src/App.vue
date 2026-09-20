@@ -40,11 +40,12 @@
       <RightPanel v-if="store.ui.showPropertyPanel || store.ui.showLayerPanel" />
     </div>
     <BusyOverlay />
+    <CommandPalette />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, provide, onMounted, onUnmounted } from 'vue'
+import { computed, ref, provide, onMounted, onUnmounted, defineAsyncComponent } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useEditorStore } from './editor/store'
 import { rulerUnitFactor } from './editor/geometry'
@@ -57,6 +58,8 @@ import DocTabs from './components/canvas/DocTabs.vue'
 import ColorBar from './components/canvas/ColorBar.vue'
 import RightPanel from './components/panels/RightPanel.vue'
 import BusyOverlay from './components/BusyOverlay.vue'
+// Async so the palette dialog ships in its own chunk, not the main bundle.
+const CommandPalette = defineAsyncComponent(() => import('./components/CommandPalette.vue'))
 
 const store = useEditorStore()
 const { tool } = storeToRefs(store)

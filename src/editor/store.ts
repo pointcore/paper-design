@@ -247,6 +247,8 @@ export const useEditorStore = defineStore('editor', {
       saveDialogOpen: false,
       /** Blend dialog (Ctrl+Alt+B opens it) */
       blendDialogOpen: false,
+      /** Command palette (Ctrl+Shift+P, or Ctrl+K with empty selection) */
+      commandPaletteOpen: false,
       showNavigator: true,
       zenMode: false,
       showControlBar: true,
@@ -540,6 +542,11 @@ export const useEditorStore = defineStore('editor', {
      * the Ctrl+Alt+B shortcut can reach it) */
     setBlendDialogOpen(val: boolean) {
       this.ui.blendDialogOpen = val
+    },
+
+    /** Open/close the command palette (store-shared so shortcuts can reach it) */
+    setCommandPaletteOpen(val: boolean) {
+      this.ui.commandPaletteOpen = val
     },
 
     /** Set page size */
