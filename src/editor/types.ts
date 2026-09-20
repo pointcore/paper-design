@@ -309,6 +309,22 @@ export interface StylePreset {
   style: StyleState
 }
 
+/** Global color (AI Swatches parity): editing it repaints every user. */
+export interface GlobalColor {
+  id: string
+  name: string
+  /** CSS color string. */
+  color: string
+}
+
+/** Named text style preset: character + paragraph snapshot (one-change-apply). */
+export interface TextStylePreset {
+  id: string
+  name: string
+  char: CharStyle
+  paragraph: ParagraphStyle
+}
+
 /** One layer in a multi-fill/stroke appearance stack. */
 export interface AppearanceFill {
   /** Unique id for drag-reorder and keyed selection. */

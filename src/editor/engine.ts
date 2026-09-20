@@ -1891,6 +1891,61 @@ export class EditorEngine {
     }
   }
 
+  // ===== Global colors (AI Swatches parity, one-change-all) =====
+
+  /** Paint the unlocked selection with a global color. Returns touched items. */
+  applyGlobalColorToSelection(color: string, toStroke: boolean): number {
+    let n = 0
+    for (const item of this.getSelection() as any[]) {
+      if (item.locked) continue
+      if (toStroke) {
+        if (item.strokeColor !== undefined) {
+          item.strokeColor = color
+          n++
+        }
+      } else if (item.fillColor !== undefined) {
+        item.fillColor = color
+        n++
+      }
+    }
+    if (n > 0) this.scope.view.update()
+    return n
+  }
+
+  /**
+   * Repaint every user item using `oldColor` with `newColor`.
+   * Powers the global-color "edit once, update everywhere" contract.
+   * Returns the number of paints touched (fill + stroke counted separately).
+   */
+  recolorGlobalUsages(oldColor: string, newColor: string): number {
+    const oldN = (oldColor || '').trim().toLowerCase()
+    const newN = (newColor || '').trim().toLowerCase()
+    if (!oldN || oldN === newN) return 0
+    let n = 0
+    const items = this.project.getItems({ match: () => true })
+    for (const item of items) {
+      const data = (item.data as any) ?? {}
+      if (!data.isUserItem) continue
+      const s = item as any
+      if (s.fillColor !== undefined) {
+        const css = this.colorToCSS(s.fillColor)
+        if (typeof css === 'string' && css.trim().toLowerCase() === oldN) {
+          s.fillColor = newColor
+          n++
+        }
+      }
+      if (s.strokeColor !== undefined) {
+        const css = this.colorToCSS(s.strokeColor)
+        if (typeof css === 'string' && css.trim().toLowerCase() === oldN) {
+          s.strokeColor = newColor
+          n++
+        }
+      }
+    }
+    if (n > 0) this.scope.view.update()
+    return n
+  }
+
   // ===== Opacity masks (AI/CDR parity) =====
 
   /** Get opacity mask from an item (or null). */

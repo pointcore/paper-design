@@ -18,6 +18,21 @@
       </div>
     </div>
     <div class="panel-section">
+      <div class="sec-title">Global <span class="sec-hint">edit repaints every usage</span></div>
+      <div class="row">
+        <input type="color" v-model="globalColorPick" class="global-pick" title="Pick a global color" />
+        <el-input v-model="globalName" size="small" placeholder="Global name" @keyup.enter="saveGlobal" />
+        <el-button size="small" @click="saveGlobal">Add</el-button>
+      </div>
+      <div v-if="store.globalColors.length === 0" class="hint">Save a brand color here; editing it updates all artwork using it.</div>
+      <div v-for="g in store.globalColors" :key="g.id" class="style-row" :title="`Apply ${g.name}`" @click="applyGlobal(g.id, $event)" @contextmenu.prevent="applyGlobal(g.id, $event, true)">
+        <span class="style-chip" :style="{ background: g.color }"></span>
+        <span class="style-name">{{ g.name }}</span>
+        <input type="color" :value="g.color" class="global-edit" title="Edit global (repaints usages)" @click.stop @change="editGlobal(g.id, ($event.target as HTMLInputElement).value)" />
+        <el-button size="small" type="danger" plain @click.stop="removeGlobal(g.id)">×</el-button>
+      </div>
+    </div>
+    <div class="panel-section">
       <div class="sec-title">Styles <span class="sec-hint">single-appearance presets</span></div>
       <div class="row">
         <el-input v-model="styleName" size="small" placeholder="Preset name" @keyup.enter="saveStyle" />
@@ -163,6 +178,58 @@ function persistStyles() {
   } catch { /* private mode */ }
 }
 
+const globalColorPick = ref('#e74c3c')
+const globalName = ref('')
+
+function saveGlobal() {
+  store.addGlobalColor(globalName.value || store.style.fillColor || globalColorPick.value, globalColorPick.value)
+  globalName.value = ''
+  persistGlobals()
+  store.setStatusMessage('Global color saved')
+}
+
+function applyGlobal(id: string, e: MouseEvent, forceStroke = false) {
+  const g = store.globalColors.find((x) => x.id === id)
+  if (!g) return
+  const toStroke = forceStroke || e.altKey || (e as MouseEvent).type === 'contextmenu'
+  store.pushRecentColor(g.color)
+  const engine = getEngine()
+  if (!engine) {
+    if (toStroke) store.updateStyle({ strokeColor: g.color })
+    else store.updateStyle({ fillColor: g.color, gradient: null })
+    return
+  }
+  if (toStroke) store.updateStyle({ strokeColor: g.color })
+  else store.updateStyle({ fillColor: g.color, gradient: null })
+  const n = engine.applyGlobalColorToSelection(g.color, toStroke)
+  engine.scope.view.update()
+  if (n > 0) engine.pushHistory(toStroke ? 'Apply Global Stroke' : 'Apply Global Fill')
+  else store.setStatusMessage(`Global "${g.name}" set as default`)
+}
+
+function editGlobal(id: string, next: string) {
+  const g = store.globalColors.find((x) => x.id === id)
+  if (!g || !next) return
+  const prev = store.updateGlobalColor(id, { color: next })
+  persistGlobals()
+  const engine = getEngine()
+  if (!engine || !prev) return
+  const n = engine.recolorGlobalUsages(prev, next)
+  if (n > 0) engine.pushHistory('Edit Global Color')
+  store.setStatusMessage(n > 0 ? `Global "${g.name}" repainted ${n} paint(s)` : `Global "${g.name}" updated`)
+}
+
+function removeGlobal(id: string) {
+  store.removeGlobalColor(id)
+  persistGlobals()
+}
+
+function persistGlobals() {
+  try {
+    localStorage.setItem('vve.globals', JSON.stringify(store.globalColors))
+  } catch { /* private mode */ }
+}
+
 onMounted(() => {
   try {
     const raw = localStorage.getItem('vve.styles')
@@ -179,11 +246,34 @@ onMounted(() => {
       }))
     store.setStylePresets(clean)
   } catch { /* corrupt storage: defaults stand */ }
+  try {
+    const graw = localStorage.getItem('vve.globals')
+    if (graw) {
+      const glist = JSON.parse(graw) as Array<{ id?: unknown; name?: unknown; color?: unknown }>
+      if (Array.isArray(glist)) {
+        store.setGlobalColors(
+          glist
+            .filter((g) => g && typeof g === 'object')
+            .slice(0, 48)
+            .map((g, i) => ({
+              id: typeof g.id === 'string' && g.id ? g.id : `global-restored-${i}`,
+              name: typeof g.name === 'string' && g.name ? (g.name as string).slice(0, 40) : `Global ${i + 1}`,
+              color: typeof g.color === 'string' && g.color ? (g.color as string).slice(0, 64) : '#000000',
+            })),
+        )
+      }
+    }
+  } catch { /* corrupt storage: defaults stand */ }
 })
 
 watch(
   () => store.stylePresets.length,
   () => persistStyles()
+)
+
+watch(
+  () => store.globalColors.length,
+  () => persistGlobals()
 )
 </script>
 
@@ -204,6 +294,11 @@ watch(
 .hint { font-size: 11px; color: #8a8a8a; line-height: 1.5; }
 .row { display: flex; gap: 4px; }
 .row :deep(.el-input) { flex: 1; min-width: 0; }
+.global-pick, .global-edit {
+  width: 26px; height: 24px; padding: 0;
+  border: 1px solid #4a4a4a; border-radius: 3px;
+  background: transparent; cursor: pointer; flex-shrink: 0;
+}
 .style-row {
   display: flex; align-items: center; gap: 8px;
   padding: 4px 6px; border-radius: 3px; cursor: pointer;

@@ -6,6 +6,8 @@ import type {
   ToolName,
   StyleState,
   StylePreset,
+  GlobalColor,
+  TextStylePreset,
   LayerMeta,
   ArtboardMeta,
   CharStyle,
@@ -190,6 +192,10 @@ export const useEditorStore = defineStore('editor', {
     recentColors: [] as string[],
     /** Saved appearance presets (Graphic Styles lite, persisted) */
     stylePresets: [] as StylePreset[],
+    /** Global colors (AI Swatches parity: edit repaints every usage) */
+    globalColors: [] as GlobalColor[],
+    /** Named text style presets (char + paragraph snapshot) */
+    textStylePresets: [] as TextStylePreset[],
     /** Live-shape options surfaced in the contextual control bar */
     polygonSides: 5,
     polygonStar: false,
@@ -654,6 +660,66 @@ export const useEditorStore = defineStore('editor', {
     /** Delete a style preset */
     removeStylePreset(id: string) {
       this.stylePresets = this.stylePresets.filter((p) => p.id !== id)
+    },
+
+    /** Replace the global-color list (storage load, cap 48) */
+    setGlobalColors(list: GlobalColor[]) {
+      this.globalColors = Array.isArray(list)
+        ? list
+          .filter((g) => g && typeof g.id === 'string' && typeof g.name === 'string' && typeof g.color === 'string')
+          .slice(0, 48)
+          .map((g) => ({ id: g.id, name: g.name.slice(0, 40), color: g.color.slice(0, 64) }))
+        : []
+    },
+
+    /** Add a global color, returns its id (dedupe by exact paint) */
+    addGlobalColor(name: string, color: string): string {
+      const clean = (name || '').trim().slice(0, 40) || `Global ${this.globalColors.length + 1}`
+      const paint = (color || '').trim().slice(0, 64)
+      const dup = this.globalColors.find((g) => g.color.toLowerCase() === paint.toLowerCase())
+      if (dup) return dup.id
+      const id = `gc-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`
+      this.globalColors = [{ id, name: clean, color: paint }, ...this.globalColors].slice(0, 48)
+      return id
+    },
+
+    /** Rename / recolor a global color; returns the previous paint ('' when missing) */
+    updateGlobalColor(id: string, patch: Partial<Pick<GlobalColor, 'name' | 'color'>>): string {
+      const g = this.globalColors.find((x) => x.id === id)
+      if (!g) return ''
+      const prev = g.color
+      if (typeof patch.name === 'string' && patch.name.trim()) g.name = patch.name.trim().slice(0, 40)
+      if (typeof patch.color === 'string' && patch.color.trim()) g.color = patch.color.trim().slice(0, 64)
+      return prev
+    },
+
+    /** Delete a global color */
+    removeGlobalColor(id: string) {
+      this.globalColors = this.globalColors.filter((g) => g.id !== id)
+    },
+
+    /** Replace the text-style preset list (storage load, cap 24) */
+    setTextStylePresets(list: TextStylePreset[]) {
+      this.textStylePresets = Array.isArray(list)
+        ? list
+          .filter((p) => p && typeof p.id === 'string' && typeof p.name === 'string' && p.char && p.paragraph)
+          .slice(0, 24)
+        : []
+    },
+
+    /** Save the current char + paragraph style as a preset, returns its id */
+    addTextStylePreset(name: string): string {
+      const clean = (name || '').trim().slice(0, 40) || `Text ${this.textStylePresets.length + 1}`
+      const id = `ts-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`
+      const char = JSON.parse(JSON.stringify(this.charStyle))
+      const paragraph = JSON.parse(JSON.stringify(this.paragraphStyle))
+      this.textStylePresets = [{ id, name: clean, char, paragraph }, ...this.textStylePresets].slice(0, 24)
+      return id
+    },
+
+    /** Delete a text style preset */
+    removeTextStylePreset(id: string) {
+      this.textStylePresets = this.textStylePresets.filter((p) => p.id !== id)
     },
 
     /** Live-shape option setters (clamped to sane ranges) */

@@ -433,6 +433,15 @@
               <el-button size="small" class="icon-btn" title="Select previous frame" @click="onThreadNav('prev')">←</el-button>
               <el-button size="small" class="icon-btn" title="Select next frame" @click="onThreadNav('next')">→</el-button>
             </div>
+            <div class="prop-row">
+              <span class="prop-label-sm">Styles</span>
+              <el-input v-model="textPresetName" size="small" class="flex-ctl" placeholder="Preset name" @keyup.enter="onSaveTextPreset" />
+              <el-button size="small" class="grid-btn" @click="onSaveTextPreset">Save</el-button>
+            </div>
+            <div v-for="p in store.textStylePresets" :key="p.id" class="prop-row">
+              <el-button size="small" class="grid-btn flex-ctl" :title="`Apply ${p.name}`" @click="onApplyTextPreset(p.id)">{{ p.name }}</el-button>
+              <el-button size="small" class="icon-btn" title="Delete preset" @click="onRemoveTextPreset(p.id)">×</el-button>
+            </div>
           </div>
         </div>
       </div>
@@ -515,7 +524,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, inject, type Ref } from 'vue'
+import { ref, computed, watch, inject, onMounted, type Ref } from 'vue'
 import {
   ArrowLeft, ArrowRight, View, Grid, Magnet, Guide, Aim, MagicStick,
 } from '@element-plus/icons-vue'
@@ -1309,6 +1318,64 @@ function onAlignChange(val: TextAlign) {  // Paper.js justification has no justi
   store.updateParagraphStyle({ align: val })
   applyTextStyle((item) => { (item as any).justification = justification }, 'Change Text Alignment')
 }
+
+/** Named text-style presets: snapshot of char + paragraph, one-click apply. */
+const textPresetName = ref('')
+
+function onSaveTextPreset() {
+  store.addTextStylePreset(textPresetName.value)
+  textPresetName.value = ''
+  persistTextPresets()
+  store.setStatusMessage('Text style saved')
+}
+
+function onApplyTextPreset(id: string) {
+  const preset = store.textStylePresets.find((p) => p.id === id)
+  if (!preset) return
+  const char = JSON.parse(JSON.stringify(preset.char))
+  const paragraph = JSON.parse(JSON.stringify(preset.paragraph))
+  store.updateCharStyle({ ...char })
+  store.updateParagraphStyle({ ...paragraph })
+  const justification = paragraph.align === 'center' ? 'center' : paragraph.align === 'right' ? 'right' : 'left'
+  applyTextStyle((item) => {
+    if (char.fontFamily !== undefined) item.fontFamily = char.fontFamily
+    if (char.fontSize !== undefined) item.fontSize = char.fontSize
+    if (char.leading !== undefined) (item as any).leading = char.leading
+    ;(item as any).justification = justification
+  }, `Apply Text Style "${preset.name}"`)
+  syncAreaFromSelection()
+}
+
+function onRemoveTextPreset(id: string) {
+  store.removeTextStylePreset(id)
+  persistTextPresets()
+}
+
+function persistTextPresets() {
+  try {
+    localStorage.setItem('vve.textstyles', JSON.stringify(store.textStylePresets))
+  } catch { /* private mode */ }
+}
+
+onMounted(() => {
+  try {
+    const raw = localStorage.getItem('vve.textstyles')
+    if (!raw) return
+    const list = JSON.parse(raw) as Array<{ id?: unknown; name?: unknown; char?: unknown; paragraph?: unknown }>
+    if (!Array.isArray(list)) return
+    store.setTextStylePresets(
+      list
+        .filter((p) => p && typeof p === 'object' && typeof p.char === 'object' && p.char !== null && typeof p.paragraph === 'object' && p.paragraph !== null)
+        .slice(0, 24)
+        .map((p, i) => ({
+          id: typeof p.id === 'string' && p.id ? p.id : `text-restored-${i}`,
+          name: typeof p.name === 'string' && p.name ? (p.name as string).slice(0, 40) : `Text ${i + 1}`,
+          char: p.char as import('../../editor/types').CharStyle,
+          paragraph: p.paragraph as import('../../editor/types').ParagraphStyle,
+        })),
+    )
+  } catch { /* corrupt storage: defaults stand */ }
+})
 
 function onChangeCase(mode: 'upper' | 'lower' | 'title') {
   const e = getEngine()
