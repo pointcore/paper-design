@@ -6,7 +6,7 @@ import { PaperOffset } from 'paperjs-offset'
 import type { ToolName, StyleState, LayerMeta, LayerItemNode, ArtboardMeta, SymbolEntry, HistoryEntry, GuideOrientation, ProjectFileData, ReferencePoint, AlignMode, DistributeAxis, BooleanOperation, RasterExportOptions, GradientState, PatternFillState, EnvelopePreset, AppearanceState, AppearanceFill, AppearanceStroke, OpacityMaskState, MeshGradientState, MeshGradientVertex } from './types'
 import { createDefaultStyle } from './store'
 import { cursorForTool } from './cursors'
-import { gradientAngleFromVector, linearGradientEndpoints, normalizeAngleDeg } from './geometry'
+import { gradientAngleFromVector } from './geometry'
 import { changeCaseText } from './text/text-case'
 import { alignSampledPoints, lerp, lerpRgba, rgbaToCss, sampleCountFor } from './blend/blend'
 import type { Rgba } from './color'
@@ -33,6 +33,7 @@ import * as layers from './engine-layers'
 import * as pathfinder from './engine-pathfinder'
 import * as join from './engine-join'
 import * as compound from './engine-compound'
+import * as appearance from './engine-appearance'
 import {
   TRACE_MIN_DIM,
   cleanTraceOptions,
@@ -1118,7 +1119,7 @@ export class EditorEngine {
       return
     }
     const paperStyle: any = {}
-    const gradientFill = this.gradientFillForItem(item, style)
+    const gradientFill = appearance.gradientFillForItem(this, item, style)
     if (gradientFill) paperStyle.fillColor = gradientFill
     else if (style.fillColor) paperStyle.fillColor = style.fillColor
     else paperStyle.fillColor = null
@@ -1144,33 +1145,6 @@ export class EditorEngine {
    * Radial colors always carry an explicit highlight so linear vs radial
    * stays detectable on readback.
    */
-  private gradientFillForItem(item: paper.Item, style: StyleState): paper.Color | null {
-    const gradient = style.gradient
-    if (!gradient || gradient.stops.length === 0) return null
-    const scope = this.scope
-    const bounds = (item as any).bounds as paper.Rectangle | undefined
-    if (!bounds || bounds.width <= 0 || bounds.height <= 0) return null
-    const stops = gradient.stops.map(
-      (stop) => new scope.GradientStop(new scope.Color(stop.color), stop.offset)
-    )
-    // The bundled typings omit the Gradient constructor overloads, so the
-    // gradient is assembled through its declared properties instead.
-    const paperGradient = new scope.Gradient()
-    paperGradient.stops = stops
-    paperGradient.radial = gradient.type === 'radial'
-    if (gradient.type === 'radial') {
-      const center = bounds.center
-      const radius = Math.max(bounds.width, bounds.height) / 2
-      const edge = new scope.Point(center.x + radius, center.y)
-      return new scope.Color(paperGradient, center, edge, center.clone()) as paper.Color
-    }
-    const angle = normalizeAngleDeg(gradient.angle ?? 0)
-    const e = linearGradientEndpoints(bounds.center.x, bounds.center.y, bounds.width, bounds.height, angle)
-    const origin = new scope.Point(e.x1, e.y1)
-    const destination = new scope.Point(e.x2, e.y2)
-    return new scope.Color(paperGradient, origin, destination) as paper.Color
-  }
-
   /** Read a baked gradient back into parameters (stops + angle survive). */
   private gradientFromItem(item: paper.Item): GradientState | null {
     const fill = (item as any).fillColor as any
@@ -1198,7 +1172,7 @@ export class EditorEngine {
   refreshItemGradient(item: paper.Item): void {
     const params = this.gradientFromItem(item)
     if (!params) return
-    const rebuilt = this.gradientFillForItem(item, { gradient: params } as StyleState)
+    const rebuilt = appearance.gradientFillForItem(this, item, { gradient: params } as StyleState)
     if (rebuilt) (item as any).fillColor = rebuilt
   }
 
@@ -1251,234 +1225,66 @@ export class EditorEngine {
   // ===== Multi-appearance (AI Appearance panel parity) =====
 
   /** Create a default empty appearance (single fill + stroke). */
+  /** See engine-appearance.ts. */
   createDefaultAppearance(): AppearanceState {
-    return {
-      fills: [{
-        id: this.genId(),
-        color: null,
-        gradient: null,
-        pattern: null,
-        fillRule: 'nonzero',
-        opacity: 1,
-        blendMode: 'source-over',
-        visible: true,
-      }],
-      strokes: [{
-        id: this.genId(),
-        color: '#000000',
-        strokeWidth: 1,
-        strokeAlign: 'center',
-        lineCap: 'round',
-        lineJoin: 'miter',
-        miterLimit: 4,
-        dashArray: [],
-        dashOffset: 0,
-        opacity: 1,
-        blendMode: 'source-over',
-        visible: true,
-      }],
-      opacity: 1,
-      blendMode: 'source-over',
-    }
+    return appearance.createDefaultAppearance(this)
   }
 
-  /** Read appearance from an item (or create default). */
+  /** See engine-appearance.ts. */
   getAppearanceFromItem(item: paper.Item): AppearanceState {
-    const data = (item.data as any) ?? {}
-    if (data.appearance) {
-      return data.appearance as AppearanceState
-    }
-    // Legacy single-appearance: build from current item paint.
-    const style = this.getStyleFromItem(item)
-    return {
-      fills: [{
-        id: this.genId(),
-        color: style.fillColor,
-        gradient: style.gradient,
-        pattern: style.pattern,
-        fillRule: style.fillRule,
-        opacity: 1,
-        blendMode: 'source-over',
-        visible: true,
-      }],
-      strokes: [{
-        id: this.genId(),
-        color: style.strokeColor,
-        strokeWidth: style.strokeWidth,
-        strokeAlign: style.strokeAlign,
-        lineCap: style.lineCap,
-        lineJoin: style.lineJoin,
-        miterLimit: style.miterLimit,
-        dashArray: style.dashArray,
-        dashOffset: style.dashOffset,
-        opacity: 1,
-        blendMode: 'source-over',
-        visible: true,
-      }],
-      opacity: style.opacity,
-      blendMode: style.blendMode,
-    }
+    return appearance.getAppearanceFromItem(this, item)
   }
 
-  /** Store appearance on an item and apply the bottom-most fill/stroke to Paper. */
-  setAppearanceOnItem(item: paper.Item, appearance: AppearanceState) {
-    const data = (item.data as any) ?? {}
-    data.appearance = appearance
-    item.data = data
-    // Apply bottom-most visible fill and stroke to the Paper.js item.
-    const fill = appearance.fills.filter((f) => f.visible).pop()
-    const stroke = appearance.strokes.filter((s) => s.visible).pop()
-    const paperStyle: any = {}
-    if (fill) {
-      if (fill.gradient) {
-        const gf = this.gradientFillForItem(item, { gradient: fill.gradient } as StyleState)
-        paperStyle.fillColor = gf ?? fill.color
-      } else if (fill.pattern) {
-        // Pattern fills are handled by the pattern group; skip here.
-      } else {
-        paperStyle.fillColor = fill.color
-      }
-      paperStyle.fillRule = fill.fillRule
-    } else {
-      paperStyle.fillColor = null
-    }
-    if (stroke && stroke.visible) {
-      paperStyle.strokeColor = stroke.color
-      paperStyle.strokeWidth = stroke.strokeWidth
-      paperStyle.strokeCap = stroke.lineCap
-      paperStyle.strokeJoin = stroke.lineJoin
-      paperStyle.miterLimit = stroke.miterLimit
-      if (stroke.dashArray.length > 0) paperStyle.dashArray = stroke.dashArray
-      paperStyle.dashOffset = stroke.dashOffset
-    } else {
-      paperStyle.strokeColor = null
-    }
-    paperStyle.opacity = appearance.opacity
-    paperStyle.blendMode = appearance.blendMode
-    item.set(paperStyle)
+  /** See engine-appearance.ts. */
+  setAppearanceOnItem(item: paper.Item, appearanceState: AppearanceState) {
+    appearance.setAppearanceOnItem(this, item, appearanceState)
   }
 
-  /** Add a fill layer to an item's appearance. */
+  /** See engine-appearance.ts. */
   addAppearanceFill(item: paper.Item, fill?: Partial<AppearanceFill>): AppearanceFill {
-    const app = this.getAppearanceFromItem(item)
-    const newFill: AppearanceFill = {
-      id: this.genId(),
-      color: '#ff0000',
-      gradient: null,
-      pattern: null,
-      fillRule: 'nonzero',
-      opacity: 1,
-      blendMode: 'source-over',
-      visible: true,
-      ...fill,
-    }
-    app.fills.push(newFill)
-    this.setAppearanceOnItem(item, app)
-    return newFill
+    return appearance.addAppearanceFill(this, item, fill)
   }
 
-  /** Add a stroke layer to an item's appearance. */
+  /** See engine-appearance.ts. */
   addAppearanceStroke(item: paper.Item, stroke?: Partial<AppearanceStroke>): AppearanceStroke {
-    const app = this.getAppearanceFromItem(item)
-    const newStroke: AppearanceStroke = {
-      id: this.genId(),
-      color: '#000000',
-      strokeWidth: 1,
-      strokeAlign: 'center',
-      lineCap: 'round',
-      lineJoin: 'miter',
-      miterLimit: 4,
-      dashArray: [],
-      dashOffset: 0,
-      opacity: 1,
-      blendMode: 'source-over',
-      visible: true,
-      ...stroke,
-    }
-    app.strokes.push(newStroke)
-    this.setAppearanceOnItem(item, app)
-    return newStroke
+    return appearance.addAppearanceStroke(this, item, stroke)
   }
 
-  /** Remove a fill layer by id. */
+  /** See engine-appearance.ts. */
   removeAppearanceFill(item: paper.Item, fillId: string) {
-    const app = this.getAppearanceFromItem(item)
-    app.fills = app.fills.filter((f) => f.id !== fillId)
-    if (app.fills.length === 0) {
-      app.fills.push({ id: this.genId(), color: null, gradient: null, pattern: null, fillRule: 'nonzero', opacity: 1, blendMode: 'source-over', visible: true })
-    }
-    this.setAppearanceOnItem(item, app)
+    appearance.removeAppearanceFill(this, item, fillId)
   }
 
-  /** Remove a stroke layer by id. */
+  /** See engine-appearance.ts. */
   removeAppearanceStroke(item: paper.Item, strokeId: string) {
-    const app = this.getAppearanceFromItem(item)
-    app.strokes = app.strokes.filter((s) => s.id !== strokeId)
-    if (app.strokes.length === 0) {
-      app.strokes.push({ id: this.genId(), color: null, strokeWidth: 1, strokeAlign: 'center', lineCap: 'round', lineJoin: 'miter', miterLimit: 4, dashArray: [], dashOffset: 0, opacity: 1, blendMode: 'source-over', visible: true })
-    }
-    this.setAppearanceOnItem(item, app)
+    appearance.removeAppearanceStroke(this, item, strokeId)
   }
 
-  /** Update a fill layer. */
+  /** See engine-appearance.ts. */
   updateAppearanceFill(item: paper.Item, fillId: string, patch: Partial<AppearanceFill>) {
-    const app = this.getAppearanceFromItem(item)
-    const fill = app.fills.find((f) => f.id === fillId)
-    if (fill) {
-      Object.assign(fill, patch)
-      this.setAppearanceOnItem(item, app)
-    }
+    appearance.updateAppearanceFill(this, item, fillId, patch)
   }
 
-  /** Update a stroke layer. */
+  /** See engine-appearance.ts. */
   updateAppearanceStroke(item: paper.Item, strokeId: string, patch: Partial<AppearanceStroke>) {
-    const app = this.getAppearanceFromItem(item)
-    const stroke = app.strokes.find((s) => s.id === strokeId)
-    if (stroke) {
-      Object.assign(stroke, patch)
-      this.setAppearanceOnItem(item, app)
-    }
+    appearance.updateAppearanceStroke(this, item, strokeId, patch)
   }
 
-  /** Reorder fill layers (drag-and-drop). */
+  /** See engine-appearance.ts. */
   reorderAppearanceFills(item: paper.Item, fromIndex: number, toIndex: number) {
-    const app = this.getAppearanceFromItem(item)
-    const [moved] = app.fills.splice(fromIndex, 1)
-    if (moved) {
-      app.fills.splice(toIndex, 0, moved)
-      this.setAppearanceOnItem(item, app)
-    }
+    appearance.reorderAppearanceFills(this, item, fromIndex, toIndex)
   }
 
-  /** Reorder stroke layers (drag-and-drop). */
+  /** See engine-appearance.ts. */
   reorderAppearanceStrokes(item: paper.Item, fromIndex: number, toIndex: number) {
-    const app = this.getAppearanceFromItem(item)
-    const [moved] = app.strokes.splice(fromIndex, 1)
-    if (moved) {
-      app.strokes.splice(toIndex, 0, moved)
-      this.setAppearanceOnItem(item, app)
-    }
+    appearance.reorderAppearanceStrokes(this, item, fromIndex, toIndex)
   }
 
   // ===== Global colors (AI Swatches parity, one-change-all) =====
 
-  /** Paint the unlocked selection with a global color. Returns touched items. */
+  /** See engine-appearance.ts. */
   applyGlobalColorToSelection(color: string, toStroke: boolean): number {
-    let n = 0
-    for (const item of this.getSelection() as any[]) {
-      if (item.locked) continue
-      if (toStroke) {
-        if (item.strokeColor !== undefined) {
-          item.strokeColor = color
-          n++
-        }
-      } else if (item.fillColor !== undefined) {
-        item.fillColor = color
-        n++
-      }
-    }
-    if (n > 0) this.scope.view.update()
-    return n
+    return appearance.applyGlobalColorToSelection(this, color, toStroke)
   }
 
   /**
@@ -4321,37 +4127,14 @@ export class EditorEngine {
     return pathfinder.extendedBoolean(this, op)
   }
 
-  /**
-   * Spot-color placeholder names on the selection (first item wins on read;
-   * empty strings clear). Names ride on `item.data` so they persist in
-   * project JSON; paints still render/export with their RGB preview.
-   */
+  /** See engine-appearance.ts. */
   getSpotFromSelection(): { fill: string | null; stroke: string | null } {
-    const first = this.getSelection()[0] as any
-    if (!first) return { fill: null, stroke: null }
-    const data = (first.data as any) ?? {}
-    const clean = (v: unknown): string | null =>
-      typeof v === 'string' && v.trim().length > 0 ? v.trim().slice(0, 60) : null
-    return { fill: clean(data.spotFill), stroke: clean(data.spotStroke) }
+    return appearance.getSpotFromSelection(this)
   }
 
-  /** Stamp spot names onto every selected top-level item (one history entry). */
+  /** See engine-appearance.ts. */
   setSpotForSelection(fill: string | null, stroke: string | null): void {
-    const items = this.getSelection().filter((i) => !i.locked && i.parent)
-    if (items.length === 0) return
-    const clean = (v: string | null): string | null =>
-      typeof v === 'string' && v.trim().length > 0 ? v.trim().slice(0, 60) : null
-    const nextFill = clean(fill)
-    const nextStroke = clean(stroke)
-    for (const item of items) {
-      const data = (item.data as any) ?? ((item.data as any) = {})
-      if (nextFill) data.spotFill = nextFill
-      else delete data.spotFill
-      if (nextStroke) data.spotStroke = nextStroke
-      else delete data.spotStroke
-    }
-    this.pushHistory('Spot Color')
-    this.scope.view.update()
+    appearance.setSpotForSelection(this, fill, stroke)
   }
 
   // ===== Raster export =====
@@ -7703,21 +7486,9 @@ export class EditorEngine {
     return true
   }
 
-  /**
-   * Reset the unlocked selection to the default appearance. Returns
-   * items reset; one history entry.
-   */
+  /** See engine-appearance.ts. */
   clearAppearance(): number {
-    const items = this.getSelection().filter((item) => !item.locked && item.parent)
-    if (items.length === 0) return 0
-    const defaults = createDefaultStyle()
-    for (const item of items) {
-      this.applyStyleToItem(item, defaults)
-      this.refreshItemGradient(item)
-    }
-    this.pushHistory('Clear Appearance')
-    this.scope.view.update()
-    return items.length
+    return appearance.clearAppearance(this)
   }
 
   /** Every text run in the document (annotation labels excluded). */
