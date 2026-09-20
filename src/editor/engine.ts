@@ -25,6 +25,7 @@ import {
 } from './cdr/cdr-to-svg'
 import { yieldToUI, type ProgressReport } from './busy'
 import { alignToPixel } from './pixel'
+import { MAX_MERGE_ROWS, mergeTemplate } from './data-merge'
 import { inflateHistoryImages, slimHistoryImages } from './history-images'
 
 /** Identifier stamped into every saved project file. */
@@ -7430,6 +7431,80 @@ export class EditorEngine {
     this.scope.view.update()
     this.pushHistory(historyLabel)
     return true
+  }
+
+  // ===== Data merge (CSV -> one artboard per row, D5) =====
+
+  /**
+   * Generate one artboard per record with merged title/body text.
+   * Boards extend the row to the right (same size as the active board);
+   * every text item is a regular user item (selectable, undoable).
+   * Returns board/item counts; 0 boards when there is nothing to merge.
+   */
+  dataMerge(
+    records: Array<Record<string, string>>,
+    opts: { titleTemplate: string; bodyTemplate: string }
+  ): { boards: number; items: number } {
+    const rows = (Array.isArray(records) ? records : []).slice(0, MAX_MERGE_ROWS)
+    if (rows.length === 0) return { boards: 0, items: 0 }
+    const active = this.store.activeArtboard
+    const GAP = 100
+    let cursorX = active ? active.x + active.width + GAP : 0
+    const cursorY = active ? active.y : 0
+    const bw = active ? active.width : this.store.pageSize.width
+    const bh = active ? active.height : this.store.pageSize.height
+    const fontFamily = this.store.charStyle.fontFamily || 'Arial'
+    const layer = this.getActiveLayer()
+    const made: paper.Item[] = []
+    let boards = 0
+    rows.forEach((rec, i) => {
+      const title = mergeTemplate(opts.titleTemplate || '{{name}}', rec).slice(0, 120) || `Row ${i + 1}`
+      const body = mergeTemplate(opts.bodyTemplate || '', rec).slice(0, 2000)
+      const board = {
+        id: this.genId(),
+        name: title.slice(0, 40),
+        x: Math.round(cursorX * 10) / 10,
+        y: cursorY,
+        width: bw,
+        height: bh,
+      }
+      this.store.addArtboard(board)
+      const titleItem = new this.scope.PointText({
+        point: new this.scope.Point(board.x + 48, board.y + 84),
+        content: title,
+        fontFamily,
+        fontSize: 26,
+        justification: 'left',
+        fillColor: '#1a1a1a',
+      }) as paper.PointText
+      ;(titleItem as any).data = { id: this.genId(), isUserItem: true }
+      layer.addChild(titleItem)
+      made.push(titleItem)
+      if (body) {
+        const bodyItem = new this.scope.PointText({
+          point: new this.scope.Point(board.x + 48, board.y + 128),
+          content: body,
+          fontFamily,
+          fontSize: 13,
+          justification: 'left',
+          fillColor: '#333333',
+        }) as paper.PointText
+        ;(bodyItem as any).data = { id: this.genId(), isUserItem: true }
+        layer.addChild(bodyItem)
+        made.push(bodyItem)
+      }
+      cursorX += bw + GAP
+      boards++
+    })
+    const last = this.store.artboards[this.store.artboards.length - 1]
+    if (last) this.store.setActiveArtboard(last.id)
+    this.refreshArtboards()
+    this.clearSelection()
+    for (const item of made) item.selected = true
+    this.syncSelectionToStore()
+    this.pushHistory('Data Merge')
+    this.scope.view.update()
+    return { boards, items: made.length }
   }
 
   // ===== CDR import (CDR -> SVG -> Paper.js) =====

@@ -59,8 +59,7 @@
     </div>
 
     <div class="panel-section">
-      <div class="sec-title">N-up Imposition</div>
-      <div class="row">
+      <div class="sec-title">N-up Imposition</div>      <div class="row">
         <el-select v-model="nUpCount" size="small" style="width: 100px">
           <el-option :value="2" label="2-up" />
           <el-option :value="4" label="4-up" />
@@ -72,6 +71,33 @@
         <el-button size="small" class="grid-btn" @click="exportNUp('pdf')">PDF</el-button>
       </div>
       <div class="hint">Arrange artboards on a single sheet for print.</div>
+    </div>
+
+    <div class="panel-section">
+      <div class="sec-title">Data Merge <span class="sec-hint">CSV → one board per row</span></div>
+      <div class="row">
+        <input type="file" accept=".csv,text/csv" class="file-input" @change="loadMergeFile" />
+      </div>
+      <el-input
+        v-model="mergeCsv"
+        type="textarea"
+        :rows="5"
+        size="small"
+        placeholder="name,title&#10;Ada,Engineer&#10;Bob,Designer"
+        class="merge-text"
+      />
+      <div class="row">
+        <el-input v-model="mergeTitle" size="small" placeholder="Title: {{name}}" />
+      </div>
+      <div class="row">
+        <el-input v-model="mergeBody" size="small" placeholder="Body: {{title}}" />
+      </div>
+      <div class="hint">{{ mergeHint }}</div>
+      <div class="row">
+        <el-button size="small" class="grid-btn" :disabled="mergeRecords.length === 0" @click="runMerge">
+          Generate {{ mergeRecords.length > 0 ? `${mergeRecords.length} board${mergeRecords.length === 1 ? '' : 's'}` : '' }}
+        </el-button>
+      </div>
     </div>
 
     <div class="panel-section">
@@ -110,6 +136,12 @@ import {
   describeExportPreset,
   type ExportPreset,
 } from '../../editor/export-presets'
+import {
+  MAX_MERGE_ROWS,
+  parseCsv,
+  recordsFromCsv,
+  templateFields,
+} from '../../editor/data-merge'
 
 const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
@@ -286,7 +318,86 @@ onMounted(() => {
     const raw = localStorage.getItem('vve.exportPresets')
     if (raw) customPresets.value = cleanExportPresets(JSON.parse(raw))
   } catch { /* corrupt storage: defaults stand */ }
+  try {
+    const mraw = localStorage.getItem('vve.datamerge')
+    if (mraw) {
+      const saved = JSON.parse(mraw) as { csv?: unknown; title?: unknown; body?: unknown }
+      if (typeof saved.csv === 'string') mergeCsv.value = saved.csv.slice(0, 200000)
+      if (typeof saved.title === 'string') mergeTitle.value = saved.title.slice(0, 200)
+      if (typeof saved.body === 'string') mergeBody.value = saved.body.slice(0, 2000)
+    }
+  } catch { /* corrupt storage: defaults stand */ }
 })
+
+// Data merge: CSV pasted or dropped in, one artboard per row.
+const mergeCsv = ref('')
+const mergeTitle = ref('{{name}}')
+const mergeBody = ref('{{title}}')
+
+const mergeParsed = computed(() => {
+  try {
+    return parseCsv(mergeCsv.value)
+  } catch {
+    return { headers: [], rows: [] }
+  }
+})
+
+const mergeRecords = computed(() => recordsFromCsv(mergeParsed.value))
+
+const mergeHint = computed(() => {
+  const p = mergeParsed.value
+  if (!mergeCsv.value.trim()) return 'Paste CSV or choose a file. First row is the header.'
+  if (p.headers.length === 0) return 'No header row found.'
+  const known = new Set(p.headers)
+  const unknown = [...templateFields(mergeTitle.value), ...templateFields(mergeBody.value)]
+    .filter((f) => f && !known.has(f))
+    .filter((f, i, arr) => arr.indexOf(f) === i)
+  const base = `${mergeRecords.value.length} row${mergeRecords.value.length === 1 ? '' : 's'} × ${p.headers.length} field${p.headers.length === 1 ? '' : 's'}`
+  const capped = mergeRecords.value.length >= MAX_MERGE_ROWS ? ` (capped at ${MAX_MERGE_ROWS})` : ''
+  return unknown.length > 0 ? `${base}${capped} · unknown: ${unknown.join(', ')}` : `${base}${capped}`
+})
+
+function loadMergeFile(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0]
+  if (!file) return
+  if (file.size > 2 * 1024 * 1024) {
+    store.setStatusMessage('CSV too large (2 MB max)')
+    return
+  }
+  const reader = new FileReader()
+  reader.onload = () => {
+    mergeCsv.value = String(reader.result ?? '')
+    persistMerge()
+  }
+  reader.onerror = () => store.setStatusMessage('Could not read CSV file')
+  reader.readAsText(file)
+}
+
+function persistMerge() {
+  try {
+    localStorage.setItem('vve.datamerge', JSON.stringify({
+      csv: mergeCsv.value.slice(0, 200000),
+      title: mergeTitle.value.slice(0, 200),
+      body: mergeBody.value.slice(0, 2000),
+    }))
+  } catch { /* private mode */ }
+}
+
+function runMerge() {
+  const e = engineRef?.value
+  if (!e) return
+  if (mergeRecords.value.length === 0) {
+    store.setStatusMessage('Nothing to merge')
+    return
+  }
+  const { boards, items } = e.dataMerge(mergeRecords.value, {    titleTemplate: mergeTitle.value,
+    bodyTemplate: mergeBody.value,
+  })
+  persistMerge()
+  store.setStatusMessage(
+    boards > 0 ? `Data merge: ${boards} board${boards === 1 ? '' : 's'}, ${items} text item${items === 1 ? '' : 's'}` : 'Nothing to merge',
+  )
+}
 
 const shortcuts = computed(() =>
   (Object.entries(TOOL_SHORTCUTS) as Array<[string, { label: string } | null]>)
@@ -345,6 +456,12 @@ async function exportNUp(format: 'svg' | 'pdf' = 'svg') {
 .hint { font-size: 11px; color: #8a8a8a; line-height: 1.5; }
 .row { display: flex; gap: 4px; }
 .grid-btn { flex: 1; margin: 0 !important; }
+.file-input { font-size: 11px; color: #b5b5b5; max-width: 100%; }
+.merge-text :deep(.el-textarea__inner) {
+  font-family: ui-monospace, monospace;
+  background: #111;
+  color: #e6e6e6;
+}
 .sc-list { display: flex; flex-direction: column; max-height: 260px; overflow-y: auto; }
 .sc-row { display: flex; justify-content: space-between; padding: 3px 2px; border-bottom: 1px solid #1e1e1e; font-size: 11px; }
 .sc-tool { color: #d5d5d5; text-transform: capitalize; }
