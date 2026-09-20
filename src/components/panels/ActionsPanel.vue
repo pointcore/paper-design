@@ -121,6 +121,68 @@
     </div>
 
     <div class="panel-section">
+      <div class="sec-title">Action Batch <span class="sec-hint">record once, replay on selection</span></div>
+      <div class="row">
+        <el-select v-model="batchOp" size="small" style="flex: 1">
+          <el-option value="nudge" label="Nudge" />
+          <el-option value="align" label="Align" />
+          <el-option value="distribute" label="Distribute" />
+          <el-option value="distributeSpacing" label="Distribute spacing" />
+          <el-option value="boolean" label="Boolean" />
+        </el-select>
+        <el-button size="small" :type="recording ? 'danger' : ''" @click="toggleRecording">{{ recording ? 'Stop' : 'Record' }}</el-button>
+      </div>
+      <div class="row" v-if="batchOp === 'nudge'">
+        <el-input v-model="batchDx" size="small" placeholder="dx" />
+        <el-input v-model="batchDy" size="small" placeholder="dy" />
+        <el-button size="small" class="grid-btn" @click="runBatchStep">Run</el-button>
+      </div>
+      <div class="row" v-if="batchOp === 'align'">
+        <el-select v-model="batchMode" size="small" style="flex: 1">
+          <el-option value="left" label="Left" />
+          <el-option value="centerX" label="Center X" />
+          <el-option value="right" label="Right" />
+          <el-option value="top" label="Top" />
+          <el-option value="centerY" label="Center Y" />
+          <el-option value="bottom" label="Bottom" />
+        </el-select>
+        <el-button size="small" class="grid-btn" @click="runBatchStep">Run</el-button>
+      </div>
+      <div class="row" v-if="batchOp === 'distribute' || batchOp === 'distributeSpacing'">
+        <el-select v-model="batchAxis" size="small" style="flex: 1">
+          <el-option value="horizontal" label="Horizontal" />
+          <el-option value="vertical" label="Vertical" />
+        </el-select>
+        <el-button size="small" class="grid-btn" @click="runBatchStep">Run</el-button>
+      </div>
+      <div class="row" v-if="batchOp === 'boolean'">
+        <el-select v-model="batchBool" size="small" style="flex: 1">
+          <el-option value="unite" label="Unite" />
+          <el-option value="subtract" label="Subtract" />
+          <el-option value="intersect" label="Intersect" />
+          <el-option value="exclude" label="Exclude" />
+        </el-select>
+        <el-button size="small" class="grid-btn" @click="runBatchStep">Run</el-button>
+      </div>
+      <div class="hint">{{ batchHint }}</div>
+      <div v-for="(s, i) in recordedSteps" :key="i" class="sc-row">
+        <span class="sc-tool">{{ i + 1 }}. {{ describeStep(s) }}</span>
+        <el-button size="small" type="danger" plain @click="dropRecordedStep(i)">×</el-button>
+      </div>
+      <div class="row" v-if="recordedSteps.length > 0">
+        <el-input v-model="batchName" size="small" placeholder="Batch name" @keyup.enter="saveBatch" />
+        <el-button size="small" class="grid-btn" @click="saveBatch">Save</el-button>
+      </div>
+      <div v-for="a in namedActions" :key="a.id" class="sc-row">
+        <span class="sc-tool">{{ a.name }} · {{ describeAction(a) }}</span>
+        <span class="ver-actions">
+          <el-button size="small" plain @click="replayAction(a.id)">Replay</el-button>
+          <el-button size="small" type="danger" plain @click="removeAction(a.id)">×</el-button>
+        </span>
+      </div>
+    </div>
+
+    <div class="panel-section">
       <div class="sec-title">Keyboard Shortcuts</div>
       <div class="sc-list">
         <div v-for="s in shortcuts" :key="s.label + s.tool" class="sc-row">
@@ -148,7 +210,7 @@ import { computed, ref, watch, inject, onMounted, type Ref } from 'vue'
 // a multi-scale ZIP is actually requested).
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
-import type { RasterExportArea, RasterExportFormat, WorkspacePreset } from '../../editor/types'
+import type { AlignMode, BooleanOperation, DistributeAxis, RasterExportArea, RasterExportFormat, WorkspacePreset } from '../../editor/types'
 import { COMMAND_SHORTCUTS, TOOL_SHORTCUTS } from '../../editor/shortcuts'
 import {
   cleanExportPresets,
@@ -171,6 +233,19 @@ import {
   isValidNamedVersion,
   type NamedVersion,
 } from '../../editor/versions'
+import {
+  MAX_ACTIONS,
+  MAX_STEPS_PER_ACTION,
+  cleanActions,
+  createNamedAction,
+  describeAction,
+  describeStep,
+  isValidActionStep,
+  runActionSteps,
+  type ActionOp,
+  type ActionStep,
+  type NamedAction,
+} from '../../editor/action-batch'
 
 const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
@@ -360,6 +435,10 @@ onMounted(() => {
     const vraw = localStorage.getItem('vve.versions')
     if (vraw) namedVersions.value = cleanVersions(JSON.parse(vraw))
   } catch { /* corrupt storage: start empty */ }
+  try {
+    const araw = localStorage.getItem('vve.actions')
+    if (araw) namedActions.value = cleanActions(JSON.parse(araw))
+  } catch { /* corrupt storage: start empty */ }
 })
 
 // Data merge: CSV pasted or dropped in, one artboard per row.
@@ -528,6 +607,164 @@ function removeVersion(id: string) {
     diffLines.value = []
   }
   persistVersions()
+}
+
+// Action batches: v1 records only ops run from this section (palette and
+// menu ops are not intercepted yet). Each op runs against the current
+// selection immediately; replay re-runs the recorded steps on whatever is
+// selected then. Steps stop at the first failure so a later destructive op
+// never applies after an earlier miss.
+const batchOp = ref<ActionOp>('nudge')
+const batchDx = ref('10')
+const batchDy = ref('0')
+const batchMode = ref<AlignMode>('left')
+const batchAxis = ref<DistributeAxis>('horizontal')
+const batchBool = ref<BooleanOperation>('unite')
+const recording = ref(false)
+const recordedSteps = ref<ActionStep[]>([])
+const batchName = ref('')
+const namedActions = ref<NamedAction[]>([])
+
+const batchHint = computed(() => {
+  if (recording.value) return `Recording: ${recordedSteps.value.length}/${MAX_STEPS_PER_ACTION} steps — Run adds ops.`
+  if (recordedSteps.value.length > 0) {
+    return `${recordedSteps.value.length} recorded — Save as a batch or keep running ops.`
+  }
+  if (namedActions.value.length === 0) return 'Record panel ops once, then replay them on any selection.'
+  return `${namedActions.value.length}/${MAX_ACTIONS} batches kept (newest first).`
+})
+
+function persistActions() {
+  try {
+    localStorage.setItem('vve.actions', JSON.stringify(namedActions.value))
+  } catch {
+    // Quota or private mode: the in-memory list still works for this session.
+  }
+}
+
+/** Build a step from the current inputs (null when params are invalid). */
+function buildBatchStep(): ActionStep | null {
+  let step: ActionStep
+  switch (batchOp.value) {
+    case 'nudge': {
+      const dx = Number(batchDx.value)
+      const dy = Number(batchDy.value)
+      step = { op: 'nudge', params: { dx, dy } }
+      break
+    }
+    case 'align':
+      step = { op: 'align', params: { mode: batchMode.value } }
+      break
+    case 'distribute':
+      step = { op: 'distribute', params: { axis: batchAxis.value } }
+      break
+    case 'distributeSpacing':
+      step = { op: 'distributeSpacing', params: { axis: batchAxis.value } }
+      break
+    case 'boolean':
+      step = { op: 'boolean', params: { op: batchBool.value } }
+      break
+  }
+  return isValidActionStep(step) ? step : null
+}
+
+/**
+ * Run one step against the engine. Align/distribute need an explicit
+ * history entry (the engine only reports whether anything moved); nudge
+ * and boolean record their own.
+ */
+function runStepOnEngine(step: ActionStep): boolean {
+  const e = engineRef?.value
+  if (!e) return false
+  switch (step.op) {
+    case 'nudge':
+      return e.nudgeSelection(Number(step.params.dx), Number(step.params.dy))
+    case 'align': {
+      const ok = e.alignSelection(step.params.mode as AlignMode)
+      if (ok) e.pushHistory('Align')
+      return ok
+    }
+    case 'distribute': {
+      const ok = e.distributeSelection(step.params.axis as DistributeAxis)
+      if (ok) e.pushHistory('Distribute')
+      return ok
+    }
+    case 'distributeSpacing': {
+      const ok = e.distributeSpacing(step.params.axis as DistributeAxis)
+      if (ok) e.pushHistory('Distribute Spacing')
+      return ok
+    }
+    case 'boolean':
+      return e.booleanOperation(step.params.op as BooleanOperation)
+  }
+}
+
+function runBatchStep() {
+  const step = buildBatchStep()
+  if (!step) {
+    store.setStatusMessage('Invalid step params')
+    return
+  }
+  if (!runStepOnEngine(step)) {
+    store.setStatusMessage(`${describeStep(step)} did nothing (check selection)`)
+    return
+  }
+  if (recording.value) {
+    if (recordedSteps.value.length >= MAX_STEPS_PER_ACTION) {
+      store.setStatusMessage(`Step cap reached (${MAX_STEPS_PER_ACTION}) — stop and save`)
+      return
+    }
+    recordedSteps.value = [...recordedSteps.value, step]
+    store.setStatusMessage(`Recorded step ${recordedSteps.value.length}: ${describeStep(step)}`)
+  } else {
+    store.setStatusMessage(`${describeStep(step)} done`)
+  }
+}
+
+function toggleRecording() {
+  if (recording.value) {
+    recording.value = false
+    return
+  }
+  recordedSteps.value = []
+  recording.value = true
+}
+
+function dropRecordedStep(index: number) {
+  recordedSteps.value = recordedSteps.value.filter((_, i) => i !== index)
+}
+
+function saveBatch() {
+  const entry = createNamedAction(
+    batchName.value || `Batch ${namedActions.value.length + 1}`,
+    recordedSteps.value,
+  )
+  if (!entry) {
+    store.setStatusMessage('Record steps first')
+    return
+  }
+  namedActions.value = [entry, ...namedActions.value].slice(0, MAX_ACTIONS)
+  recordedSteps.value = []
+  batchName.value = ''
+  recording.value = false
+  persistActions()
+  store.setStatusMessage(`Batch "${entry.name}" saved (${entry.steps.length} steps)`)
+}
+
+function replayAction(id: string) {
+  const a = namedActions.value.find((x) => x.id === id)
+  if (!a) return
+  const res = runActionSteps(a.steps, (s) => runStepOnEngine(s))
+  if (res.ok) {
+    store.setStatusMessage(`Batch "${a.name}" replayed (${res.ran} steps)`)
+  } else {
+    store.setStatusMessage(`Batch "${a.name}" stopped at step ${res.ran + 1}/${res.total}`)
+  }
+}
+
+function removeAction(id: string) {
+  namedActions.value = namedActions.value.filter((a) => a.id !== id)
+  persistActions()
 }
 
 const shortcuts = computed(() =>
