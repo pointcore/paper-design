@@ -30,6 +30,7 @@ import { inflateHistoryImages, slimHistoryImages } from './history-images'
 import * as artboards from './engine-artboards'
 import * as guides from './engine-guides'
 import * as layers from './engine-layers'
+import * as pathfinder from './engine-pathfinder'
 import {
   TRACE_MIN_DIM,
   cleanTraceOptions,
@@ -4031,83 +4032,9 @@ export class EditorEngine {
     return moved
   }
 
-  /**
-   * Combine unlocked selected paths with a Pathfinder boolean operation.
-   * Operands run back-to-front in document order: unite / intersect /
-   * exclude merge every operand, subtract removes each front operand from
-   * the back one. The result keeps the back operand style, replaces the
-   * originals and becomes the new selection. Consumed (empty) results are
-   * still recorded so Undo restores the operands. Returns false when fewer
-   * than two unlocked paths are selected or the operation fails.
-   */
+  /** See engine-pathfinder.ts. */
   booleanOperation(op: BooleanOperation): boolean {
-    const scope = this.scope
-    const paths = this.getSelection().filter(
-      (item) =>
-        !item.locked &&
-        item.parent &&
-        (item instanceof scope.Path || item instanceof scope.CompoundPath)
-    ) as paper.PathItem[]
-    if (paths.length < 2) return false
-    // Deterministic back-to-front operand order.
-    const ordered = paths
-      .slice()
-      .sort((a, b) => (a.isBelow(b) ? -1 : a.isAbove(b) ? 1 : 0))
-    const base = ordered[0]
-    const style = this.getStyleFromItem(base)
-    const parent = base.parent ?? this.getActiveLayer()
-
-    let working: paper.PathItem = base
-    let workingIsIntermediate = false
-    try {
-      for (let i = 1; i < ordered.length; i++) {
-        const next = ordered[i]
-        let combined: paper.PathItem
-        switch (op) {
-          case 'unite': combined = working.unite(next); break
-          case 'subtract': combined = working.subtract(next); break
-          case 'intersect': combined = working.intersect(next); break
-          case 'exclude': combined = working.exclude(next); break
-        }
-        if (workingIsIntermediate) working.remove()
-        working = combined
-        workingIsIntermediate = true
-      }
-    } catch {
-      if (workingIsIntermediate) working.remove()
-      return false
-    }
-
-    for (const operand of ordered) operand.remove()
-    const historyLabel =
-      op === 'unite' ? 'Unite' :
-      op === 'subtract' ? 'Subtract' :
-      op === 'intersect' ? 'Intersect' : 'Exclude'
-    if (this.isEmptyPathResult(working)) {
-      working.remove()
-      this.clearSelection()
-      this.pushHistory(historyLabel)
-      this.scope.view.update()
-      return true
-    }
-    parent.addChild(working)
-    working.data.id = this.genId()
-    working.data.isUserItem = true
-    this.applyStyleToItem(working, style)
-    this.clearSelection()
-    working.selected = true
-    this.syncSelectionToStore()
-    this.pushHistory(historyLabel)
-    this.scope.view.update()
-    return true
-  }
-
-  /** Whether a boolean result carries no visible geometry. */
-  private isEmptyPathResult(item: paper.PathItem): boolean {
-    const scope = this.scope
-    if (item instanceof scope.Path) return item.segments.length === 0
-    if (item instanceof scope.CompoundPath) return item.children.length === 0
-    return false
+    return pathfinder.booleanOperation(this, op)
   }
 
   /**
@@ -4387,132 +4314,9 @@ export class EditorEngine {
     return item.bounds.clone()
   }
 
-  /**
-   * Extended shaper ops composed from the four boolean primitives.
-   * - minusBack: top-most path minus everything below (keeps top style).
-   * - divide: exactly two paths -> intersect + remainders (keeps per-piece styles).
-   * - trim: exactly two paths -> back-minus-front plus the intact front.
-   * - outline: alias for Outline Stroke (one history entry).
-   * Returns false when the selection does not satisfy the op.
-   */
+  /** See engine-pathfinder.ts. */
   extendedBoolean(op: 'minusBack' | 'divide' | 'trim' | 'outline'): boolean {
-    if (op === 'outline') return this.outlineStroke()
-    const scope = this.scope
-    const paths = this.getSelection().filter(
-      (item) =>
-        !item.locked &&
-        item.parent &&
-        (item instanceof scope.Path || item instanceof scope.CompoundPath)
-    ) as paper.PathItem[]
-    if (paths.length < 2) return false
-    const ordered = paths
-      .slice()
-      .sort((a, b) => (a.isBelow(b) ? -1 : a.isAbove(b) ? 1 : 0))
-    const parent = ordered[0].parent ?? this.getActiveLayer()
-    const at = Math.max(0, parent.children.indexOf(ordered[0] as any))
-    try {
-      if (op === 'minusBack') {
-        const top = ordered[ordered.length - 1]
-        const style = this.getStyleFromItem(top)
-        let working = (top.clone({ insert: false }) as paper.PathItem)
-        for (let i = ordered.length - 2; i >= 0; i--) {
-          const cutter = ordered[i].clone({ insert: false }) as paper.PathItem
-          const next = (working.subtract(cutter, { insert: false } as any) as paper.PathItem)
-          working.remove()
-          cutter.remove()
-          working = next
-        }
-        for (const o of ordered) o.remove()
-        if (this.isEmptyPathResult(working)) {
-          working.remove()
-          this.clearSelection()
-          this.pushHistory('Minus Back')
-          this.scope.view.update()
-          return true
-        }
-        parent.insertChild(Math.min(at, parent.children.length), working as any)
-        working.data.id = this.genId()
-        working.data.isUserItem = true
-        this.applyStyleToItem(working, style)
-        this.clearSelection()
-        working.selected = true
-        this.syncSelectionToStore()
-        this.pushHistory('Minus Back')
-        this.scope.view.update()
-        return true
-      }
-      if (ordered.length !== 2) return false
-      const back = ordered[0]
-      const front = ordered[1]
-      const backStyle = this.getStyleFromItem(back)
-      const frontStyle = this.getStyleFromItem(front)
-      if (op === 'divide') {
-        const a = back.clone({ insert: false }) as paper.PathItem
-        const b = front.clone({ insert: false }) as paper.PathItem
-        const inter = (a.clone({ insert: false }) as paper.PathItem).intersect(b, { insert: false } as any) as paper.PathItem
-        const aMinus = (a.subtract(b, { insert: false } as any) as paper.PathItem)
-        const bMinus = ((front.clone({ insert: false }) as paper.PathItem).subtract(back.clone({ insert: false }) as paper.PathItem, { insert: false } as any) as paper.PathItem)
-        a.remove()
-        b.remove()
-        const pieces: Array<{ node: paper.PathItem; style: ReturnType<EditorEngine['getStyleFromItem']> }> = []
-        if (!this.isEmptyPathResult(aMinus)) pieces.push({ node: aMinus, style: backStyle })
-        else aMinus.remove()
-        if (!this.isEmptyPathResult(bMinus)) pieces.push({ node: bMinus, style: frontStyle })
-        else bMinus.remove()
-        if (!this.isEmptyPathResult(inter)) pieces.push({ node: inter, style: frontStyle })
-        else inter.remove()
-        back.remove()
-        front.remove()
-        if (pieces.length === 0) {
-          this.clearSelection()
-          this.pushHistory('Divide')
-          this.scope.view.update()
-          return true
-        }
-        this.clearSelection()
-        pieces.forEach(({ node, style }, i) => {
-          parent.insertChild(Math.min(at + i, parent.children.length), node as any)
-          node.data.id = this.genId()
-          node.data.isUserItem = true
-          this.applyStyleToItem(node, style)
-          node.selected = true
-        })
-        this.syncSelectionToStore()
-        this.pushHistory('Divide')
-        this.scope.view.update()
-        return true
-      }
-      // trim: back gets cut by front, front stays intact on top.
-      const cut = (back.clone({ insert: false }) as paper.PathItem).subtract(
-        front.clone({ insert: false }) as paper.PathItem, { insert: false } as any
-      ) as paper.PathItem
-      const frontCopy = front.clone({ insert: false }) as paper.PathItem
-      back.remove()
-      front.remove()
-      this.clearSelection()
-      let idx = 0
-      if (!this.isEmptyPathResult(cut)) {
-        parent.insertChild(Math.min(at, parent.children.length), cut as any)
-        cut.data.id = this.genId()
-        cut.data.isUserItem = true
-        this.applyStyleToItem(cut, backStyle)
-        cut.selected = true
-        idx++
-      } else {
-        cut.remove()
-      }
-      parent.insertChild(Math.min(at + idx, parent.children.length), frontCopy as any)
-      frontCopy.data.id = this.genId()
-      frontCopy.data.isUserItem = true
-      this.applyStyleToItem(frontCopy, frontStyle)
-      frontCopy.selected = true
-      this.syncSelectionToStore()
-      this.pushHistory('Trim')
-      this.scope.view.update()
-      return true
-    } catch {
-      return false
-    }
+    return pathfinder.extendedBoolean(this, op)
   }
 
   /**
