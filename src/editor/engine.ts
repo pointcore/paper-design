@@ -5085,6 +5085,7 @@ export class EditorEngine {
     const parent = items[0].parent ?? this.getActiveLayer()
     const raster = new this.scope.Raster({ source: url }) as paper.Raster
     parent.addChild(raster)
+    this.stampRasterIdentity(raster)
     raster.onLoad = () => {
       // exportRaster ran at 2x, so the bitmap lands at twice the selection
       // size (a data URL carries no DPI): scale it back into the original
@@ -5094,8 +5095,7 @@ export class EditorEngine {
         raster.scale(bounds.width / nb.width, bounds.height / nb.height)
       }
       raster.position = bounds.center.clone()
-      raster.data.id = this.genId()
-      raster.data.isUserItem = true
+      this.stampRasterIdentity(raster)
       for (const item of items) {
         try {
           item.remove()
@@ -6481,10 +6481,10 @@ export class EditorEngine {
   placeImage(dataUrl: string, at?: paper.Point): void {
     const raster = new this.scope.Raster({ source: dataUrl }) as paper.Raster
     this.getActiveLayer().addChild(raster)
+    this.stampRasterIdentity(raster)
     raster.onLoad = () => {
       raster.position = (at ?? this.scope.view.center).clone()
-      raster.data.id = this.genId()
-      raster.data.isUserItem = true
+      this.stampRasterIdentity(raster)
       this.selectItem(raster)
       this.pushHistory('Place Image')
       this.showStatus('Image placed')
@@ -6589,11 +6589,11 @@ export class EditorEngine {
     const opacity = (source as any).opacity
     const next = new scope.Raster({ source: url }) as paper.Raster
     parent.insertChild(Math.min(Math.max(at, 0), parent.children.length), next as any)
+    this.stampRasterIdentity(next)
     next.onLoad = () => {
       next.position = (source as paper.Raster).position.clone()
       next.opacity = opacity
-      next.data.id = this.genId()
-      next.data.isUserItem = true
+      this.stampRasterIdentity(next)
       this.carryImageStash(source as paper.Raster, next)
       try {
         ;(source as paper.Raster).remove()
@@ -6681,6 +6681,7 @@ export class EditorEngine {
       const opacity = (source as any).opacity
       const next = new scope.Raster({ source: url }) as paper.Raster
       parent.insertChild(Math.min(Math.max(at, 0), parent.children.length), next as any)
+      this.stampRasterIdentity(next)
       next.onLoad = () => {
         const nb = (next as any).bounds as paper.Rectangle | undefined
         if (nb && nb.width > 0 && nb.height > 0) {
@@ -6688,8 +6689,7 @@ export class EditorEngine {
         }
         next.position = bounds.center.clone()
         next.opacity = opacity
-        next.data.id = this.genId()
-        next.data.isUserItem = true
+        this.stampRasterIdentity(next)
         this.carryImageStash(source, next)
         try {
           source.remove()
@@ -6710,6 +6710,20 @@ export class EditorEngine {
       }
     }
     return targets.length
+  }
+
+  /**
+   * Stamp identity synchronously on a fresh raster. DataURL decode lands
+   * in onLoad on a later turn; snapshots, saves, selection syncs and the
+   * layer tree taken in between must see a legal placeholder instead of
+   * an id-less ghost. Keeps a pre-stamped id so mid-decode snapshots keep
+   * referring to the item that onLoad finalizes.
+   */
+  private stampRasterIdentity(raster: paper.Raster): void {
+    const data = (((raster as any).data ?? {}) as Record<string, unknown>)
+    if (typeof data.id !== 'string' || !data.id) data.id = this.genId()
+    data.isUserItem = true
+    ;(raster as any).data = data
   }
 
   /**
@@ -6786,6 +6800,7 @@ export class EditorEngine {
     const opacity = (source as any).opacity
     const next = new scope.Raster({ source: url }) as paper.Raster
     parent.insertChild(Math.min(Math.max(at, 0), parent.children.length), next as any)
+    this.stampRasterIdentity(next)
     next.onLoad = () => {
       const nb = (next as any).bounds as paper.Rectangle | undefined
       if (nb && nb.width > 0 && nb.height > 0) {
@@ -6793,8 +6808,7 @@ export class EditorEngine {
       }
       next.position = bounds.center.clone()
       next.opacity = opacity
-      next.data.id = this.genId()
-      next.data.isUserItem = true
+      this.stampRasterIdentity(next)
       // Keep the stash reachable under the new id so Reset Image stays
       // repeatable instead of burning itself on the first use.
       this.carryImageStash(source as paper.Raster, next)
@@ -6852,6 +6866,7 @@ export class EditorEngine {
     const opacity = (source as any).opacity
     const next = new scope.Raster({ source: dataUrl }) as paper.Raster
     parent.insertChild(Math.min(Math.max(at, 0), parent.children.length), next as any)
+    this.stampRasterIdentity(next)
     next.onLoad = () => {
       const nb = (next as any).bounds as paper.Rectangle | undefined
       if (nb && nb.width > 0 && nb.height > 0) {
@@ -6859,8 +6874,7 @@ export class EditorEngine {
       }
       next.position = bounds.center.clone()
       next.opacity = opacity
-      next.data.id = this.genId()
-      next.data.isUserItem = true
+      this.stampRasterIdentity(next)
       this.carryImageStash(source as paper.Raster, next)
       try {
         ;(source as paper.Raster).remove()
