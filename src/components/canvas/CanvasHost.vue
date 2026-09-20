@@ -71,6 +71,7 @@ import { registerAllControllers } from '../../editor/register-controllers'
 import { handleGlobalKeydown, handleGlobalKeyUp } from '../../editor/shortcuts'
 import { cursorForTool } from '../../editor/cursors'
 import { rulerUnitFactor } from '../../editor/geometry'
+import { LONG_PRESS_MS, LONG_PRESS_SLOP_PX, isLongPress, pinchTransform } from '../../editor/gestures'
 import {
   clearRecoverySnapshot,
   loadRecoverySnapshot,
@@ -106,6 +107,18 @@ let guideDragGhostLayer: paper.Layer | null = null
 let middlePanActive = false
 let middlePanLast: { x: number; y: number } | null = null
 let middlePanPrevCursor = ''
+
+// Touch state (D10): Paper maps single touches to mouse events itself, so
+// only the two-pointer frame and the stationary hold need app handling.
+let pinchIds: number[] = []
+let pinchLast: Array<{ x: number; y: number }> = []
+let longPressTimer: ReturnType<typeof setTimeout> | undefined
+let longPressAnchor: { x: number; y: number; at: number } | null = null
+let longPressMoved = 0
+// A touch long-press opens the menu while the finger is still down; the
+// compatibility click synthesized on lift would bubble to the document and
+// dismiss it again, so the first document click after a touch menu is eaten.
+let suppressMenuDismiss = false
 
 // Crash-recovery autosave state (debounced mirror of the dirty document)
 let recoveryTimer: ReturnType<typeof setTimeout> | undefined
@@ -168,6 +181,12 @@ onMounted(() => {
   // see it and the selection survives.
   window.addEventListener('keydown', onCaptureKeydown, true)
   document.addEventListener('click', onDocumentClick)
+  // Touch gestures (D10): single touches stay on Paper's mouse emulation;
+  // the canvas opts out of browser gesture takeover via `touch-action`.
+  canvasRef.value.addEventListener('touchstart', onTouchStart, { passive: true })
+  canvasRef.value.addEventListener('touchmove', onTouchMove, { passive: false })
+  canvasRef.value.addEventListener('touchend', onTouchEnd)
+  canvasRef.value.addEventListener('touchcancel', onTouchEnd)
 
   // Watch for view setting changes
   watch(
@@ -237,6 +256,14 @@ onUnmounted(() => {
   window.removeEventListener('mouseup', onGuideDragEnd)
   window.removeEventListener('mousemove', onMiddlePanMove)
   window.removeEventListener('mouseup', onMiddlePanEnd)
+  cancelLongPress()
+  pinchIds = []
+  if (canvasRef.value) {
+    canvasRef.value.removeEventListener('touchstart', onTouchStart)
+    canvasRef.value.removeEventListener('touchmove', onTouchMove)
+    canvasRef.value.removeEventListener('touchend', onTouchEnd)
+    canvasRef.value.removeEventListener('touchcancel', onTouchEnd)
+  }
   document.removeEventListener('visibilitychange', onVisibilityFlush)
   window.removeEventListener('beforeunload', onVisibilityFlush)
   if (recoveryTimer) {
@@ -245,6 +272,7 @@ onUnmounted(() => {
   }
   guideDragActive = false
   middlePanActive = false
+  suppressMenuDismiss = false
   if (engine) {
     if (engine.onViewChange) {
       engine.onViewChange = null
@@ -392,6 +420,99 @@ function onMiddlePanEnd() {
       canvasRef.value.style.cursor = cursorForTool(store.tool)
     }
   }
+}
+
+// ------------------------------------------------------------------
+// Touch gestures (D10)
+// ------------------------------------------------------------------
+
+function touchClient(t: Touch) {
+  return { x: t.clientX, y: t.clientY }
+}
+
+function cancelLongPress() {
+  if (longPressTimer) {
+    clearTimeout(longPressTimer)
+    longPressTimer = undefined
+  }
+  longPressAnchor = null
+  longPressMoved = 0
+}
+
+function findTouch(e: TouchEvent, id: number): Touch | null {
+  for (let i = 0; i < e.touches.length; i++) {
+    if (e.touches[i].identifier === id) return e.touches[i]
+  }
+  return null
+}
+
+function onTouchStart(e: TouchEvent) {
+  if (!engine || !canvasRef.value) return
+  if (e.touches.length === 2) {
+    // A second finger takes over: pinch replaces any hold tracking.
+    const a = e.touches[0]
+    const b = e.touches[1]
+    pinchIds = [a.identifier, b.identifier]
+    pinchLast = [touchClient(a), touchClient(b)]
+    cancelLongPress()
+  } else if (e.touches.length === 1) {
+    const t = e.touches[0]
+    cancelLongPress()
+    longPressAnchor = { x: t.clientX, y: t.clientY, at: performance.now() }
+    longPressMoved = 0
+    longPressTimer = setTimeout(() => {
+      longPressTimer = undefined
+      const anchor = longPressAnchor
+      // The hold may have ended or drifted while the timer was queued;
+      // re-check against the policy instead of trusting the delay.
+      if (anchor && isLongPress(performance.now() - anchor.at, longPressMoved)) {
+        suppressMenuDismiss = true
+        showMenuAt(anchor.x, anchor.y)
+      }
+      longPressAnchor = null
+      longPressMoved = 0
+    }, LONG_PRESS_MS)
+  } else {
+    cancelLongPress()
+    pinchIds = []
+  }
+}
+
+function onTouchMove(e: TouchEvent) {
+  if (!engine || !canvasRef.value) return
+  if (e.touches.length === 2 && pinchIds.length === 2) {
+    // Non-passive: keep the page (and browser pinch-zoom) out of the app gesture.
+    e.preventDefault()
+    const a = findTouch(e, pinchIds[0])
+    const b = findTouch(e, pinchIds[1])
+    if (!a || !b) return
+    const cur = [touchClient(a), touchClient(b)]
+    const t = pinchTransform(pinchLast[0], pinchLast[1], cur[0], cur[1])
+    const rect = canvasRef.value.getBoundingClientRect()
+    const midX = (cur[0].x + cur[1].x) / 2 - rect.left
+    const midY = (cur[0].y + cur[1].y) / 2 - rect.top
+    if (t.scale !== 1) engine.zoomAt(t.scale, midX, midY)
+    if (t.panX !== 0 || t.panY !== 0) {
+      const zoom = engine.scope.view.zoom || 1
+      engine.panBy(t.panX / zoom, t.panY / zoom)
+    }
+    // Twist is measured but not applied: the canvas has no rotation
+    // transform, and rotating artwork instead would corrupt data.
+    pinchLast = cur
+    engine.scope.view.update()
+  } else if (e.touches.length === 1 && longPressAnchor) {
+    const t = e.touches[0]
+    longPressMoved = Math.max(
+      longPressMoved,
+      Math.hypot(t.clientX - longPressAnchor.x, t.clientY - longPressAnchor.y)
+    )
+    if (longPressMoved > LONG_PRESS_SLOP_PX) cancelLongPress()
+  }
+}
+
+function onTouchEnd(e: TouchEvent) {
+  if (e.touches.length < 2) pinchIds = []
+  if (e.touches.length === 0) cancelLongPress()
 }
 
 /** Space-pan release handler (restores the parked tool). */
@@ -548,6 +669,12 @@ function unitLabel(doc: number): string {
 }
 
 function onDocumentClick() {
+  // Eats the compatibility click from a touch long-press lift so the menu
+  // it just opened survives; every later click dismisses normally.
+  if (suppressMenuDismiss) {
+    suppressMenuDismiss = false
+    return
+  }
   contextMenu.value.visible = false
 }
 
@@ -574,13 +701,18 @@ function exitIsolation() {
 }
 
 function onContextMenu(e: MouseEvent) {
+  showMenuAt(e.clientX, e.clientY)
+}
+
+/** Open the canvas menu at viewport coords (right-click and long-press share this). */
+function showMenuAt(clientX: number, clientY: number) {
   // Clamp inside the viewport so edge clicks keep every item clickable.
   const MENU_W = 200
   const MENU_H = 520
   contextMenu.value = {
     visible: true,
-    x: Math.min(e.clientX, window.innerWidth - MENU_W),
-    y: Math.min(e.clientY, window.innerHeight - MENU_H),
+    x: Math.min(clientX, window.innerWidth - MENU_W),
+    y: Math.min(clientY, window.innerHeight - MENU_H),
   }
 }
 
@@ -1024,6 +1156,9 @@ function removeGuideGhost() {
   left: 0;
   cursor: default;
   display: block;
+  /* D10: two-finger gestures belong to the app (pinch zoom/pan); single
+     touches still reach Paper through compatibility mouse events. */
+  touch-action: none;
 }
 
 .ruler {
