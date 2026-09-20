@@ -40,6 +40,7 @@ import { useEditorStore } from '../editor/store'
 import type { EditorEngine } from '../editor/engine'
 import type { ToolName } from '../editor/types'
 import { filterPalette, toolEntries, commandEntries, type PaletteItem } from '../editor/command-palette'
+import { pluginApi } from '../editor/plugin-api'
 import { TOOL_SHORTCUTS } from '../editor/shortcuts'
 
 const store = useEditorStore()
@@ -105,7 +106,13 @@ const allItems = computed<PaletteItem[]>(() => {
     category: 'Layer',
     keywords: `layer ${l.name ?? ''}`,
   }))
-  return [...tools, ...cmds, ...boards, ...layers]
+  const plugins: PaletteItem[] = pluginApi.getCommands().map((c) => ({
+    id: `plugin:${c.id}`,
+    title: c.title,
+    category: 'Plugin',
+    keywords: `plugin ${c.id}`,
+  }))
+  return [...tools, ...cmds, ...boards, ...layers, ...plugins]
 })
 
 const filtered = computed(() => filterPalette(allItems.value, query.value, 12))
@@ -123,6 +130,13 @@ function runActive() {
 function run(item: PaletteItem) {
   const engine = engineRef?.value
   const [kind, rest] = [item.id.split(':')[0], item.id.slice(item.id.indexOf(':') + 1)]
+  // Plugin runs are async and self-reporting; the palette closes at once.
+  if (kind === 'plugin') {
+    if (engine) void pluginApi.run(engine, store, rest)
+    else store.setStatusMessage('Plugin host not ready')
+    close()
+    return
+  }
   try {
     if (kind === 'tool') {
       const tool = rest as ToolName

@@ -49,6 +49,8 @@ import { computed, ref, provide, onMounted, onUnmounted, defineAsyncComponent } 
 import { storeToRefs } from 'pinia'
 import { useEditorStore } from './editor/store'
 import { rulerUnitFactor } from './editor/geometry'
+import { pluginApi } from './editor/plugin-api'
+import { registerSampleCommands } from './editor/plugin-sample'
 import type { EditorEngine } from './editor/engine'
 import TopBar from './components/menus/TopBar.vue'
 import ControlBar from './components/menus/ControlBar.vue'
@@ -63,6 +65,9 @@ const CommandPalette = defineAsyncComponent(() => import('./components/CommandPa
 
 const store = useEditorStore()
 const { tool } = storeToRefs(store)
+
+// Register the bundled sample plugin once (idempotent: duplicates rejected).
+registerSampleCommands(pluginApi)
 
 const engineRef = ref<EditorEngine | null>(null)
 provide('engine', engineRef)
