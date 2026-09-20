@@ -25,6 +25,7 @@ import {
 } from './cdr/cdr-to-svg'
 import { yieldToUI, type ProgressReport } from './busy'
 import { alignToPixel } from './pixel'
+import { inflateHistoryImages, slimHistoryImages } from './history-images'
 
 /** Identifier stamped into every saved project file. */
 const PROJECT_FILE_APP = 'vue-vector-editor'
@@ -2526,8 +2527,21 @@ export class EditorEngine {
   // ===== History =====
 
   snapshotProject(): string {
-    return this.withCleanScene(() => this.project.exportJSON({ asString: true }))
+    // History diet (C5): inline bitmap pixels are replaced by sidecar
+    // tokens so 100 snapshots share one copy of each distinct image.
+    // Project files (snapshotProjectObject) stay self-contained.
+    const obj = this.withCleanScene(
+      () => (this.project as any).exportJSON({ asString: false }) as unknown,
+    )
+    return JSON.stringify(slimHistoryImages(obj, this.historyImageStore))
   }
+
+  /**
+   * Session sidecar for history-snapshot bitmaps: content-hash -> dataURL.
+   * Never pruned within a session (distinct images only, so it stays
+   * bounded); snapshots reference it by token, files embed pixels directly.
+   */
+  private historyImageStore = new Map<string, string>()
 
   /** Snapshot as a plain object for v2 project files (no double encoding). */
   snapshotProjectObject(): Record<string, unknown> {
@@ -2601,7 +2615,11 @@ export class EditorEngine {
     // duplicate the whole document.
     this.clearIsolationState()
     this.project.clear()
-    this.project.importJSON(snapshot as string)
+    // History snapshots carry image tokens (see snapshotProject): inflate
+    // them from the session sidecar. Full-fidelity payloads (project files,
+    // pre-diet snapshots) pass through untouched.
+    const raw = typeof snapshot === 'string' ? (JSON.parse(snapshot) as unknown) : snapshot
+    this.project.importJSON(inflateHistoryImages(raw, this.historyImageStore) as string)
     if (meta) {
       const page = meta.pageSize
       if (page && Number.isFinite(page.width) && Number.isFinite(page.height) && page.width > 0 && page.height > 0) {
@@ -2991,6 +3009,9 @@ export class EditorEngine {
     this.store.setHistory([], -1)
     // Bitmap stash is keyed by item id and belongs to the outgoing document.
     this.imageStash.clear()
+    // Same for the history image sidecar: the new baseline snapshot
+    // re-registers the live document's pixels on the pushHistory below.
+    this.historyImageStore.clear()
     this.pushHistory(name)
     this.markSaved()
   }
