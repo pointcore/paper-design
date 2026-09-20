@@ -98,7 +98,8 @@
 
 <script setup lang="ts">
 import { computed, ref, watch, inject, onMounted, type Ref } from 'vue'
-import JSZip from 'jszip'
+// JSZip loads on demand with the export (keeps this async chunk lean until
+// a multi-scale ZIP is actually requested).
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
 import type { RasterExportArea, RasterExportFormat, WorkspacePreset } from '../../editor/types'
@@ -207,7 +208,7 @@ async function exportAll(scales: number[] = [1, 2, 3]) {
     store.setStatusMessage('Nothing selected to export')
     return
   }
-  const zip = new JSZip()
+  const zip = new (await import('jszip')).default()
   let exported = 0
   for (const s of scales) {
     const url = e.exportRaster({ format: format.value, scale: s, area: area.value })

@@ -1050,7 +1050,8 @@
 <script setup lang="ts">
 import { ref, reactive, computed, inject, watch, onMounted, type Ref } from 'vue'
 import { QuestionFilled, Check } from '@element-plus/icons-vue'
-import JSZip from 'jszip'
+// JSZip stays out of the main bundle: multi-board exports load it on demand
+// (same pattern as the jspdf/svg2pdf dynamic imports below).
 import AppDialog from '../ui/AppDialog.vue'
 import { uniqueSelectionName, pruneSelectionIds } from '../../editor/selection/saved-selection'
 import { clearRecentProjects, listRecentProjects, loadRecentProjectText } from '../../editor/recent-files'
@@ -1421,7 +1422,7 @@ async function onBoardsExportConfirm() {
   } catch { /* private mode */ }
   const previousActive = store.activeArtboardId
   const useZip = boards.length > 1
-  const zip = useZip ? new JSZip() : null
+  const zip = useZip ? new (await import('jszip')).default() : null
   try {
     if (boardsForm.format === 'pdf') {
       const { jsPDF } = await import('jspdf')
@@ -2307,7 +2308,7 @@ async function onExportBoardsPng() {
     return
   }
   const previousActive = store.activeArtboardId
-  const zip = boards.length > 1 ? new JSZip() : null
+  const zip = boards.length > 1 ? new (await import('jszip')).default() : null
   try {
     let painted = 0
     let skipped = 0
