@@ -249,7 +249,7 @@
               <el-input-number v-model="miterLimit" :min="1" :max="100" size="small" controls-position="right" @change="onStrokeAppearanceChange" />
               <span class="prop-label-sm">Dash</span>
               <el-select v-model="dashPreset" size="small" class="flex-ctl" placeholder="Preset" @change="onDashPreset">
-                <el-option v-for="d in dashPresets" :key="d.value" :label="d.label" :value="d.value" />
+                <el-option v-for="d in DASH_PRESETS" :key="d.value" :label="d.label" :value="d.value" />
               </el-select>
               <el-input-number v-model="dashOffset" size="small" controls-position="right" title="Dash offset" style="max-width: 76px" @change="onDashOffsetChange" />
             </div>
@@ -269,7 +269,7 @@
             <div class="prop-row">
               <span class="prop-label-sm">Dash</span>
               <el-select v-model="dashPreset" size="small" class="flex-ctl" placeholder="Preset" @change="onDashPreset">
-                <el-option v-for="d in dashPresets" :key="d.value" :label="d.label" :value="d.value" />
+                <el-option v-for="d in DASH_PRESETS" :key="d.value" :label="d.label" :value="d.value" />
               </el-select>
               <el-input-number v-model="dashOffset" size="small" controls-position="right" title="Dash offset" style="max-width: 76px" @change="onDashOffsetChange" />
             </div>
@@ -531,6 +531,7 @@ import {
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
 import { cssToCmykString, isOutOfCmykGamut } from '../../editor/color'
+import { DASH_PRESETS, cleanTextStylePresets, parseDashPattern } from '../../editor/property-helpers'
 import type { AlignMode, BooleanOperation, DistributeAxis, FillRule, GradientState, LineCap, LineJoin, PatternFillState, ReferencePoint, RulerUnit, TextAlign, CharRun } from '../../editor/types'
 
 const store = useEditorStore()
@@ -1361,19 +1362,7 @@ onMounted(() => {
   try {
     const raw = localStorage.getItem('vve.textstyles')
     if (!raw) return
-    const list = JSON.parse(raw) as Array<{ id?: unknown; name?: unknown; char?: unknown; paragraph?: unknown }>
-    if (!Array.isArray(list)) return
-    store.setTextStylePresets(
-      list
-        .filter((p) => p && typeof p === 'object' && typeof p.char === 'object' && p.char !== null && typeof p.paragraph === 'object' && p.paragraph !== null)
-        .slice(0, 24)
-        .map((p, i) => ({
-          id: typeof p.id === 'string' && p.id ? p.id : `text-restored-${i}`,
-          name: typeof p.name === 'string' && p.name ? (p.name as string).slice(0, 40) : `Text ${i + 1}`,
-          char: p.char as import('../../editor/types').CharStyle,
-          paragraph: p.paragraph as import('../../editor/types').ParagraphStyle,
-        })),
-    )
+    store.setTextStylePresets(cleanTextStylePresets(JSON.parse(raw)))
   } catch { /* corrupt storage: defaults stand */ }
 })
 
@@ -1698,14 +1687,6 @@ function onStrokeAppearanceChange() {
   e.pushHistory('Change Stroke Style')
 }
 
-/** Parse a dash pattern like "4 2" into lengths (empty means solid). */
-function parseDashPattern(text: string): number[] {
-  return text
-    .split(/[\s,]+/)
-    .map((part) => Number(part))
-    .filter((n) => Number.isFinite(n) && n >= 0)
-}
-
 function onDashChange() {
   const e = getEngine()
   if (!e) return
@@ -1718,13 +1699,6 @@ function onDashChange() {
   e.pushHistory('Change Dash Pattern')
 }
 
-const dashPresets = [
-  { value: '', label: 'Solid' },
-  { value: '4 2', label: 'Dashed' },
-  { value: '1 2', label: 'Dotted' },
-  { value: '6 2 1 2', label: 'Dash-Dot' },
-  { value: '8 3 2 3', label: 'Long Dash' },
-]
 const dashPreset = ref('')
 
 function onDashPreset(val: string) {
