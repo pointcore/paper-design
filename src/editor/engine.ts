@@ -29,6 +29,7 @@ import { MAX_MERGE_ROWS, mergeTemplate } from './data-merge'
 import { inflateHistoryImages, slimHistoryImages } from './history-images'
 import * as artboards from './engine-artboards'
 import * as guides from './engine-guides'
+import * as layers from './engine-layers'
 import {
   TRACE_MIN_DIM,
   cleanTraceOptions,
@@ -553,174 +554,46 @@ export class EditorEngine {
     layer.name = 'Layer 1'
     layer.data.isUserLayer = true
     layer.data.layerId = this.genId()
-    this.parkUserLayer(layer)
+    layers.parkUserLayer(this, layer)
     layer.activate()
     this.syncLayersToStore()
     this.store.setActiveLayer(layer.data.layerId as string)
     return layer
   }
 
+  /** See engine-layers.ts. */
   createLayer(name?: string): paper.Layer {
-    const layer = new this.scope.Layer()
-    layer.name = (name ?? '').trim() || this.nextUserLayerName()
-    layer.data.isUserLayer = true
-    layer.data.layerId = this.genId()
-    // `new Layer()` appends at the very top of the stack (above guides and
-    // overlay chrome, which would bury interaction feedback). Park the layer
-    // on top of the user band instead.
-    this.parkUserLayer(layer)
-    layer.activate()
-    this.syncLayersToStore()
-    this.pushHistory('New Layer')
-    this.scope.view.update()
-    return layer
+    return layers.createLayer(this, name)
   }
 
-  /** First unused "Layer N" name across user layers. */
-  private nextUserLayerName(): string {
-    const users = this.project.layers.filter((l) => (l.data as any)?.isUserLayer)
-    const names = new Set(users.map((l) => l.name))
-    let n = users.length + 1
-    while (names.has(`Layer ${n}`)) n++
-    return `Layer ${n}`
-  }
-
-  /**
-   * Keep a newborn user layer inside the user band: directly above the
-   * topmost user layer (project order is bottom-first), or below the
-   * first chrome layer when no user band exists yet.
-   */
-  private parkUserLayer(layer: paper.Layer): void {    const users = this.project.layers.filter(
-      (l) => (l.data as any)?.isUserLayer && l !== layer
-    )
-    if (users.length > 0) {
-      layer.insertAbove(users[users.length - 1])
-      return
-    }
-    const chrome = this.project.layers.find((l) => !(l.data as any)?.isUserLayer && l !== layer)
-    if (chrome) layer.insertBelow(chrome)
-  }
-
-  /**
-   * Duplicate a user layer with its artwork right above the source. Every
-   * document id in the copy is restamped so selection and history never
-   * confuse originals with clones.
-   */
+  /** See engine-layers.ts. */
   duplicateLayer(layerId: string): void {
-    const source = this.project.layers.find((l) => (l.data as any)?.layerId === layerId)
-    if (!source || !(source.data as any)?.isUserLayer) return
-    const clone = source.clone({ insert: false }) as paper.Layer
-    clone.data.layerId = this.genId()
-    clone.name = `${source.name || 'Layer'} copy`
-    this.restampCloneTree(clone)
-    clone.insertAbove(source)
-    clone.activate()
-    this.syncLayersToStore()
-    this.store.setActiveLayer(clone.data.layerId as string)
-    this.pushHistory('Duplicate Layer')
-    this.scope.view.update()
+    layers.duplicateLayer(this, layerId)
   }
 
+  /** See engine-layers.ts. */
   deleteLayer(layerId: string): boolean {
-    const layer = this.project.layers.find((l) => (l.data as any)?.layerId === layerId)
-    if (!layer) return false
-    layer.remove()
-    this.clearSelection()
-    this.syncLayersToStore()
-    this.pointActiveLayerAtRestoredStack()
-    this.pushHistory('Delete Layer')
-    this.scope.view.update()
-    return true
+    return layers.deleteLayer(this, layerId)
   }
 
-  /**
-   * Layer visibility / lock / rename with store sync and history (the panel
-   * used to write these straight through, leaving them un-undoable and
-   * overwritable by the next undo). Labels reuse the object-op names so the
-   * entries stay frame-safe. Each returns false when nothing changed.
-   */
+  /** See engine-layers.ts. */
   setUserLayerVisible(layerId: string, visible: boolean): boolean {
-    const layer = this.project.layers.find((l) => (l.data as any)?.layerId === layerId)
-    if (!layer || layer.visible === visible) return false
-    layer.visible = visible
-    this.store.updateLayer(layerId, { visible })
-    this.pushHistory(visible ? 'Show' : 'Hide')
-    this.scope.view.update()
-    return true
+    return layers.setUserLayerVisible(this, layerId, visible)
   }
 
+  /** See engine-layers.ts. */
   setUserLayerLocked(layerId: string, locked: boolean): boolean {
-    const layer = this.project.layers.find((l) => (l.data as any)?.layerId === layerId)
-    if (!layer || layer.locked === locked) return false
-    layer.locked = locked
-    this.store.updateLayer(layerId, { locked })
-    this.pushHistory(locked ? 'Lock' : 'Unlock')
-    this.scope.view.update()
-    return true
+    return layers.setUserLayerLocked(this, layerId, locked)
   }
 
+  /** See engine-layers.ts. */
   renameUserLayer(layerId: string, name: string): boolean {
-    const next = (name ?? '').trim() || 'Layer'
-    const layer = this.project.layers.find((l) => (l.data as any)?.layerId === layerId)
-    if (!layer || layer.name === next) return false
-    layer.name = next
-    this.store.updateLayer(layerId, { name: next })
-    this.pushHistory('Rename')
-    this.scope.view.update()
-    return true
+    return layers.renameUserLayer(this, layerId, name)
   }
 
-  /**
-   * Solo a user layer (AI Alt-click eye/lock parity): visibility solos
-   * toggle (hide the rest, or restore all when already solo); lock solos
-   * one-way (Unlock All restores). Returns false for unknown layers.
-   */
+  /** See engine-layers.ts. */
   soloUserLayer(layerId: string, mode: 'visible' | 'locked'): boolean {
-    const users = this.project.layers.filter((l) => (l.data as any)?.isUserLayer)
-    const target = users.find((l) => (l.data as any)?.layerId === layerId)
-    if (!target) return false
-    if (mode === 'locked') {
-      let changed = false
-      for (const layer of users) {
-        const id = (layer.data as any)?.layerId as string
-        if (id === layerId || layer.locked) continue
-        layer.locked = true
-        this.store.updateLayer(id, { locked: true })
-        changed = true
-      }
-      if (!changed) return false
-      this.pushHistory('Lock Others')
-      this.scope.view.update()
-      return true
-    }
-    const others = users.filter((l) => (l.data as any)?.layerId !== layerId)
-    if (others.length > 0 && others.every((l) => !l.visible)) {
-      for (const layer of users) {
-        const id = (layer.data as any)?.layerId as string
-        if (layer.visible) continue
-        layer.visible = true
-        this.store.updateLayer(id, { visible: true })
-      }
-      if (!target.visible) {
-        target.visible = true
-        this.store.updateLayer(layerId, { visible: true })
-      }
-      this.pushHistory('Show All Layers')
-    } else {
-      for (const layer of others) {
-        const id = (layer.data as any)?.layerId as string
-        if (!layer.visible) continue
-        layer.visible = false
-        this.store.updateLayer(id, { visible: false })
-      }
-      if (!target.visible) {
-        target.visible = true
-        this.store.updateLayer(layerId, { visible: true })
-      }
-      this.pushHistory('Solo Layer')
-    }
-    this.scope.view.update()
-    return true
+    return layers.soloUserLayer(this, layerId, mode)
   }
 
   getOverlayLayer(): paper.Layer {
@@ -2679,16 +2552,7 @@ export class EditorEngine {
    * exist; fall back to the topmost user layer in that case.
    */
   private pointActiveLayerAtRestoredStack(): void {
-    const activeId = this.store.activeLayerId
-    const stillExists =
-      !!activeId &&
-      this.project.layers.some((l) => (l.data as any)?.layerId === activeId)
-    if (stillExists) return
-    const userLayers = this.project.layers.filter((l) => (l.data as any)?.isUserLayer)
-    const last = userLayers[userLayers.length - 1]
-    if (last) {
-      this.store.setActiveLayer((last.data as any)?.layerId as string)
-    }
+    layers.pointActiveLayerAtRestoredStack(this)
   }
 
   /** Drop the whole history stack and start over with a single entry. */
@@ -2707,64 +2571,19 @@ export class EditorEngine {
     this.markSaved()
   }
 
-  /**
-   * Move a user layer to a position in the user band (0 = bottom).
-   * Only permutes user layers via pairwise stacking, so the grid, guide
-   * and overlay layers keep their slots. Callers mirror the store order.
-   */
+  /** See engine-layers.ts. */
   moveUserLayer(layerId: string, toUserIndex: number): boolean {
-    const users = this.project.layers.filter((l) => (l.data as any)?.isUserLayer)
-    const from = users.findIndex((l) => (l.data as any)?.layerId === layerId)
-    if (from < 0) return false
-    const clamped = Math.min(users.length - 1, Math.max(0, toUserIndex))
-    if (clamped === from) return false
-    const [moved] = users.splice(from, 1)
-    users.splice(clamped, 0, moved)
-    for (let i = 1; i < users.length; i++) {
-      users[i].insertAbove(users[i - 1])
-    }
-    this.pushHistory('Rearrange')
-    this.scope.view.update()
-    return true
+    return layers.moveUserLayer(this, layerId, toUserIndex)
   }
 
-  /** Set the active user layer opacity (store stays in sync, one history entry). */
+  /** See engine-layers.ts. */
   setActiveLayerOpacity(opacity: number): void {
-    const layer = this.getActiveLayer()
-    if (!layer) return
-    const clamped = Math.min(1, Math.max(0, opacity))
-    if (layer.opacity === clamped) return
-    layer.opacity = clamped
-    const id = (layer.data as any)?.layerId as string | undefined
-    if (id) this.store.updateLayer(id, { opacity: clamped })
-    this.pushHistory('Layer Opacity')
-    this.scope.view.update()
+    layers.setActiveLayerOpacity(this, opacity)
   }
 
-  /**
-   * Merge the user layer below the active one into it. Donor children land
-   * underneath in order; the emptied donor is removed. Returns false when
-   * the active layer is already the bottom one.
-   */
+  /** See engine-layers.ts. */
   mergeLayerBelow(): boolean {
-    const users = this.project.layers.filter((l) => (l.data as any)?.isUserLayer)
-    const at = users.findIndex((l) => (l.data as any)?.layerId === this.store.activeLayerId)
-    if (at <= 0) return false
-    const target = users[at]
-    const donor = users[at - 1]
-    const wasLocked = target.locked
-    target.locked = false
-    let index = 0
-    for (const child of donor.children.slice()) {
-      target.insertChild(index, child as paper.Item)
-      index++
-    }
-    donor.remove()
-    target.locked = wasLocked
-    this.syncLayersToStore()
-    this.pushHistory('Merge Layer Below')
-    this.scope.view.update()
-    return true
+    return layers.mergeLayerBelow(this)
   }
 
   // ===== Layer object tree (AI-style nested hierarchy) =====
@@ -3228,10 +3047,10 @@ export class EditorEngine {
       .sort((a, b) => (a.isBelow(b) ? -1 : a.isAbove(b) ? 1 : 0))
     const layer = new this.scope.Layer()
     const id = this.genId()
-    layer.name = this.nextUserLayerName()
+    layer.name = layers.nextUserLayerName(this)
     layer.data.isUserLayer = true
     layer.data.layerId = id
-    this.parkUserLayer(layer)
+    layers.parkUserLayer(this, layer)
     for (const node of ordered) layer.addChild(node)
     layer.activate()
     this.syncLayersToStore()
@@ -3275,10 +3094,10 @@ export class EditorEngine {
         const layer = new scope.Layer()
         const id = this.genId()
         const label = ((kid as any).name as string | undefined)?.trim()
-        layer.name = label || this.nextUserLayerName()
+        layer.name = label || layers.nextUserLayerName(this)
         layer.data.isUserLayer = true
         layer.data.layerId = id
-        this.parkUserLayer(layer)
+        layers.parkUserLayer(this, layer)
         layer.addChild(kid)
         released.push(kid)
         dissolved = true
