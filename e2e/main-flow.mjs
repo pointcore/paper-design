@@ -208,6 +208,39 @@ check(
   `${exported.chars} chars`
 )
 
+/* ---------- 8. compound: make keeps leaves, release restores them ---------- */
+const compound = await page.evaluate(() => {
+  const E = window.__engine__
+  const S = E.scope
+  const L = E.getActiveLayer()
+  const c = S.view.viewToProject(S.view.center)
+  const ids = []
+  for (const dx of [-60, 60]) {
+    const p = new S.Path.Rectangle({
+      from: new S.Point(c.x + dx - 40, c.y - 40),
+      to: new S.Point(c.x + dx + 40, c.y + 40),
+    })
+    p.fillColor = new S.Color('#3366cc')
+    p.data.id = E.genId()
+    p.data.isUserItem = true
+    L.addChild(p)
+    ids.push(p.data.id)
+  }
+  E.selectByIds(ids)
+  const made = E.makeCompoundPath()
+  const sel = E.getSelection()
+  const kids = sel.length === 1 && sel[0] instanceof S.CompoundPath ? sel[0].children.length : -1
+  const released = E.releaseCompoundPath()
+  return { made, kids, released }
+})
+snap = await snapshot()
+check('compound: make keeps both leaves', compound.made && compound.kids === 2, JSON.stringify(compound))
+check(
+  'compound: release restores plain paths',
+  compound.released && snap.paths === 4 && snap.texts === 1,
+  JSON.stringify(snap)
+)
+
 await browser.close()
 
 const failed = results.filter((r) => !r.ok)

@@ -43,7 +43,13 @@ export function makeCompoundPath(e: EditorEngine): boolean {
   const at = rawAt < 0 ? parent.children.length : rawAt
   const compound = new scope.CompoundPath({ insert: false }) as paper.CompoundPath
   for (const leaf of leaves) compound.addChild(leaf)
-  for (const operand of ordered) operand.remove()
+  // Plain leaves already reparented above — only the emptied source
+  // compounds still need removal. Removing a leaf here would detach it
+  // from the new compound and lose the artwork (the old code did exactly
+  // that, so make+release destroyed the selection).
+  for (const operand of ordered) {
+    if (operand instanceof scope.CompoundPath) operand.remove()
+  }
   parent.insertChild(Math.min(at, parent.children.length), compound)
   compound.data.id = e.genId()
   compound.data.isUserItem = true
