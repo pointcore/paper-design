@@ -28,6 +28,7 @@ import { alignToPixel } from './pixel'
 import { MAX_MERGE_ROWS, mergeTemplate } from './data-merge'
 import { inflateHistoryImages, slimHistoryImages } from './history-images'
 import * as artboards from './engine-artboards'
+import * as guides from './engine-guides'
 import {
   TRACE_MIN_DIM,
   cleanTraceOptions,
@@ -779,38 +780,24 @@ export class EditorEngine {
     return this.guideLayer
   }
 
-  /** Whether an item is a guide line. */
+  /** See engine-guides.ts. */
   isGuide(item: paper.Item): boolean {
-    return !!(item && (item.data as any)?.isGuide)
+    return guides.isGuide(this, item)
   }
 
-  /** All guide items currently on the guide layer. */
+  /** See engine-guides.ts. */
   getGuides(): paper.Path[] {
-    const layer = this.getGuideLayer()
-    const out: paper.Path[] = []
-    if (!layer) return out
-    layer.children.forEach((child: any) => {
-      if ((child as any).data?.isGuide) out.push(child as paper.Path)
-    })
-    return out
+    return guides.getGuides(this)
   }
 
-  /** Guide orientation of a guide item, or null if it is not a guide. */
+  /** See engine-guides.ts. */
   getGuideOrientation(item: paper.Item): GuideOrientation | null {
-    if (!this.isGuide(item)) return null
-    return (item.data as any)?.guideOrientation as GuideOrientation
+    return guides.getGuideOrientation(this, item)
   }
 
-  /** Document coordinate along the guide's free axis. */
+  /** See engine-guides.ts. */
   getGuidePosition(item: paper.Item): number {
-    const orientation = this.getGuideOrientation(item)
-    if (!orientation) return 0
-    const segs = (item as paper.Path).segments
-    if (!segs || segs.length === 0) return 0
-    if (orientation === 'vertical') {
-      return segs[0].point.x
-    }
-    return segs[0].point.y
+    return guides.getGuidePosition(this, item)
   }
 
   /** Keep guide strokes at hairline width across zooms (selected = 2px). */
@@ -841,150 +828,44 @@ export class EditorEngine {
     }
   }
 
-  /** Move a guide to a new document position along its free axis. */
+  /** See engine-guides.ts. */
   moveGuide(item: paper.Item, position: number) {
-    if (!this.isGuide(item) || !(item instanceof this.scope.Path)) return
-    const path = item as paper.Path
-    const orientation = this.getGuideOrientation(item)
-    const s0 = path.segments[0]
-    const s1 = path.segments[path.segments.length - 1]
-    if (!s0 || !s1) return
-
-    const layer = this.getGuideLayer()
-    const wasLocked = layer ? layer.locked : false
-    if (layer) layer.locked = false
-    try {
-      if (orientation === 'horizontal') {
-        // Horizontal guide: line is (a, y) - (b, y); update y.
-        ;(s0 as any).point.y = position
-        ;(s1 as any).point.y = position
-      } else if (orientation === 'vertical') {
-        ;(s0 as any).point.x = position
-        ;(s1 as any).point.x = position
-      }
-    } finally {
-      if (layer) layer.locked = wasLocked
-      this.scope.view.update()
-    }
+    guides.moveGuide(this, item, position)
   }
 
-  /**
-   * Create a guide line on the guide layer.
-   * Vertical guides sit at a document X and run vertically;
-   * horizontal guides sit at a document Y and run horizontally.
-   * Guides span a huge document range so they stay visible through
-   * pan/zoom operations.
-   */
+  /** See engine-guides.ts. */
   createGuide(position: number, orientation: GuideOrientation): paper.Path | null {
-    const scope = this.scope
-    const layer = this.getGuideLayer()
-    if (!layer) return null
-
-    const span = 1e6 // document units on each side
-    const p1 = new scope.Point(-span, position)
-    const p2 = new scope.Point(span, position)
-    if (orientation === 'vertical') {
-      p1.x = position
-      p1.y = -span
-      p2.x = position
-      p2.y = span
-    }
-
-    const line = new scope.Path.Line(p1, p2) as paper.Path
-    line.data.isGuide = true
-    line.data.guideId = this.genId()
-    line.data.guideOrientation = orientation
-    line.strokeColor = new scope.Color('#00bcd4') // cyan
-    line.strokeWidth = 1 / this.zoom
-    line.strokeCap = 'butt'
-    line.locked = false
-    line.data.isUserLayer = false
-
-    // Unlock temporarily so we can add to the locked guide layer
-    layer.locked = false
-    try {
-      layer.addChild(line)
-    } finally {
-      layer.locked = true
-    }
-
-    this.scope.view.update()
-    return line
+    return guides.createGuide(this, position, orientation)
   }
 
-  /** Delete a guide item from the guide layer. */
+  /** See engine-guides.ts. */
   deleteGuide(guide: paper.Path) {
-    const layer = this.getGuideLayer()
-    if (!layer) return
-    layer.locked = false
-    try {
-      guide.remove()
-    } finally {
-      layer.locked = true
-      this.scope.view.update()
-    }
+    guides.deleteGuide(this, guide)
   }
 
-  /** Every guide as plain data (id / orientation / position), top-first. */
+  /** See engine-guides.ts. */
   listGuides(): Array<{ id: string; orientation: GuideOrientation; position: number }> {
-    const layer = this.getGuideLayer()
-    if (!layer) return []
-    const out: Array<{ id: string; orientation: GuideOrientation; position: number }> = []
-    for (const child of layer.children) {
-      const data = (child as any).data ?? {}
-      if (!data.isGuide) continue
-      const orientation = (data.guideOrientation === 'vertical' ? 'vertical' : 'horizontal') as GuideOrientation
-      const segs = (child as paper.Path).segments
-      const p = segs.length > 0 ? (segs[0] as any).point : null
-      if (!p) continue
-      const position = orientation === 'vertical' ? Number(p.x) : Number(p.y)
-      if (!Number.isFinite(position)) continue
-      out.push({ id: String(data.guideId ?? ''), orientation, position: Math.round(position * 10) / 10 })
-    }
-    return out.reverse()
+    return guides.listGuides(this)
   }
 
-  /** Move a guide by id; false when the id is unknown. Callers record history. */
+  /** See engine-guides.ts. */
   moveGuideById(id: string, position: number): boolean {
-    if (!id || !Number.isFinite(position)) return false
-    const layer = this.getGuideLayer()
-    if (!layer) return false
-    const guide = layer.children.find((c) => String((c as any).data?.guideId ?? '') === id)
-    if (!guide) return false
-    this.moveGuide(guide as paper.Item, position)
-    return true
+    return guides.moveGuideById(this, id, position)
   }
 
-  /** Delete a guide by id; false when the id is unknown. Callers record history. */
+  /** See engine-guides.ts. */
   deleteGuideById(id: string): boolean {
-    if (!id) return false
-    const layer = this.getGuideLayer()
-    if (!layer) return false
-    const guide = layer.children.find((c) => String((c as any).data?.guideId ?? '') === id)
-    if (!guide || !(guide instanceof this.scope.Path)) return false
-    this.deleteGuide(guide as paper.Path)
-    return true
+    return guides.deleteGuideById(this, id)
   }
 
-  /** Remove all guides from the guide layer. */
+  /** See engine-guides.ts. */
   clearGuides() {
-    const layer = this.getGuideLayer()
-    if (!layer) return
-    layer.locked = false
-    try {
-      layer.removeChildren()
-    } finally {
-      layer.locked = true
-      this.scope.view.update()
-    }
+    guides.clearGuides(this)
   }
 
-  /** Set guide-layer visibility according to the current store setting. */
+  /** See engine-guides.ts. */
   refreshGuides() {
-    const layer = this.getGuideLayer()
-    if (!layer) return
-    layer.visible = this.store.view.showGuides
-    this.scope.view.update()
+    guides.refreshGuides(this)
   }
 
   /** Pending rAF grid rebuild (coalesces rapid zoom/pan ticks). */
