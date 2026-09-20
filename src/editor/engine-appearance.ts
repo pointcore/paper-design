@@ -15,6 +15,23 @@ import { createDefaultStyle } from './store'
 import { linearGradientEndpoints, normalizeAngleDeg } from './geometry'
 import type { AppearanceFill, AppearanceState, AppearanceStroke, StyleState } from './types'
 
+/**
+ * Coerce a stored paint for bulk `item.set()`: the bulk path stores color
+ * values verbatim, and Paper later crashes clearing `_canvasStyle` on a
+ * stale string (`old._canvasStyle = null` in paper-core fields/set) the
+ * next time a different color is set. Direct `item.fillColor = str`
+ * assignment converts safely, so only bulk sets need this guard.
+ */
+export function paperColorFor(scope: paper.PaperScope, paint: unknown): paper.Color | null {
+  if (paint === null || paint === undefined) return null
+  if (typeof paint !== 'string') return paint as paper.Color
+  try {
+    return new scope.Color(paint)
+  } catch {
+    return null
+  }
+}
+
 export function createDefaultAppearance(e: EditorEngine): AppearanceState {
   return {
     fills: [{
@@ -96,18 +113,18 @@ export function setAppearanceOnItem(e: EditorEngine, item: paper.Item, appearanc
   if (fill) {
     if (fill.gradient) {
       const gf = gradientFillForItem(e, item, { gradient: fill.gradient } as StyleState)
-      paperStyle.fillColor = gf ?? fill.color
+      paperStyle.fillColor = gf ?? paperColorFor(e.scope, fill.color)
     } else if (fill.pattern) {
       // Pattern fills are handled by the pattern group; skip here.
     } else {
-      paperStyle.fillColor = fill.color
+      paperStyle.fillColor = paperColorFor(e.scope, fill.color)
     }
     paperStyle.fillRule = fill.fillRule
   } else {
     paperStyle.fillColor = null
   }
   if (stroke && stroke.visible) {
-    paperStyle.strokeColor = stroke.color
+    paperStyle.strokeColor = paperColorFor(e.scope, stroke.color)
     paperStyle.strokeWidth = stroke.strokeWidth
     paperStyle.strokeCap = stroke.lineCap
     paperStyle.strokeJoin = stroke.lineJoin

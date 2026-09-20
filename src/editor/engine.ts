@@ -1104,9 +1104,12 @@ export class EditorEngine {
   applyStyleToItem(item: paper.Item, style: StyleState) {
     // Pattern groups own their fill (motifs + background); a solid/gradient
     // paint must not leak into the tiles. Stroke/opacity/blend still apply.
+    // Colors convert to paper objects: bulk item.set() stores raw strings
+    // verbatim and paper later crashes on the stale string (see
+    // paperColorFor in engine-appearance.ts).
     if (this.isPatternGroup(item)) {
       const paperStyle: any = {}
-      if (style.strokeColor) paperStyle.strokeColor = style.strokeColor
+      if (style.strokeColor) paperStyle.strokeColor = appearance.paperColorFor(this.scope, style.strokeColor)
       else paperStyle.strokeColor = null
       paperStyle.strokeWidth = style.strokeWidth
       paperStyle.strokeCap = style.lineCap
@@ -1121,10 +1124,10 @@ export class EditorEngine {
     const paperStyle: any = {}
     const gradientFill = appearance.gradientFillForItem(this, item, style)
     if (gradientFill) paperStyle.fillColor = gradientFill
-    else if (style.fillColor) paperStyle.fillColor = style.fillColor
+    else if (style.fillColor) paperStyle.fillColor = appearance.paperColorFor(this.scope, style.fillColor)
     else paperStyle.fillColor = null
     if (style.fillRule) paperStyle.fillRule = style.fillRule
-    if (style.strokeColor) paperStyle.strokeColor = style.strokeColor
+    if (style.strokeColor) paperStyle.strokeColor = appearance.paperColorFor(this.scope, style.strokeColor)
     else paperStyle.strokeColor = null
     paperStyle.strokeWidth = style.strokeWidth
     paperStyle.strokeCap = style.lineCap

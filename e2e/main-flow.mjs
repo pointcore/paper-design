@@ -241,6 +241,31 @@ check(
   JSON.stringify(snap)
 )
 
+/* ---------- 9. appearance: fill add/update/reorder/remove ---------- */
+// Bulk item.set() with raw CSS strings used to poison paper's cached
+// style and crash the next reorder (any throw below fails the run).
+const appear = await page.evaluate(() => {
+  const E = window.__engine__
+  const S = E.scope
+  const L = E.getActiveLayer()
+  const c = S.view.viewToProject(S.view.center)
+  const p = new S.Path.Rectangle({
+    from: new S.Point(c.x - 200, c.y - 200),
+    to: new S.Point(c.x - 120, c.y - 120),
+  })
+  p.fillColor = new S.Color('#3366cc')
+  p.data.id = E.genId()
+  p.data.isUserItem = true
+  L.addChild(p)
+  E.selectByIds([p.data.id])
+  const f = E.addAppearanceFill(p, { color: '#ff0000' })
+  E.updateAppearanceFill(p, f.id, { opacity: 0.5 })
+  E.reorderAppearanceFills(p, 1, 0)
+  E.removeAppearanceFill(p, f.id)
+  return { fills: E.getAppearanceFromItem(p).fills.length }
+})
+check('appearance: fill add/update/reorder/remove roundtrip', appear.fills === 1, JSON.stringify(appear))
+
 await browser.close()
 
 const failed = results.filter((r) => !r.ok)
