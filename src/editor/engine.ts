@@ -6,7 +6,7 @@ import { PaperOffset } from 'paperjs-offset'
 import type { ToolName, StyleState, LayerMeta, LayerItemNode, ArtboardMeta, SymbolEntry, HistoryEntry, GuideOrientation, ProjectFileData, ReferencePoint, AlignMode, DistributeAxis, BooleanOperation, RasterExportOptions, GradientState, PatternFillState, EnvelopePreset, AppearanceState, AppearanceFill, AppearanceStroke, OpacityMaskState, MeshGradientState, MeshGradientVertex } from './types'
 import { createDefaultStyle } from './store'
 import { cursorForTool } from './cursors'
-import { chooseJoinEnds, gradientAngleFromVector, linearGradientEndpoints, normalizeAngleDeg } from './geometry'
+import { gradientAngleFromVector, linearGradientEndpoints, normalizeAngleDeg } from './geometry'
 import { changeCaseText } from './text/text-case'
 import { alignSampledPoints, lerp, lerpRgba, rgbaToCss, sampleCountFor } from './blend/blend'
 import type { Rgba } from './color'
@@ -31,6 +31,7 @@ import * as artboards from './engine-artboards'
 import * as guides from './engine-guides'
 import * as layers from './engine-layers'
 import * as pathfinder from './engine-pathfinder'
+import * as join from './engine-join'
 import {
   TRACE_MIN_DIM,
   cleanTraceOptions,
@@ -5462,42 +5463,12 @@ export class EditorEngine {
     return true
   }
 
-  /**
-   * Join exactly two unlocked open paths end to end. The closest endpoint
-   * pair wins; a gap bridges with a straight span and coincident ends merge
-   * cleanly. Curves keep their handles (reversed where the walk flips).
-   */
+  /** See engine-join.ts. */
   joinPaths(): boolean {
-    const scope = this.scope
-    const paths = this.getSelection().filter(
-      (item) =>
-        !item.locked &&
-        item.parent &&
-        item instanceof scope.Path &&
-        !(item instanceof scope.CompoundPath) &&
-        !item.closed &&
-        item.segments.length > 0
-    ) as paper.Path[]
-    if (paths.length !== 2) return false
-    const ordered = paths
-      .slice()
-      .sort((a, b) => (a.isBelow(b) ? -1 : a.isAbove(b) ? 1 : 0))
-    const [first, second] = ordered
-    const aEnds = [first.segments[0].point, first.segments[first.segments.length - 1].point]
-    const bEnds = [second.segments[0].point, second.segments[second.segments.length - 1].point]
-    // Closest endpoint pair wins (ties keep the first); each path walks so
-    // the joined ends meet. The decision core lives in geometry.ts under
-    // unit-test lock; this stays a thin paper bridge.
-    const ends = chooseJoinEnds(aEnds[0], aEnds[1], bEnds[0], bEnds[1])
-    const style = this.getStyleFromItem(first)
-    return this.mergePathsEndToEnd(first, second, ends.firstUsesFirst, ends.secondUsesFirst, style)
+    return join.joinPaths(this)
   }
 
-  /**
-   * Merge two open paths end to end with explicit orientations: each path
-   * walks so the joined ends meet (useFirst reverses the walk). Shared by
-   * auto nearest-pair join and sub-selection endpoint join.
-   */
+  /** See engine-join.ts. */
   mergePathsEndToEnd(
     first: paper.Path,
     second: paper.Path,
@@ -5505,59 +5476,7 @@ export class EditorEngine {
     secondUsesFirst: boolean,
     style?: StyleState
   ): boolean {
-    const scope = this.scope
-    if (!first.parent || !second.parent) return false
-    const paint = style ?? this.getStyleFromItem(first)
-    const parent = first.parent ?? this.getActiveLayer()
-    const rawAt = parent.children.indexOf(first)
-    const at = rawAt < 0 ? parent.children.length : rawAt
-    const merged = new scope.Path({ insert: false }) as paper.Path
-    const pushOriented = (path: paper.Path, useFirst: boolean) => {
-      const segs = path.segments
-      if (!useFirst) {
-        for (const seg of segs) merged.add(this.cloneSegment(seg))
-      } else {
-        for (let i = segs.length - 1; i >= 0; i--) merged.add(this.reversedSegment(segs[i]))
-      }
-    }
-    pushOriented(first, firstUsesFirst)
-    pushOriented(second, secondUsesFirst)
-    merged.closed = false
-    first.remove()
-    second.remove()
-    parent.insertChild(Math.min(at, parent.children.length), merged)
-    merged.data.id = this.genId()
-    merged.data.isUserItem = true
-    this.applyStyleToItem(merged, paint)
-    this.clearSelection()
-    merged.selected = true
-    this.syncSelectionToStore()
-    this.pushHistory('Join Paths')
-    this.scope.view.update()
-    return true
-  }
-
-  /** Copy a segment (points and handles cloned). */
-  private cloneSegment(seg: paper.Segment): paper.Segment {
-    const scope = this.scope
-    return new scope.Segment(
-      seg.point.clone(),
-      seg.handleIn ? seg.handleIn.clone() : undefined,
-      seg.handleOut ? seg.handleOut.clone() : undefined
-    )
-  }
-
-  /**
-   * Copy a segment for backwards traversal: the anchor stays, handles swap
-   * sides (no negation — a reversed bezier reuses the same offsets).
-   */
-  private reversedSegment(seg: paper.Segment): paper.Segment {
-    const scope = this.scope
-    return new scope.Segment(
-      seg.point.clone(),
-      seg.handleOut ? seg.handleOut.clone() : undefined,
-      seg.handleIn ? seg.handleIn.clone() : undefined
-    )
+    return join.mergePathsEndToEnd(this, first, second, firstUsesFirst, secondUsesFirst, style)
   }
 
   /**
