@@ -101,6 +101,26 @@
     </div>
 
     <div class="panel-section">
+      <div class="sec-title">Versions <span class="sec-hint">named milestones + diff replay</span></div>
+      <div class="row">
+        <el-input v-model="versionName" size="small" placeholder="Version name" @keyup.enter="saveVersion" />
+        <el-button size="small" class="grid-btn" @click="saveVersion">Save</el-button>
+      </div>
+      <div class="hint">{{ versionHint }}</div>
+      <div v-for="v in namedVersions" :key="v.id" class="sc-row">
+        <span class="sc-tool">{{ v.name }} · {{ describeVersion(v) }}</span>
+        <span class="ver-actions">
+          <el-button size="small" plain @click="previewVersion(v.id)">{{ diffVersionId === v.id ? 'Hide' : 'Diff' }}</el-button>
+          <el-button size="small" plain @click="restoreVersion(v.id)">Restore</el-button>
+          <el-button size="small" type="danger" plain @click="removeVersion(v.id)">×</el-button>
+        </span>
+      </div>
+      <div v-if="diffLines.length > 0" class="diff-list">
+        <div v-for="(line, i) in diffLines" :key="i" class="diff-line">{{ line }}</div>
+      </div>
+    </div>
+
+    <div class="panel-section">
       <div class="sec-title">Keyboard Shortcuts</div>
       <div class="sc-list">
         <div v-for="s in shortcuts" :key="s.label + s.tool" class="sc-row">
@@ -142,6 +162,15 @@ import {
   recordsFromCsv,
   templateFields,
 } from '../../editor/data-merge'
+import {
+  MAX_VERSIONS,
+  cleanVersions,
+  createNamedVersion,
+  describeVersion,
+  diffProjectFiles,
+  isValidNamedVersion,
+  type NamedVersion,
+} from '../../editor/versions'
 
 const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
@@ -327,6 +356,10 @@ onMounted(() => {
       if (typeof saved.body === 'string') mergeBody.value = saved.body.slice(0, 2000)
     }
   } catch { /* corrupt storage: defaults stand */ }
+  try {
+    const vraw = localStorage.getItem('vve.versions')
+    if (vraw) namedVersions.value = cleanVersions(JSON.parse(vraw))
+  } catch { /* corrupt storage: start empty */ }
 })
 
 // Data merge: CSV pasted or dropped in, one artboard per row.
@@ -399,6 +432,104 @@ function runMerge() {
   )
 }
 
+// Named versions: labelled project snapshots with diff-against-current replay.
+const versionName = ref('')
+const namedVersions = ref<NamedVersion[]>([])
+const diffVersionId = ref('')
+const diffLines = ref<string[]>([])
+
+const versionHint = computed(() => {
+  if (namedVersions.value.length === 0) return 'Save the current document as a named milestone.'
+  if (diffVersionId.value) {
+    const v = namedVersions.value.find((x) => x.id === diffVersionId.value)
+    if (!v) return ''
+    if (diffLines.value.length === 0) return `"${v.name}" matches the current document.`
+    return `"${v.name}" vs current: ${diffLines.value.length} change${diffLines.value.length === 1 ? '' : 's'}.`
+  }
+  return `${namedVersions.value.length}/${MAX_VERSIONS} versions kept (newest first).`
+})
+
+function persistVersions() {
+  try {
+    localStorage.setItem('vve.versions', JSON.stringify(namedVersions.value))
+  } catch {
+    // Quota or private mode: the in-memory list still works for this session.
+  }
+}
+
+function saveVersion() {
+  const e = engineRef?.value
+  if (!e) return
+  let fileText = ''
+  try {
+    fileText = e.exportProjectFile()
+  } catch {
+    store.setStatusMessage('Version save failed')
+    return
+  }
+  const entry = createNamedVersion(versionName.value || `Version ${namedVersions.value.length + 1}`, fileText)
+  if (!isValidNamedVersion(entry)) {
+    store.setStatusMessage('Document too large for a named version')
+    return
+  }
+  namedVersions.value = [entry, ...namedVersions.value].slice(0, MAX_VERSIONS)
+  versionName.value = ''
+  diffVersionId.value = ''
+  diffLines.value = []
+  persistVersions()
+  try {
+    // Confirm the list actually persisted (quota failures stay in memory).
+    localStorage.setItem('vve.versions', JSON.stringify(namedVersions.value))
+  } catch {
+    store.setStatusMessage(`Version "${entry.name}" saved for this session (storage full)`)
+    return
+  }
+  store.setStatusMessage(`Version "${entry.name}" saved`)
+}
+
+function previewVersion(id: string) {
+  const e = engineRef?.value
+  if (diffVersionId.value === id) {
+    diffVersionId.value = ''
+    diffLines.value = []
+    return
+  }
+  const v = namedVersions.value.find((x) => x.id === id)
+  if (!v || !e) return
+  let current = ''
+  try {
+    current = e.exportProjectFile()
+  } catch {
+    store.setStatusMessage('Version diff failed')
+    return
+  }
+  diffVersionId.value = id
+  diffLines.value = diffProjectFiles(v.fileText, current)
+}
+
+function restoreVersion(id: string) {
+  const e = engineRef?.value
+  const v = namedVersions.value.find((x) => x.id === id)
+  if (!v || !e) return
+  try {
+    e.importProjectFile(v.fileText)
+    diffVersionId.value = ''
+    diffLines.value = []
+    store.setStatusMessage(`Restored version "${v.name}"`)
+  } catch {
+    store.setStatusMessage('Version restore failed')
+  }
+}
+
+function removeVersion(id: string) {
+  namedVersions.value = namedVersions.value.filter((v) => v.id !== id)
+  if (diffVersionId.value === id) {
+    diffVersionId.value = ''
+    diffLines.value = []
+  }
+  persistVersions()
+}
+
 const shortcuts = computed(() =>
   (Object.entries(TOOL_SHORTCUTS) as Array<[string, { label: string } | null]>)
     .filter(([, def]) => !!def)
@@ -466,6 +597,9 @@ async function exportNUp(format: 'svg' | 'pdf' = 'svg') {
 .sc-row { display: flex; justify-content: space-between; padding: 3px 2px; border-bottom: 1px solid #1e1e1e; font-size: 11px; }
 .sc-tool { color: #d5d5d5; text-transform: capitalize; }
 .sc-key { color: #8a8a8a; font-variant-numeric: tabular-nums; }
+.ver-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.diff-list { display: flex; flex-direction: column; gap: 2px; background: #111; border: 1px solid #333; border-radius: 3px; padding: 6px; max-height: 160px; overflow-y: auto; }
+.diff-line { font-size: 11px; color: #b5b5b5; font-family: ui-monospace, monospace; line-height: 1.4; }
 .ai-panel :deep(.el-button--small) { background: #333; border: 1px solid #4a4a4a; color: #d5d5d5; border-radius: 3px; height: 24px; font-size: 11px; }
 .ai-panel :deep(.el-button--small.el-button--primary) { background: #2f6fbf; border-color: #2f6fbf; color: #fff; }
 .ai-panel :deep(.el-radio-button__inner) { background: #1a1a1a; border-color: #3d3d3d; color: #b5b5b5; font-size: 11px; padding: 5px 6px; box-shadow: none; }
