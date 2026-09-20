@@ -16,6 +16,7 @@
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.1",
     "element-plus": "^2.14.0",
+    "imagetracerjs": "^1.2.6",
     "jspdf": "^4.2.1",
     "jszip": "^3.10.2",
     "paper": "^0.12.17",

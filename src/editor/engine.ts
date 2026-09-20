@@ -27,6 +27,16 @@ import { yieldToUI, type ProgressReport } from './busy'
 import { alignToPixel } from './pixel'
 import { MAX_MERGE_ROWS, mergeTemplate } from './data-merge'
 import { inflateHistoryImages, slimHistoryImages } from './history-images'
+import {
+  TRACE_MIN_DIM,
+  cleanTraceOptions,
+  countTracePaths,
+  fitTraceSize,
+  traceImageData,
+  type TraceImage,
+  type TraceOptions,
+} from './trace'
+import type { ImageTracerInstance } from 'imagetracerjs'
 
 /** Identifier stamped into every saved project file. */
 const PROJECT_FILE_APP = 'vue-vector-editor'
@@ -7507,6 +7517,115 @@ export class EditorEngine {
     this.pushHistory('Data Merge')
     this.scope.view.update()
     return { boards, items: made.length }
+  }
+
+  // ===== Bitmap trace (placed raster -> vector paths, D6) =====
+
+  /**
+   * Trace the single selected bitmap into vector paths with the local
+   * imagetracerjs build (lazy-loaded, so the main bundle stays untouched).
+   * The traced artwork replaces the raster at its bounds with one history
+   * entry. Returns the traced path count, or null when nothing traceable
+   * is selected, pixels are unreadable, or the trace yields no paths —
+   * failures never modify the document.
+   */
+  async traceSelectedRaster(opts: TraceOptions): Promise<{ paths: number } | null> {
+    const scope = this.scope
+    const rasters = this.getSelection().filter(
+      (item) => !item.locked && item.parent && item instanceof scope.Raster
+    ) as paper.Raster[]
+    if (rasters.length !== 1) return null
+    const raster = rasters[0]
+    const options = cleanTraceOptions(opts)
+    // Read (and downscale past the cap) off the raster's own canvas, so
+    // the trace sees exactly the placed pixels at their placed aspect.
+    let img: TraceImage | null = null
+    try {
+      const canvas = (raster as unknown as { canvas?: HTMLCanvasElement }).canvas
+      if (!canvas || canvas.width < TRACE_MIN_DIM || canvas.height < TRACE_MIN_DIM) return null
+      const fit = fitTraceSize(canvas.width, canvas.height)
+      if (fit.width < TRACE_MIN_DIM || fit.height < TRACE_MIN_DIM) return null
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return null
+      if (fit.width === canvas.width && fit.height === canvas.height) {
+        const full = ctx.getImageData(0, 0, canvas.width, canvas.height)
+        img = { width: full.width, height: full.height, data: full.data }
+      } else {
+        const tmp = document.createElement('canvas')
+        tmp.width = fit.width
+        tmp.height = fit.height
+        const tctx = tmp.getContext('2d')
+        if (!tctx) return null
+        tctx.drawImage(canvas, 0, 0, fit.width, fit.height)
+        const small = tctx.getImageData(0, 0, fit.width, fit.height)
+        img = { width: small.width, height: small.height, data: small.data }
+      }
+    } catch {
+      // Tainted or otherwise unreadable canvas: leave the document alone.
+      return null
+    }
+    if (!img) return null
+    await yieldToUI()
+    let svg: string
+    try {
+      const mod = await import('imagetracerjs')
+      const tracer = ((mod as unknown as { default?: unknown }).default ?? mod) as ImageTracerInstance
+      if (!tracer || typeof tracer.imagedataToSVG !== 'function') return null
+      svg = traceImageData(img, options, (pixels, itOpts) => tracer.imagedataToSVG(pixels, itOpts))
+    } catch {
+      return null
+    }
+    const paths = countTracePaths(svg)
+    if (paths === 0) return null
+    const bounds = raster.bounds ? raster.bounds.clone() : null
+    if (!bounds || bounds.width <= 0 || bounds.height <= 0) return null
+    const parent = raster.parent ?? this.getActiveLayer()
+    const rawAt = parent.children.indexOf(raster as unknown as paper.Item)
+    const at = rawAt < 0 ? parent.children.length : rawAt
+    let imported: paper.Item | paper.Item[]
+    try {
+      imported = this.project.importSVG(svg)
+    } catch {
+      return null
+    }
+    const items = (Array.isArray(imported) ? imported : [imported]).filter(Boolean) as paper.Item[]
+    if (items.length === 0) return null
+    // Refit input-px artwork onto the raster bounds: normalize to the
+    // origin, scale to the placed size, then move into place.
+    const united = this.unitedBoundsOf(items)
+    if (!united || united.width <= 0 || united.height <= 0) {
+      for (const item of items) item.remove()
+      return null
+    }
+    const toOrigin = new scope.Point(-united.x, -united.y)
+    const sx = bounds.width / united.width
+    const sy = bounds.height / united.height
+    const toPlace = new scope.Point(bounds.x, bounds.y)
+    for (const item of items) {
+      item.translate(toOrigin)
+      item.scale(sx, sy, new scope.Point(0, 0))
+      item.translate(toPlace)
+      this.restampCloneTree(item)
+      if (!(item as unknown as { data?: unknown }).data) {
+        ;((item as unknown as { data?: unknown }).data as Record<string, unknown>) = {}
+      }
+      const data = (item as unknown as { data: Record<string, unknown> }).data
+      data.id = this.genId()
+      data.isUserItem = true
+    }
+    raster.remove()
+    items.forEach((item, i) => {
+      parent.insertChild(Math.min(at + i, parent.children.length), item as unknown as paper.Item)
+    })
+    this.syncLayersToStore()
+    this.clearSelection()
+    items.forEach((item) => {
+      item.selected = true
+    })
+    this.syncSelectionToStore()
+    this.pushHistory('Trace Bitmap')
+    this.scope.view.update()
+    return { paths }
   }
 
   // ===== CDR import (CDR -> SVG -> Paper.js) =====

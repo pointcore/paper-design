@@ -183,6 +183,27 @@
     </div>
 
     <div class="panel-section">
+      <div class="sec-title">Bitmap Trace <span class="sec-hint">placed raster → paths</span></div>
+      <div class="row">
+        <el-select v-model="traceColors" size="small" style="flex: 1">
+          <el-option :value="2" label="2 colors" />
+          <el-option :value="4" label="4 colors" />
+          <el-option :value="8" label="8 colors" />
+          <el-option :value="16" label="16 colors" />
+        </el-select>
+        <el-select v-model="traceDetail" size="small" style="flex: 1">
+          <el-option value="low" label="Low detail" />
+          <el-option value="medium" label="Medium detail" />
+          <el-option value="high" label="High detail" />
+        </el-select>
+      </div>
+      <div class="row">
+        <el-button size="small" class="grid-btn" :loading="tracing" @click="runTrace">Trace selected bitmap</el-button>
+      </div>
+      <div class="hint">Replaces one selected bitmap in place (512px cap, single undo).</div>
+    </div>
+
+    <div class="panel-section">
       <div class="sec-title">Keyboard Shortcuts</div>
       <div class="sc-list">
         <div v-for="s in shortcuts" :key="s.label + s.tool" class="sc-row">
@@ -246,6 +267,8 @@ import {
   type ActionStep,
   type NamedAction,
 } from '../../editor/action-batch'
+import { cleanTraceOptions, type TraceDetail } from '../../editor/trace'
+import { withBusy } from '../../editor/busy'
 
 const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
@@ -765,6 +788,30 @@ function replayAction(id: string) {
 function removeAction(id: string) {
   namedActions.value = namedActions.value.filter((a) => a.id !== id)
   persistActions()
+}
+
+// Bitmap trace: one selected raster becomes vector paths in place.
+const traceColors = ref(8)
+const traceDetail = ref<TraceDetail>('medium')
+const tracing = ref(false)
+
+async function runTrace() {
+  const e = engineRef?.value
+  if (!e || tracing.value) return
+  tracing.value = true
+  try {
+    const opts = cleanTraceOptions({ colors: Number(traceColors.value), detail: traceDetail.value })
+    const res = await withBusy(store, 'Tracing bitmap…', () => e.traceSelectedRaster(opts))
+    if (!res) {
+      store.setStatusMessage('Trace needs one selected bitmap')
+      return
+    }
+    store.setStatusMessage(`Traced ${res.paths} path${res.paths === 1 ? '' : 's'}`)
+  } catch {
+    store.setStatusMessage('Trace failed')
+  } finally {
+    tracing.value = false
+  }
 }
 
 const shortcuts = computed(() =>
