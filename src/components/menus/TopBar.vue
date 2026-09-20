@@ -311,7 +311,7 @@
               <span class="setting-name">Preset</span>
             </div>
             <el-select v-model="settings.pagePreset" size="small" style="width: 150px" @change="onPagePresetChange">
-              <el-option v-for="p in pagePresets" :key="p.value" :label="p.label" :value="p.value" />
+              <el-option v-for="p in PAGE_PRESETS" :key="p.value" :label="p.label" :value="p.value" />
             </el-select>
           </div>
 
@@ -375,7 +375,7 @@
               <span class="setting-name">Format</span>
             </div>
             <el-select v-model="exportForm.format" size="small" style="width: 120px">
-              <el-option v-for="f in exportFormats" :key="f.value" :label="f.label" :value="f.value" />
+              <el-option v-for="f in EXPORT_FORMATS" :key="f.value" :label="f.label" :value="f.value" />
             </el-select>
           </div>
 
@@ -384,7 +384,7 @@
               <span class="setting-name">Scale</span>
             </div>
             <el-select v-model="exportForm.scale" size="small" style="width: 120px">
-              <el-option v-for="s in exportScales" :key="s.value" :label="s.label" :value="s.value" />
+              <el-option v-for="s in EXPORT_SCALES" :key="s.value" :label="s.label" :value="s.value" />
             </el-select>
           </div>
 
@@ -393,7 +393,7 @@
               <span class="setting-name">Quality</span>
             </div>
             <el-select v-model="exportForm.quality" size="small" style="width: 120px">
-              <el-option v-for="q in exportQualities" :key="q.value" :label="q.label" :value="q.value" />
+              <el-option v-for="q in EXPORT_QUALITIES" :key="q.value" :label="q.label" :value="q.value" />
             </el-select>
           </div>
 
@@ -922,7 +922,7 @@
               <span class="setting-name">Quality</span>
             </div>
             <el-select v-model="boardsForm.quality" size="small" style="width: 110px">
-              <el-option v-for="q in exportQualities" :key="q.value" :label="q.label" :value="q.value" />
+              <el-option v-for="q in EXPORT_QUALITIES" :key="q.value" :label="q.label" :value="q.value" />
             </el-select>
           </div>
           <div class="setting-row">
@@ -1039,7 +1039,7 @@
           <span class="setting-desc">{{ preflightRows.length }} finding(s), capped at 50</span>
         </div>
         <div v-for="(row, i) in preflightRows" :key="i" class="setting-row preflight-row" :class="{ clickable: !!row.itemId }" @click="row.itemId && gotoIssue(row.itemId)">
-          <el-tag size="small" :type="preflightTag(row.kind)">{{ preflightKind(row.kind) }}</el-tag>
+          <el-tag size="small" :type="preflightSeverity(row.kind)">{{ preflightKindLabel(row.kind) }}</el-tag>
           <span class="setting-desc">{{ row.message }}</span>
         </div>
       </div>
@@ -1057,6 +1057,17 @@ import { uniqueSelectionName, pruneSelectionIds } from '../../editor/selection/s
 import { clearRecentProjects, listRecentProjects, loadRecentProjectText } from '../../editor/recent-files'
 import { useEditorStore } from '../../editor/store'
 import { withBusy, yieldToUI } from '../../editor/busy'
+import {
+  EXPORT_FORMATS,
+  EXPORT_QUALITIES,
+  EXPORT_SCALES,
+  PAGE_PRESETS,
+  matchPagePreset,
+  preflightKindLabel,
+  preflightSeverity,
+  rasterFailText,
+  sanitizeExportForm,
+} from '../../editor/topbar-dialogs'
 import type { EditorEngine } from '../../editor/engine'
 import type { RulerUnit, RasterExportFormat, RasterExportArea, EnvelopePreset } from '../../editor/types'
 
@@ -1712,22 +1723,6 @@ function openPreflight() {
   preflightTick.value++
   preflightVisible.value = true
 }
-function preflightKind(kind: string): string {
-  switch (kind) {
-    case 'overflow': return 'Overflow'
-    case 'gamut': return 'Gamut'
-    case 'tac': return 'Ink'
-    case 'small': return 'Type'
-    case 'hairline': return 'Stroke'
-    case 'dpi': return 'DPI'
-    default: return 'Layer'
-  }
-}
-function preflightTag(kind: string): 'danger' | 'warning' | 'info' {
-  if (kind === 'overflow' || kind === 'dpi' || kind === 'tac') return 'danger'
-  if (kind === 'gamut' || kind === 'hairline' || kind === 'small') return 'warning'
-  return 'info'
-}
 function selectAllIssues() {
   const e = engineRef?.value
   if (!e) return
@@ -1747,58 +1742,12 @@ const exportForm = reactive({
 })
 try {
   const raw = localStorage.getItem('vve.export')
-  if (raw) {
-    const saved = JSON.parse(raw) as Partial<typeof exportForm>
-    if (saved.format === 'png' || saved.format === 'jpeg' || saved.format === 'webp') {
-      exportForm.format = saved.format
-    }
-    if (saved.scale === 1 || saved.scale === 2 || saved.scale === 3) exportForm.scale = saved.scale
-    if (saved.area === 'artwork' || saved.area === 'selection' || saved.area === 'page') {
-      exportForm.area = saved.area
-    }
-    if (saved.quality === 0.92 || saved.quality === 0.75 || saved.quality === 0.55) {
-      exportForm.quality = saved.quality
-    }
-  }
+  if (raw) Object.assign(exportForm, sanitizeExportForm(JSON.parse(raw)))
 } catch { /* private mode: defaults stand */ }
 function persistExportForm() {
   try {
     localStorage.setItem('vve.export', JSON.stringify(exportForm))
   } catch { /* private mode */ }
-}
-const exportQualities = [
-  { value: 0.92, label: 'High' },
-  { value: 0.75, label: 'Medium' },
-  { value: 0.55, label: 'Low' },
-]
-const exportFormats = [
-  { value: 'png', label: 'PNG' },
-  { value: 'jpeg', label: 'JPEG' },
-  { value: 'webp', label: 'WebP' },
-]
-const exportScales = [
-  { value: 1, label: '1x' },
-  { value: 2, label: '2x' },
-  { value: 3, label: '3x' },
-]
-
-const pagePresets = [
-  { value: 'custom', label: 'Custom' },
-  { value: '1920x1080', label: 'HD 1920 x 1080' },
-  { value: '3840x2160', label: '4K 3840 x 2160' },
-  { value: '1080x1080', label: 'Square 1080 x 1080' },
-  { value: '1080x1350', label: 'Post 1080 x 1350' },
-  { value: '1080x1920', label: 'Story 1080 x 1920' },
-  { value: '595x842', label: 'A4 595 x 842' },
-  { value: '842x1191', label: 'A3 842 x 1191' },
-  { value: '612x792', label: 'Letter 612 x 792' },
-  { value: '792x1224', label: 'Tabloid 792 x 1224' },
-]
-
-/** Preset value matching W/H, or custom when nothing matches. */
-function matchPagePreset(width: number, height: number): string {
-  const found = pagePresets.find((p) => p.value === `${width}x${height}`)
-  return found ? found.value : 'custom'
 }
 
 const settings = reactive({
@@ -2230,7 +2179,9 @@ function onExportRasterConfirm() {
       quality: exportForm.quality,
     })
     if (!dataUrl) {
-      store.setStatusMessage(rasterFailText(e) ?? 'Raster export failed')
+      store.setStatusMessage(
+        rasterFailText(e.estimateRasterSize(exportForm.area, exportForm.scale)) ?? 'Raster export failed'
+      )
       return
     }
     downloadHref(dataUrl, `export.${exportForm.format}`)
@@ -2240,18 +2191,6 @@ function onExportRasterConfirm() {
   } catch (err) {
     store.setStatusMessage('Raster export failed')
   }
-}
-
-/**
- * Precise raster-failure reason: oversized output names its pixels and the
- * guard, so users know to lower the scale instead of retrying blindly.
- */
-function rasterFailText(e: EditorEngine): string | null {
-  const size = e.estimateRasterSize(exportForm.area, exportForm.scale)
-  if (!size) return null
-  return size.width > 16384 || size.height > 16384
-    ? `Too large (${size.width}x${size.height}px, 16384 max) — lower the scale`
-    : null
 }
 
 /**
