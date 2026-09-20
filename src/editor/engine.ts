@@ -36,6 +36,7 @@ import * as compound from './engine-compound'
 import * as appearance from './engine-appearance'
 import * as symbols from './engine-symbols'
 import * as view from './engine-view'
+import * as select from './engine-select'
 import {
   TRACE_MIN_DIM,
   cleanTraceOptions,
@@ -949,37 +950,9 @@ export class EditorEngine {
   }
 
   /** Fit the view to the current selection bounds (View menu). */
-  /**
-   * AI Arrange > Send to Current Layer: move every selected item's
-   * top-level ancestor into the active layer, stacked on top in their
-   * original order. Returns the moved count (0 when nothing can move).
-   */
+  /** See engine-select.ts. */
   moveSelectionToActiveLayer(): number {
-    const active = this.getActiveLayer()
-    const picked: paper.Item[] = []
-    const seen = new Set<paper.Item>()
-    for (const item of this.getSelection()) {
-      if ((item as any).locked) continue
-      let top: paper.Item | null = item
-      while (top && !(top.parent instanceof this.scope.Layer)) {
-        top = top.parent as paper.Item | null
-      }
-      if (!top || top === active || seen.has(top)) continue
-      seen.add(top)
-      picked.push(top)
-    }
-    if (picked.length === 0) return 0
-    for (const item of picked) {
-      item.remove()
-      active.addChild(item)
-    }
-    this.syncLayersToStore()
-    this.syncSelectionToStore()
-    // Cross-layer moves leave the oriented frame's layer bookkeeping stale.
-    this.bumpGeometryVersion()
-    this.pushHistory('Send to Current Layer')
-    this.scope.view.update()
-    return picked.length
+    return select.moveSelectionToActiveLayer(this)
   }
 
   /** See engine-view.ts. */
@@ -4692,49 +4665,14 @@ export class EditorEngine {
     return levels
   }
 
-  /**
-   * Select every visible unlocked top-level user item across all layers.
-   */
+  /** See engine-select.ts. */
   selectAllArtwork(): void {
-    this.project.deselectAll()
-    for (const layer of this.project.layers) {
-      if (!(layer.data as any)?.isUserLayer || !layer.visible || layer.locked) continue
-      for (const child of layer.children) {
-        const item = child as paper.Item
-        if (!item.visible || (item as any).locked) continue
-        item.selected = true
-      }
-    }
-    this.syncSelectionToStore()
-    this.scope.view.update()
+    select.selectAllArtwork(this)
   }
 
-  /**
-   * CDR "select all in page" parity: select every visible unlocked
-   * top-level item whose bounds intersect the active artboard sheet.
-   * Returns the selected count; 0 when there is no usable board.
-   */
+  /** See engine-select.ts. */
   selectAllOnActiveArtboard(): number {
-    const board = this.store.activeArtboard
-    if (!board || board.width <= 0 || board.height <= 0) return 0
-    const sheet = new this.scope.Rectangle(board.x, board.y, board.width, board.height)
-    this.project.deselectAll()
-    let count = 0
-    for (const layer of this.project.layers) {
-      if (!(layer.data as any)?.isUserLayer || !layer.visible || layer.locked) continue
-      for (const child of layer.children) {
-        const item = child as paper.Item
-        if (!item.visible || (item as any).locked) continue
-        const b = item.bounds
-        if (!b) continue
-        if (!b.intersects(sheet)) continue
-        item.selected = true
-        count++
-      }
-    }
-    this.syncSelectionToStore()
-    this.scope.view.update()
-    return count
+    return select.selectAllOnActiveArtboard(this)
   }
 
   /** Swap each selected item with the sibling beside it in `direction`. */
