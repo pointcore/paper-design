@@ -3807,146 +3807,18 @@ export class EditorEngine {
    * (wand slider). Returns how many items were selected. Additive mode
    * keeps the existing selection (wand Shift-click parity).
    */
+  /** See engine-select.ts. */
   selectSame(
     attribute: 'fill' | 'stroke' | 'strokeWidth' | 'opacity' | 'blendMode',
     additive = false,
     tolerance = 0
   ): number {
-    const leaves = this.appearanceLeaves()
-    if (leaves.length === 0) return 0
-    const reference = this.getSelection()
-      .map((item) => this.firstLeaf(item))
-      .find((leaf) => leaf !== null) as paper.Item | undefined
-    if (!reference) return 0
-    const tol = Number.isFinite(tolerance) ? Math.max(0, tolerance) : 0
-    let matches: paper.Item[]
-    if (tol > 0 && (attribute === 'fill' || attribute === 'stroke')) {
-      const paint = (reference as any)[attribute === 'fill' ? 'fillColor' : 'strokeColor'] as any
-      if (paint?.gradient) return 0
-      const refCss = colorToCSS(paint)
-      const refRgba = refCss ? parseCssColor(refCss) : null
-      if (!refRgba) return 0
-      matches = leaves.filter((leaf) => {
-        const other = (leaf as any)[attribute === 'fill' ? 'fillColor' : 'strokeColor'] as any
-        if (!other || other.gradient) return refCss === 'none' && !other
-        const css = colorToCSS(other)
-        const rgba = css ? parseCssColor(css) : null
-        if (!rgba) return false
-        return colorDistanceRgb(refRgba, rgba) <= tol
-      })
-    } else {
-      const key = this.appearanceKey(reference, attribute)
-      matches = leaves.filter((leaf) => this.appearanceKey(leaf, attribute) === key)
-    }
-    if (!additive) this.clearSelection()
-    matches.forEach((item) => {
-      item.selected = true
-    })
-    this.syncSelectionToStore()
-    this.scope.view.update()
-    return matches.length
+    return select.selectSame(this, attribute, additive, tolerance)
   }
 
-  /**
-   * AI Select > Same > Font Family / Font Size: select every unlocked text
-   * item sharing the first selected text item's font family (or size).
-   * Returns the match count; 0 when the selection holds no text.
-   */
+  /** See engine-select.ts. */
   selectSameTextFont(by: 'family' | 'size'): number {
-    const scope = this.scope
-    const reference = this.getSelection().find(
-      (item) => item instanceof scope.PointText && !item.locked
-    ) as paper.PointText | undefined
-    if (!reference) return 0
-    const refValue = by === 'family'
-      ? String(reference.fontFamily || '')
-      : Math.round((Number(reference.fontSize) || 0) * 100) / 100
-    const matches: paper.PointText[] = []
-    for (const item of layers.walkUserItems(this)) {
-      if (!(item instanceof scope.PointText) || (item as any).locked) continue
-      if (item === reference) continue
-      const value = by === 'family'
-        ? String(item.fontFamily || '')
-        : Math.round((Number(item.fontSize) || 0) * 100) / 100
-      if (value === refValue) matches.push(item)
-    }
-    if (matches.length === 0) return 0
-    this.clearSelection()
-    reference.selected = true
-    matches.forEach((item) => {
-      item.selected = true
-    })
-    this.syncSelectionToStore()
-    this.scope.view.update()
-    return matches.length
-  }
-
-  /** Fill / stroke / width / opacity / blend key used by select-same. */
-  private appearanceKey(item: paper.Item, attribute: 'fill' | 'stroke' | 'strokeWidth' | 'opacity' | 'blendMode'): string {
-    if (attribute === 'strokeWidth') return `w:${Math.round((Number((item as any).strokeWidth) || 0) * 100) / 100}`
-    if (attribute === 'opacity') return `o:${Math.round((Number((item as any).opacity ?? 1)) * 1000) / 1000}`
-    if (attribute === 'blendMode') return `b:${String((item as any).blendMode ?? 'source-over')}`
-    const color = (
-      attribute === 'fill'
-        ? (item as any).fillColor
-        : (item as any).strokeColor
-    ) as any
-    if (color && color.gradient) return 'gradient'
-    return colorToCSS(color) ?? 'none'
-  }
-
-  /** First style-carrying leaf under an item (itself when it is one). */
-  private firstLeaf(item: paper.Item): paper.Item | null {
-    const scope = this.scope
-    if (
-      item instanceof scope.Path ||
-      item instanceof scope.CompoundPath ||
-      item instanceof scope.PointText
-    ) {
-      return item
-    }
-    const children = (item as any).children as paper.Item[] | undefined
-    if (children) {
-      for (const child of children) {
-        const found = this.firstLeaf(child)
-        if (found) return found
-      }
-    }
-    return null
-  }
-
-  /** Every selectable style-carrying leaf (locked / hidden art excluded). */
-  private appearanceLeaves(): paper.Item[] {
-    const scope = this.scope
-    const out: paper.Item[] = []
-    const walk = (item: paper.Item, hidden: boolean, locked: boolean) => {
-      const data = (item.data as any) ?? {}
-      if (data.isChrome || data.isPreview || data.isGuide || data.annotation) return
-      hidden = hidden || (item as any).visible === false
-      locked = locked || !!(item as any).locked
-      if (data.isPatternTile) return
-      // Clip masks are scaffolding: match the visible content instead.
-      if ((item as any).clipMask) return
-      if (
-        item instanceof scope.Path ||
-        item instanceof scope.CompoundPath ||
-        item instanceof scope.PointText
-      ) {
-        if (!hidden && !locked) out.push(item)
-        return
-      }
-      const children = (item as any).children as paper.Item[] | undefined
-      if (children) {
-        for (const child of children) walk(child, hidden, locked)
-      }
-    }
-    for (const layer of this.project.layers) {
-      if (!(layer.data as any)?.isUserLayer) continue
-      const layerHidden = (layer as any).visible === false
-      const layerLocked = !!(layer as any).locked
-      for (const child of layer.children) walk(child as paper.Item, layerHidden, layerLocked)
-    }
-    return out
+    return select.selectSameTextFont(this, by)
   }
 
   // ===== Path construction (compound / join / outline) =====
@@ -6046,7 +5918,7 @@ export class EditorEngine {
         }
         for (const child of children) walk(child)
       } else {
-        const leaf = this.firstLeaf(item)
+        const leaf = select.firstLeaf(this, item)
         if (leaf) repaint(leaf)
       }
     }
@@ -6084,7 +5956,7 @@ export class EditorEngine {
     }
     for (const item of this.getSelection()) {
       if ((item as any).locked) continue
-      const leaf = this.firstLeaf(item)
+      const leaf = select.firstLeaf(this, item)
       if (!leaf) continue
       if (leaf !== item && item instanceof scope.Group) {
         const walk = (node: paper.Item) => {
