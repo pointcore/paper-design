@@ -38,6 +38,7 @@ import * as view from './engine-view'
 import * as select from './engine-select'
 import * as text from './engine-text'
 import * as exporter from './engine-export'
+import * as arrange from './engine-arrange'
 import {
   TRACE_MIN_DIM,
   cleanTraceOptions,
@@ -947,7 +948,7 @@ export class EditorEngine {
   }
 
   fitToContent() {
-    this.fitBounds(this.unitedBoundsOf(this.getUserItems()))
+    this.fitBounds(arrange.unitedBoundsOf(this.getUserItems()))
   }
 
   /** Fit the view to the current selection bounds (View menu). */
@@ -2976,49 +2977,19 @@ export class EditorEngine {
 
   // ===== Selection transform =====
 
-  /** United axis-aligned bounds of the current selection, or null. */
+  /** See engine-arrange.ts. */
   getSelectionBounds(): paper.Rectangle | null {
-    return this.unitedBoundsOf(this.getSelection())
+    return arrange.getSelectionBounds(this)
   }
 
-  /** United axis-aligned bounds of the given items, or null. */
-  private unitedBoundsOf(items: paper.Item[]): paper.Rectangle | null {
-    let rect: paper.Rectangle | null = null
-    for (const item of items) {
-      const b = item.bounds
-      if (!b) continue
-      rect = rect ? rect.unite(b) : b.clone()
-    }
-    return rect
-  }
-
-  /** Position of a nine-point reference anchor within a rectangle. */
+  /** See engine-arrange.ts. */
   referencePointForRect(rect: paper.Rectangle, point: ReferencePoint): paper.Point {
-    const left = rect.x
-    const centerX = rect.x + rect.width / 2
-    const right = rect.x + rect.width
-    const top = rect.y
-    const centerY = rect.y + rect.height / 2
-    const bottom = rect.y + rect.height
-    switch (point) {
-      case 'top-left': return new this.scope.Point(left, top)
-      case 'top-center': return new this.scope.Point(centerX, top)
-      case 'top-right': return new this.scope.Point(right, top)
-      case 'middle-left': return new this.scope.Point(left, centerY)
-      case 'middle-right': return new this.scope.Point(right, centerY)
-      case 'bottom-left': return new this.scope.Point(left, bottom)
-      case 'bottom-center': return new this.scope.Point(centerX, bottom)
-      case 'bottom-right': return new this.scope.Point(right, bottom)
-      case 'center':
-      default: return new this.scope.Point(centerX, centerY)
-    }
+    return arrange.referencePointForRect(this, rect, point)
   }
 
-  /** Pivot derived from the store reference point over the selection bounds. */
+  /** See engine-arrange.ts. */
   selectionReferencePivot(): paper.Point | null {
-    const bounds = this.getSelectionBounds()
-    if (!bounds) return null
-    return this.referencePointForRect(bounds, this.store.referencePoint)
+    return arrange.selectionReferencePivot(this)
   }
 
   /**
@@ -3609,46 +3580,9 @@ export class EditorEngine {
     }
   }
 
-  /**
-   * Align every unlocked selected item to an edge or center of a target
-   * rectangle (explicit board target, or the united unlocked-selection
-   * bounds which needs at least two items). Returns false when there is
-   * nothing to align; callers record history only then.
-   */
+  /** See engine-arrange.ts. */
   alignSelection(mode: AlignMode, target?: paper.Rectangle): boolean {
-    const items = this.getSelection().filter((item) => !item.locked)
-    if (items.length === 0) return false
-    const bounds = target ?? (items.length >= 2 ? this.unitedBoundsOf(items) : null)
-    if (!bounds) return false
-    const targetLeft = bounds.x
-    const targetCenterX = bounds.x + bounds.width / 2
-    const targetRight = bounds.x + bounds.width
-    const targetTop = bounds.y
-    const targetCenterY = bounds.y + bounds.height / 2
-    const targetBottom = bounds.y + bounds.height
-    let moved = false
-    for (const item of items) {
-      const b = item.bounds
-      if (!b) continue
-      let dx = 0
-      let dy = 0
-      switch (mode) {
-        case 'left': dx = targetLeft - b.x; break
-        case 'centerX': dx = targetCenterX - (b.x + b.width / 2); break
-        case 'right': dx = targetRight - (b.x + b.width); break
-        case 'top': dy = targetTop - b.y; break
-        case 'centerY': dy = targetCenterY - (b.y + b.height / 2); break
-        case 'bottom': dy = targetBottom - (b.y + b.height); break
-      }
-      if (dx !== 0 || dy !== 0) {
-        item.position = item.position.add(new this.scope.Point(dx, dy))
-        this.refreshItemGradient(item)
-        moved = true
-      }
-    }
-    if (moved) this.reflowTextsForItems(items)
-    this.scope.view.update()
-    return moved
+    return arrange.alignSelection(this, mode, target)
   }
 
   /** Active artboard rectangle, or null when none is usable. */
@@ -3660,78 +3594,14 @@ export class EditorEngine {
     return new this.scope.Rectangle(board.x, board.y, board.width, board.height)
   }
 
-  /**
-   * Spread unlocked selected items along an axis with equal gaps between
-   * neighbors (first and last stay put; even overlap when cramped).
-   * Needs at least three unlocked items. Callers record history.
-   */
+  /** See engine-arrange.ts. */
   distributeSpacing(axis: DistributeAxis): boolean {
-    const items = this.getSelection().filter((item) => !item.locked && item.bounds)
-    if (items.length < 3) return false
-    const horizontal = axis === 'horizontal'
-    const leading = (b: paper.Rectangle) => (horizontal ? b.x : b.y)
-    const sizeOf = (b: paper.Rectangle) => (horizontal ? b.width : b.height)
-    const sorted = items.slice().sort((a, b) => leading(a.bounds) - leading(b.bounds))
-    const first = leading(sorted[0].bounds)
-    const last = leading(sorted[sorted.length - 1].bounds) + sizeOf(sorted[sorted.length - 1].bounds)
-    const totalSize = sorted.reduce((sum, item) => sum + sizeOf(item.bounds), 0)
-    const gap = (last - first - totalSize) / (items.length - 1)
-    if (!Number.isFinite(gap)) return false
-    let cursor = first
-    let moved = false
-    for (const item of sorted) {
-      const b = item.bounds
-      const delta = cursor - leading(b)
-      if (Math.abs(delta) > 1e-9) {
-        const shift = horizontal
-          ? new this.scope.Point(delta, 0)
-          : new this.scope.Point(0, delta)
-        item.position = item.position.add(shift)
-        this.refreshItemGradient(item)
-        moved = true
-      }
-      cursor += sizeOf(item.bounds) + gap
-    }
-    if (moved) this.reflowTextsForItems(items)
-    this.scope.view.update()
-    return moved
+    return arrange.distributeSpacing(this, axis)
   }
 
-  /**
-   * Spread unlocked selected items evenly along an axis by distributing
-   * their centers between the extreme centers. The extreme items stay in
-   * place. Needs at least three unlocked items with distinct extremes.
-   * Returns whether anything moved; callers record history only then.
-   */
+  /** See engine-arrange.ts. */
   distributeSelection(axis: DistributeAxis): boolean {
-    const items = this.getSelection().filter((item) => !item.locked && item.bounds)
-    if (items.length < 3) return false
-    const horizontal = axis === 'horizontal'
-    const centers = items.map((item) => {
-      const b = item.bounds
-      return horizontal ? b.x + b.width / 2 : b.y + b.height / 2
-    })
-    const order = items.map((_, index) => index).sort((a, b) => centers[a] - centers[b])
-    const first = centers[order[0]]
-    const last = centers[order[order.length - 1]]
-    if (!Number.isFinite(first) || !Number.isFinite(last)) return false
-    if (Math.abs(last - first) < 1e-9) return false
-    const step = (last - first) / (items.length - 1)
-    let moved = false
-    order.forEach((itemIndex, rank) => {
-      const delta = first + step * rank - centers[itemIndex]
-      if (Math.abs(delta) < 1e-9) return
-      const item = items[itemIndex]
-      const shift = horizontal
-        ? new this.scope.Point(delta, 0)
-        : new this.scope.Point(0, delta)
-      item.position = item.position.add(shift)
-      this.refreshItemGradient(item)
-      moved = true
-    })
-    if (moved) this.reflowTextsForItems(items)
-    this.scope.view.update()
-    return moved
+    return arrange.distributeSelection(this, axis)
   }
 
   /** See engine-pathfinder.ts. */
@@ -3975,45 +3845,14 @@ export class EditorEngine {
     return made.length
   }
 
-  /**
-   * Distribute with an exact gap value (first item stays, the rest follow
-   * with `gap` document units between neighbors). Needs 3+ unlocked items.
-   */
+  /** See engine-arrange.ts. */
   distributeSpacingExact(axis: DistributeAxis, gap: number): boolean {
-    if (!Number.isFinite(gap) || gap < 0) return false
-    const items = this.getSelection().filter((item) => !item.locked && item.bounds)
-    if (items.length < 3) return false
-    const horizontal = axis === 'horizontal'
-    const leading = (b: paper.Rectangle) => (horizontal ? b.x : b.y)
-    const sizeOf = (b: paper.Rectangle) => (horizontal ? b.width : b.height)
-    const sorted = items.slice().sort((a, b) => leading(a.bounds) - leading(b.bounds))
-    let cursor = leading(sorted[0].bounds)
-    let moved = false
-    for (const item of sorted) {
-      const b = item.bounds
-      const delta = cursor - leading(b)
-      if (Math.abs(delta) > 1e-9) {
-        const shift = horizontal
-          ? new this.scope.Point(delta, 0)
-          : new this.scope.Point(0, delta)
-        item.position = item.position.add(shift)
-        this.refreshItemGradient(item)
-        moved = true
-      }
-      cursor += sizeOf(item.bounds) + gap
-    }
-    if (moved) this.reflowTextsForItems(items)
-    this.scope.view.update()
-    return moved
+    return arrange.distributeSpacingExact(this, axis, gap)
   }
 
-  /** Bounds of the align key object, or null when unset/unusable. */
+  /** See engine-arrange.ts. */
   getKeyObjectBounds(): paper.Rectangle | null {
-    const id = (this.store as any).keyObjectId as string | undefined
-    if (!id) return null
-    const item = this.getItemById(id)
-    if (!item || item.locked || !item.parent || !item.bounds) return null
-    return item.bounds.clone()
+    return arrange.getKeyObjectBounds(this)
   }
 
   /** See engine-pathfinder.ts. */
@@ -4048,7 +3887,7 @@ export class EditorEngine {
         ? new this.scope.Rectangle(rect.x, rect.y, rect.width, rect.height)
         : null
     }
-    return this.unitedBoundsOf(this.getUserItems())
+    return arrange.unitedBoundsOf(this.getUserItems())
   }
 
   /**
@@ -4150,7 +3989,7 @@ export class EditorEngine {
    * with the document bounds it covers, or null when the scene is empty.
    */
   renderThumbnail(maxPixels: number): { url: string; x: number; y: number; width: number; height: number } | null {
-    let bounds = this.unitedBoundsOf(this.getUserItems())
+    let bounds = arrange.unitedBoundsOf(this.getUserItems())
     for (const board of this.store.artboards) {
       if (board.width > 0 && board.height > 0) {
         const rect = new this.scope.Rectangle(board.x, board.y, board.width, board.height)
@@ -6062,7 +5901,7 @@ export class EditorEngine {
     if (items.length === 0) return null
     // Refit input-px artwork onto the raster bounds: normalize to the
     // origin, scale to the placed size, then move into place.
-    const united = this.unitedBoundsOf(items)
+    const united = arrange.unitedBoundsOf(items)
     if (!united || united.width <= 0 || united.height <= 0) {
       for (const item of items) item.remove()
       return null
