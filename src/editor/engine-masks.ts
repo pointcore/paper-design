@@ -11,6 +11,8 @@
 import type paper from 'paper'
 import type { EditorEngine } from './engine'
 import type { OpacityMaskState } from './types'
+import { isClipGroup } from './engine-layers'
+import { cssOrNull, releasePatternGroup } from './engine-patterns'
 
 export function getOpacityMask(e: EditorEngine, item: paper.Item): OpacityMaskState | null {
   void e
@@ -141,4 +143,100 @@ export function toggleOpacityMaskInvert(e: EditorEngine, item: paper.Item, inver
     mask.invert = invert
     item.data = data
   }
+}
+
+export function makeClippingMask(e: EditorEngine): boolean {
+  const scope = e.scope
+  const items = e.getSelection().filter((item) => !item.locked && item.parent)
+  if (items.length < 2) return false
+  const ordered = items
+    .slice()
+    .sort((a, b) => (a.isBelow(b) ? -1 : a.isAbove(b) ? 1 : 0))
+  const mask = ordered[ordered.length - 1] as paper.PathItem
+  if (!(mask instanceof scope.Path) && !(mask instanceof scope.CompoundPath)) return false
+  const content = ordered.slice(0, -1)
+  const parent = mask.parent ?? e.getActiveLayer()
+  const rawAt = parent.children.indexOf(mask)
+  const at = rawAt < 0 ? parent.children.length : rawAt
+
+  const maskAny = mask as any
+  maskAny.data.maskPaint = {
+    fill: cssOrNull(maskAny.fillColor),
+    stroke: cssOrNull(maskAny.strokeColor),
+    width: Number(maskAny.strokeWidth) || 0,
+  }
+
+  const group = new scope.Group({ insert: false }) as paper.Group
+  group.addChild(mask)
+  for (const node of content) group.addChild(node)
+  // The flag only takes on grouped paths: set it after inserting.
+  mask.clipMask = true
+  if (maskAny.fillColor !== undefined) maskAny.fillColor = null
+  if (maskAny.strokeColor !== undefined) maskAny.strokeColor = null
+  parent.insertChild(Math.min(at, parent.children.length), group)
+  group.data.id = e.genId()
+  group.data.isUserItem = true
+  e.clearSelection()
+  group.selected = true
+  e.syncSelectionToStore()
+  e.pushHistory('Make Clipping Mask')
+  e.scope.view.update()
+  return true
+}
+
+/**
+ * Release selected clipping groups: mask paints restore, children keep
+ * their stacking slots and the group dissolves. Pattern-fill groups take
+ * the pattern path instead (tiles are dropped, the base path restores).
+ */
+export function releaseClippingMask(e: EditorEngine): boolean {
+  const scope = e.scope
+  const groups = e.getSelection().filter(
+    (item) =>
+      !item.locked && item.parent && item instanceof scope.Group && isClipGroup(item)
+  ) as paper.Group[]
+  if (groups.length === 0) return false
+  const released: paper.Item[] = []
+  let releasedPattern = false
+  for (const group of groups) {
+    if (e.isPatternGroup(group)) {
+      const base = releasePatternGroup(e, group)
+      if (base) released.push(base)
+      releasedPattern = true
+      continue
+    }
+    const parent = group.parent ?? e.getActiveLayer()
+    let at = parent.children.indexOf(group)
+    if (at < 0) at = parent.children.length
+    for (const child of group.children.slice()) {
+      const node = child as any
+      if (node.clipMask) {
+        node.clipMask = false
+        const paint = node.data?.maskPaint as
+          | { fill: string | null; stroke: string | null; width: number }
+          | undefined
+        if (paint) {
+          if (node.fillColor !== undefined) node.fillColor = paint.fill
+          if (node.strokeColor !== undefined) node.strokeColor = paint.stroke
+          if (node.strokeWidth !== undefined && Number.isFinite(paint.width)) {
+            node.strokeWidth = paint.width
+          }
+        }
+        if (node.data) delete node.data.maskPaint
+      }
+      parent.insertChild(Math.min(at, parent.children.length), node)
+      at++
+      released.push(node)
+    }
+    group.remove()
+  }
+  e.clearSelection()
+  released.forEach((item) => {
+    item.selected = true
+  })
+  e.syncSelectionToStore()
+  if (releasedPattern) e.store.updateStyle({ pattern: null })
+  e.pushHistory('Release Clipping Mask')
+  e.scope.view.update()
+  return true
 }
