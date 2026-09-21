@@ -40,6 +40,7 @@ import * as text from './engine-text'
 import * as exporter from './engine-export'
 import * as arrange from './engine-arrange'
 import * as envelope from './engine-envelope'
+import * as masks from './engine-masks'
 import {
   TRACE_MIN_DIM,
   cleanTraceOptions,
@@ -1248,132 +1249,29 @@ export class EditorEngine {
   // ===== Opacity masks (AI/CDR parity) =====
 
   /** Get opacity mask from an item (or null). */
+  /** See engine-masks.ts. */
   getOpacityMask(item: paper.Item): OpacityMaskState | null {
-    const data = (item.data as any) ?? {}
-    return data.opacityMask ?? null
+    return masks.getOpacityMask(this, item)
   }
 
-  /** Create a default opacity mask state. */
-  private createDefaultOpacityMask(): OpacityMaskState {
-    return {
-      enabled: true,
-      invert: false,
-      contentJson: null,
-      bounds: null,
-    }
-  }
-
-  /**
-   * Apply an opacity mask to an item. The mask content is a Paper.js item
-   * whose luminance controls the alpha channel. For live preview, we use
-   * a simplified approach: the mask is stored and applied during export.
-   */
+  /** See engine-masks.ts. */
   applyOpacityMask(target: paper.Item, maskContent: paper.Item | null): void {
-    const data = (target.data as any) ?? {}
-    if (!maskContent) {
-      // Remove mask.
-      delete data.opacityMask
-      target.data = data
-      // Remove mask group if it exists.
-      if (target.parent instanceof this.scope.Group && (target.parent as any).data?.isOpacityMaskGroup) {
-        const group = target.parent
-        const parent = group.parent ?? this.getActiveLayer()
-        const at = parent.children.indexOf(group)
-        // Move target out of the group.
-        for (const child of group.children.slice()) {
-          if (child !== target) {
-            parent.insertChild(Math.min(at, parent.children.length), child)
-          }
-        }
-        group.remove()
-        target.selected = true
-      }
-      return
-    }
-
-    // Serialize the mask content for storage.
-    const contentJson = maskContent.exportJSON({ asString: true })
-    const bounds = maskContent.bounds ? {
-      x: maskContent.bounds.x,
-      y: maskContent.bounds.y,
-      width: maskContent.bounds.width,
-      height: maskContent.bounds.height,
-    } : null
-
-    const maskState: OpacityMaskState = {
-      enabled: true,
-      invert: false,
-      contentJson,
-      bounds,
-    }
-    data.opacityMask = maskState
-    target.data = data
-
-    // For live preview: wrap in a group with the mask applied via alpha.
-    // This is a simplified preview; full mask is applied during SVG export.
-    this.applyOpacityMaskPreview(target, maskContent)
+    masks.applyOpacityMask(this, target, maskContent)
   }
 
-  /**
-   * Simplified live preview of opacity mask using Paper.js group compositing.
-   * The full mask is applied during SVG/PDF export.
-   */
-  private applyOpacityMaskPreview(target: paper.Item, maskContent: paper.Item): void {
-    const scope = this.scope
-    const parent = target.parent ?? this.getActiveLayer()
-    const at = parent.children.indexOf(target)
-
-    // Create a group to hold the masked content.
-    const group = new scope.Group({ insert: false }) as paper.Group
-    ;(group as any).data = { isOpacityMaskGroup: true, id: this.genId(), isUserItem: true }
-
-    // Clone the target for the masked version.
-    const clone = target.clone({ insert: false }) as paper.Item
-    clone.data = { ...clone.data, isOpacityMaskClone: true }
-
-    // Create the mask shape (white fill = opaque, black = transparent).
-    const maskClone = maskContent.clone({ insert: false }) as paper.Item
-    maskClone.fillColor = new scope.Color(1, 1, 1) // White = opaque
-    maskClone.opacity = 0.5 // Semi-transparent for preview
-    ;(maskClone as any).data = { isOpacityMaskPreview: true }
-
-    group.addChild(clone)
-    group.addChild(maskClone)
-
-    // Replace the original with the group.
-    parent.insertChild(Math.min(at, parent.children.length), group)
-    target.remove()
-
-    // Store reference for cleanup.
-    const groupData = (group as any).data
-    groupData.maskedItemId = (clone as any).data?.id
-
-    this.scope.view.update()
-  }
-
-  /** Remove opacity mask from an item. */
+  /** See engine-masks.ts. */
   removeOpacityMask(item: paper.Item): void {
-    this.applyOpacityMask(item, null)
+    masks.removeOpacityMask(this, item)
   }
 
-  /** Toggle opacity mask enabled state. */
+  /** See engine-masks.ts. */
   toggleOpacityMask(item: paper.Item, enabled: boolean): void {
-    const data = (item.data as any) ?? {}
-    const mask = data.opacityMask as OpacityMaskState | undefined
-    if (mask) {
-      mask.enabled = enabled
-      item.data = data
-    }
+    masks.toggleOpacityMask(this, item, enabled)
   }
 
-  /** Toggle opacity mask invert. */
+  /** See engine-masks.ts. */
   toggleOpacityMaskInvert(item: paper.Item, invert: boolean): void {
-    const data = (item.data as any) ?? {}
-    const mask = data.opacityMask as OpacityMaskState | undefined
-    if (mask) {
-      mask.invert = invert
-      item.data = data
-    }
+    masks.toggleOpacityMaskInvert(this, item, invert)
   }
 
   // ===== Mesh gradients (simulated via triangle tessellation) =====
