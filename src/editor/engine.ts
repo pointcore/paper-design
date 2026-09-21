@@ -544,26 +544,9 @@ export class EditorEngine {
     this.scope.view.update()
   }
 
+  /** See engine-layers.ts. */
   getActiveLayer(): paper.Layer {
-    const activeId = this.store.activeLayerId
-    if (activeId) {
-      const layer = this.project.layers.find((l) => (l.data as any)?.layerId === activeId)
-      if (layer) return layer
-    }
-    const userLayers = this.project.layers.filter((l) => (l.data as any)?.isUserLayer)
-    const found = userLayers[userLayers.length - 1]
-    if (found) return found
-    // Degenerate stacks (bad imports, cleared projects) must never hand
-    // 30+ call sites an undefined layer: rebuild one silent user layer.
-    const layer = new this.scope.Layer()
-    layer.name = 'Layer 1'
-    layer.data.isUserLayer = true
-    layer.data.layerId = this.genId()
-    layers.parkUserLayer(this, layer)
-    layer.activate()
-    this.syncLayersToStore()
-    this.store.setActiveLayer(layer.data.layerId as string)
-    return layer
+    return layers.getActiveLayer(this)
   }
 
   /** See engine-layers.ts. */
@@ -1928,7 +1911,7 @@ export class EditorEngine {
     // Isolation hides ride in snapshots as plain visible=false: lift the
     // flagged ones so undo during isolation cannot hide artwork forever
     // (the mode itself is already dropped above).
-    for (const item of this.walkUserItems()) {
+    for (const item of layers.walkUserItems(this)) {
       if ((item.data as any)?.isolationHidden) {
         item.visible = true
         delete (item.data as any).isolationHidden
@@ -2647,7 +2630,7 @@ export class EditorEngine {
 
   /** Fold or unfold every group/sublayer in the document (panel menu). */
   setAllTreeCollapsed(collapsed: boolean): void {
-    for (const item of this.walkUserItems()) {
+    for (const item of layers.walkUserItems(this)) {
       if (item instanceof this.scope.Group && (item.data as any)?.id) {
         if (collapsed) (item.data as any).treeCollapsed = true
         else delete (item.data as any).treeCollapsed
@@ -4440,17 +4423,9 @@ export class EditorEngine {
     select.setSelectedLocked(this, locked)
   }
 
-  /** Unlock every user item in the document. */
+  /** See engine-layers.ts. */
   unlockAll(): void {
-    let changed = false
-    for (const item of this.walkUserItems()) {
-      if (item.locked) {
-        item.locked = false
-        changed = true
-      }
-    }
-    if (changed) this.pushHistory('Unlock All')
-    this.scope.view.update()
+    layers.unlockAll(this)
   }
 
   /** See engine-select.ts. */
@@ -4468,17 +4443,9 @@ export class EditorEngine {
     return select.reverseOrder(this)
   }
 
-  /** Show every user item in the document. */
+  /** See engine-layers.ts. */
   showAll(): void {
-    let changed = false
-    for (const item of this.walkUserItems()) {
-      if (!item.visible) {
-        item.visible = true
-        changed = true
-      }
-    }
-    if (changed) this.pushHistory('Show All')
-    this.scope.view.update()
+    layers.showAll(this)
   }
 
   /**
@@ -4576,7 +4543,7 @@ export class EditorEngine {
       ? String(reference.fontFamily || '')
       : Math.round((Number(reference.fontSize) || 0) * 100) / 100
     const matches: paper.PointText[] = []
-    for (const item of this.walkUserItems()) {
+    for (const item of layers.walkUserItems(this)) {
       if (!(item instanceof scope.PointText) || (item as any).locked) continue
       if (item === reference) continue
       const value = by === 'family'
@@ -4661,21 +4628,6 @@ export class EditorEngine {
       for (const child of layer.children) walk(child as paper.Item, layerHidden, layerLocked)
     }
     return out
-  }
-
-  /** Every user item including group descendants (lock / visibility sweeps). */
-  private *walkUserItems(): Generator<paper.Item> {
-    const walk = function* (item: paper.Item): Generator<paper.Item> {
-      yield item
-      const children = (item as any).children as paper.Item[] | undefined
-      if (children) {
-        for (const child of children) yield* walk(child)
-      }
-    }
-    for (const layer of this.project.layers) {
-      if (!(layer.data as any)?.isUserLayer) continue
-      for (const child of layer.children) yield* walk(child as paper.Item)
-    }
   }
 
   // ===== Path construction (compound / join / outline) =====
@@ -5421,7 +5373,7 @@ export class EditorEngine {
     }
     collect(root)
     this.isolationBackup.clear()
-    for (const item of this.walkUserItems()) {
+    for (const item of layers.walkUserItems(this)) {
       if (inside.has(item)) continue
       this.isolationBackup.set(item, item.visible)
       // Flag isolation-driven hides so snapshot restores can tell them

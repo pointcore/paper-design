@@ -315,3 +315,66 @@ export function setTreeCollapsed(e: EditorEngine, id: string, collapsed: boolean
   if (collapsed) (item.data as any).treeCollapsed = true
   else delete (item.data as any).treeCollapsed
 }
+
+export function getActiveLayer(e: EditorEngine): paper.Layer {
+  const activeId = e.store.activeLayerId
+  if (activeId) {
+    const layer = e.project.layers.find((l) => (l.data as any)?.layerId === activeId)
+    if (layer) return layer
+  }
+  const userLayers = e.project.layers.filter((l) => (l.data as any)?.isUserLayer)
+  const found = userLayers[userLayers.length - 1]
+  if (found) return found
+  // Degenerate stacks (bad imports, cleared projects) must never hand
+  // 30+ call sites an undefined layer: rebuild one silent user layer.
+  const layer = new e.scope.Layer()
+  layer.name = 'Layer 1'
+  layer.data.isUserLayer = true
+  layer.data.layerId = e.genId()
+  parkUserLayer(e, layer)
+  layer.activate()
+  e.syncLayersToStore()
+  e.store.setActiveLayer(layer.data.layerId as string)
+  return layer
+}
+
+/** Every user item including group descendants (lock / visibility sweeps). */
+export function* walkUserItems(e: EditorEngine): Generator<paper.Item> {
+  const walk = function* (item: paper.Item): Generator<paper.Item> {
+    yield item
+    const children = (item as any).children as paper.Item[] | undefined
+    if (children) {
+      for (const child of children) yield* walk(child)
+    }
+  }
+  for (const layer of e.project.layers) {
+    if (!(layer.data as any)?.isUserLayer) continue
+    for (const child of layer.children) yield* walk(child as paper.Item)
+  }
+}
+
+/** Unlock every user item in the document. */
+export function unlockAll(e: EditorEngine): void {
+  let changed = false
+  for (const item of walkUserItems(e)) {
+    if (item.locked) {
+      item.locked = false
+      changed = true
+    }
+  }
+  if (changed) e.pushHistory('Unlock All')
+  e.scope.view.update()
+}
+
+/** Show every user item in the document. */
+export function showAll(e: EditorEngine): void {
+  let changed = false
+  for (const item of walkUserItems(e)) {
+    if (!item.visible) {
+      item.visible = true
+      changed = true
+    }
+  }
+  if (changed) e.pushHistory('Show All')
+  e.scope.view.update()
+}
