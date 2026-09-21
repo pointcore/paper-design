@@ -44,6 +44,7 @@ import * as masks from './engine-masks'
 import * as patterns from './engine-patterns'
 import * as mesh from './engine-mesh'
 import * as blend from './engine-blend'
+import * as edit from './engine-edit'
 import {
   TRACE_MIN_DIM,
   cleanTraceOptions,
@@ -5303,101 +5304,24 @@ export class EditorEngine {
     }
   }
 
+  /** See engine-edit.ts. */
   deleteSelected() {
-    const items = this.getSelection().filter((item) => !item.locked)
-    if (items.length === 0) return
-    items.forEach((i) => i.remove())
-    this.clearSelection()
-    this.pushHistory('Delete')
-    this.scope.view.update()
+    edit.deleteSelected(this)
   }
 
+  /** See engine-edit.ts. */
   duplicateSelected() {
-    const items = this.getSelection()
-    if (items.length === 0) return
-    const activeLayer = this.getActiveLayer()
-    if (!activeLayer) return
-    // Clone from a snapshot and reselect only the clones: reselecting the
-    // sources too used to double the selection on every repeat (1→2→4→8).
-    const clones: paper.Item[] = []
-    for (const item of items) {
-      const clone = item.clone()
-      activeLayer.addChild(clone)
-      this.restampCloneTree(clone)
-      clone.data.id = this.genId()
-      clone.data.isUserItem = true
-      clones.push(clone)
-    }
-    this.clearSelection()
-    if (clones.length > 0) {
-      const dx = 10
-      const dy = 10
-      clones.forEach((c) => {
-        c.position = c.position.add(new this.scope.Point(dx, dy))
-        c.selected = true
-      })
-      this.syncSelectionToStore()
-      this.pushHistory('Duplicate')
-      this.scope.view.update()
-    }
+    edit.duplicateSelected(this)
   }
 
-  /**
-   * Reduce anchor counts on unlocked selected plain paths with zoom-scaled
-   * fitting tolerance. Returns how many paths lost anchors; records
-   * history only then.
-   */
+  /** See engine-edit.ts. */
   simplifyPaths(): number {
-    const scope = this.scope
-    const paths = this.getSelection().filter(
-      (item) =>
-        !item.locked &&
-        item.parent &&
-        item instanceof scope.Path &&
-        !(item instanceof scope.CompoundPath) &&
-        item.segments.length >= 2
-    ) as paper.Path[]
-    if (paths.length === 0) return 0
-    const tolerance = 2.5 / (scope.view.zoom || 1)
-    let changed = 0
-    for (const path of paths) {
-      const before = path.segments.length
-      try {
-        path.simplify(tolerance)
-      } catch {
-        continue
-      }
-      if (path.segments.length < before) changed++
-    }
-    if (changed > 0) {
-      this.pushHistory('Simplify')
-      this.scope.view.update()
-    }
-    return changed
+    return edit.simplifyPaths(this)
   }
 
-  /**
-   * Close open paths (connect ends) or open closed ones in the unlocked
-   * selection. Returns how many paths changed; records history only then.
-   */
+  /** See engine-edit.ts. */
   setPathsClosed(closed: boolean): number {
-    const scope = this.scope
-    const paths = this.getSelection().filter(
-      (item) =>
-        !item.locked &&
-        item.parent &&
-        item instanceof scope.Path &&
-        !(item instanceof scope.CompoundPath) &&
-        item.segments.length >= 2 &&
-        item.closed !== closed
-    ) as paper.Path[]
-    if (paths.length === 0) return 0
-    for (const path of paths) {
-      path.closed = closed
-    }
-    this.pushHistory(closed ? 'Close Path' : 'Open Path')
-    this.scope.view.update()
-    return paths.length
+    return edit.setPathsClosed(this, closed)
   }
 
   /**
