@@ -197,3 +197,44 @@ export function refreshGuides(e: EditorEngine) {
   layer.visible = e.store.view.showGuides
   e.scope.view.update()
 }
+
+/**
+ * Drop a guide through the selection center (vertical = X, horizontal =
+ * Y). Respects the guides lock. Returns false with no selection.
+ */
+export function guideAtSelection(e: EditorEngine, orientation: GuideOrientation): boolean {
+  if (e.store.view.guidesLocked) return false
+  const bounds = e.getSelectionBounds()
+  if (!bounds) return false
+  const pos = orientation === 'vertical' ? bounds.x + bounds.width / 2 : bounds.y + bounds.height / 2
+  if (!Number.isFinite(pos)) return false
+  const guide = createGuide(e, pos, orientation)
+  if (!guide) return false
+  e.pushHistory('Add Guide')
+  return true
+}
+
+/**
+ * Inset margin guides on a board (print-layout staple): two vertical +
+ * two horizontal guides at `margin` inside the sheet. Respects the
+ * guides lock. Returns guides created.
+ */
+export function addMarginGuides(e: EditorEngine, boardId: string, margin: number): number {
+  if (e.store.view.guidesLocked) return 0
+  const board = e.store.artboards.find((b) => b.id === boardId)
+  if (!board || !(board.width > 0) || !(board.height > 0)) return 0
+  const m = Number.isFinite(margin) ? Math.min(Math.min(board.width, board.height) / 2 - 1, Math.max(0, margin)) : 0
+  if (!(m > 0)) return 0
+  let made = 0
+  const specs: Array<[number, GuideOrientation]> = [
+    [board.x + m, 'vertical'],
+    [board.x + board.width - m, 'vertical'],
+    [board.y + m, 'horizontal'],
+    [board.y + board.height - m, 'horizontal'],
+  ]
+  for (const [pos, orientation] of specs) {
+    if (createGuide(e, pos, orientation)) made++
+  }
+  if (made > 0) e.pushHistory('Add Margin Guides')
+  return made
+}

@@ -7,7 +7,6 @@ import type { ToolName, StyleState, LayerMeta, LayerItemNode, ArtboardMeta, Symb
 import { createDefaultStyle } from './store'
 import { cursorForTool } from './cursors'
 import { gradientAngleFromVector } from './geometry'
-import { changeCaseText } from './text/text-case'
 import { alignSampledPoints, lerp, lerpRgba, rgbaToCss, sampleCountFor } from './blend/blend'
 import type { Rgba } from './color'
 import { colorDistanceRgb, invertCssColor, isOutOfCmykGamut, parseCssColor, rgbToCmyk, shiftCssColor } from './color'
@@ -37,6 +36,7 @@ import * as appearance from './engine-appearance'
 import * as symbols from './engine-symbols'
 import * as view from './engine-view'
 import * as select from './engine-select'
+import * as text from './engine-text'
 import {
   TRACE_MIN_DIM,
   cleanTraceOptions,
@@ -6839,193 +6839,39 @@ export class EditorEngine {
    * Placeholder Text parity): a sentence for point text, a passage for
    * area/path frames. Annotation labels excluded. One history entry.
    */
+  /** See engine-text.ts. */
   fillPlaceholder(): number {
-    const scope = this.scope
-    const sentence = 'Lorem ipsum dolor sit amet, consectetur adipiscing elit.'
-    const passage =
-      'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor ' +
-      'incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud ' +
-      'exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.'
-    let changed = 0
-    for (const item of this.getSelection()) {
-      if ((item as any).locked || !(item instanceof scope.PointText)) continue
-      if ((item as any).data?.annotation) continue
-      const mode = (item as any).data?.textMode as string | undefined
-      ;(item as any).content = mode && mode !== 'point' ? passage : sentence
-      changed++
-    }
-    if (changed > 0) {
-      this.pushHistory('Fill Placeholder Text')
-      this.scope.view.update()
-    }
-    return changed
+    return text.fillPlaceholder(this)
   }
 
-  /**
-   * Drop a guide through the selection center (vertical = X, horizontal =
-   * Y). Respects the guides lock. Returns false with no selection.
-   */
+  /** See engine-guides.ts. */
   guideAtSelection(orientation: GuideOrientation): boolean {
-    if (this.store.view.guidesLocked) return false
-    const bounds = this.getSelectionBounds()
-    if (!bounds) return false
-    const pos = orientation === 'vertical' ? bounds.x + bounds.width / 2 : bounds.y + bounds.height / 2
-    if (!Number.isFinite(pos)) return false
-    const guide = this.createGuide(pos, orientation)
-    if (!guide) return false
-    this.pushHistory('Add Guide')
-    return true
+    return guides.guideAtSelection(this, orientation)
   }
 
-  /**
-   * Inset margin guides on a board (print-layout staple): two vertical +
-   * two horizontal guides at `margin` inside the sheet. Respects the
-   * guides lock. Returns guides created.
-   */
+  /** See engine-guides.ts. */
   addMarginGuides(boardId: string, margin: number): number {
-    if (this.store.view.guidesLocked) return 0
-    const board = this.store.artboards.find((b) => b.id === boardId)
-    if (!board || !(board.width > 0) || !(board.height > 0)) return 0
-    const m = Number.isFinite(margin) ? Math.min(Math.min(board.width, board.height) / 2 - 1, Math.max(0, margin)) : 0
-    if (!(m > 0)) return 0
-    let made = 0
-    const specs: Array<[number, GuideOrientation]> = [
-      [board.x + m, 'vertical'],
-      [board.x + board.width - m, 'vertical'],
-      [board.y + m, 'horizontal'],
-      [board.y + board.height - m, 'horizontal'],
-    ]
-    for (const [pos, orientation] of specs) {
-      if (this.createGuide(pos, orientation)) made++
-    }
-    if (made > 0) this.pushHistory('Add Margin Guides')
-    return made
+    return guides.addMarginGuides(this, boardId, margin)
   }
 
-  /**
-   * UPPER / lower / Title Case selected point text (AI Change Case
-   * parity, annotation labels excluded). Returns runs changed.
-   */
+  /** See engine-text.ts. */
   changeCase(mode: 'upper' | 'lower' | 'title'): number {
-    const scope = this.scope
-    let changed = 0
-    for (const item of this.getSelection()) {
-      if ((item as any).locked || !(item instanceof scope.PointText)) continue
-      if ((item as any).data?.annotation) continue
-      const before = String((item as any).content ?? '')
-      const after = changeCaseText(before, mode)
-      if (after !== before) {
-        ;(item as any).content = after
-        changed++
-      }
-    }
-    if (changed > 0) {
-      this.pushHistory('Change Case')
-      this.scope.view.update()
-    }
-    return changed
+    return text.changeCase(this, mode)
   }
 
-  /**
-   * Break thread links on selected text frames (both directions): linked
-   * siblings forget the frame, the frame forgets them. Content stays put.
-   * Returns frames unlinked; one history entry.
-   */
+  /** See engine-text.ts. */
   unlinkTextFrames(): number {
-    const scope = this.scope
-    let changed = 0
-    for (const item of this.getSelection()) {
-      if ((item as any).locked || !(item instanceof scope.PointText)) continue
-      const data = (item as any).data ?? {}
-      const links = [data.threadNext, data.threadPrev].filter(
-        (id): id is string => typeof id === 'string' && id.length > 0
-      )
-      if (links.length === 0) continue
-      for (const id of links) {
-        const other = this.getItemById(id) as any
-        if (!other?.data) continue
-        if (other.data.threadNext === data.id) delete other.data.threadNext
-        if (other.data.threadPrev === data.id) delete other.data.threadPrev
-      }
-      delete data.threadNext
-      delete data.threadPrev
-      changed++
-    }
-    if (changed > 0) {
-      this.pushHistory('Unlink Text')
-      this.scope.view.update()
-    }
-    return changed
+    return text.unlinkTextFrames(this)
   }
 
-  /**
-   * Thread selected area frames left-to-right (AI thread-text parity):
-   * each frame links to the next, replacing existing links on the chain.
-   * Needs 2+ unlocked area frames. One history entry.
-   */
+  /** See engine-text.ts. */
   threadSelectedFrames(): number {
-    const scope = this.scope
-    const frames = this.getSelection().filter(
-      (item) =>
-        !(item as any).locked &&
-        item.parent &&
-        item instanceof scope.PointText &&
-        (item as any).data?.textMode === 'area' &&
-        !(item as any).data?.annotation
-    ) as paper.PointText[]
-    if (frames.length < 2) return 0
-    const ordered = frames.slice().sort((a, b) => {
-      const fa = (a as any).data?.frame
-      const fb = (b as any).data?.frame
-      const ax = Number(fa?.x) || 0
-      const bx = Number(fb?.x) || 0
-      if (ax !== bx) return ax - bx
-      return (Number(fa?.y) || 0) - (Number(fb?.y) || 0)
-    })
-    // Detach the chain members first so no stale cross-links survive.
-    for (const frame of ordered) {
-      const data = (frame as any).data ?? ((frame as any).data = {})
-      if (typeof data.id !== 'string' || !data.id) data.id = this.genId()
-      for (const id of [data.threadNext, data.threadPrev]) {
-        if (typeof id !== 'string' || !id) continue
-        const other = this.getItemById(id) as any
-        if (!other?.data) continue
-        if (other.data.threadNext === data.id) delete other.data.threadNext
-        if (other.data.threadPrev === data.id) delete other.data.threadPrev
-      }
-      delete data.threadNext
-      delete data.threadPrev
-    }
-    for (let i = 0; i + 1 < ordered.length; i++) {
-      const a = (ordered[i] as any).data
-      const b = (ordered[i + 1] as any).data
-      a.threadNext = b.id
-      b.threadPrev = a.id
-    }
-    this.pushHistory('Thread Text')
-    this.scope.view.update()
-    return ordered.length
+    return text.threadSelectedFrames(this)
   }
 
-  /**
-   * Jump the selection along a thread chain (prev/next frame). Needs a
-   * single selected area frame with that link. No history (selection).
-   */
+  /** See engine-text.ts. */
   selectThreadNeighbor(direction: 'next' | 'prev'): boolean {
-    const scope = this.scope
-    const items = this.getSelection()
-    if (items.length !== 1) return false
-    const item = items[0]
-    if (!(item instanceof scope.PointText) || (item as any).data?.textMode !== 'area') return false
-    const id = (item as any).data?.[direction === 'next' ? 'threadNext' : 'threadPrev']
-    if (typeof id !== 'string' || !id) return false
-    const other = this.getItemById(id)
-    if (!other) return false
-    this.clearSelection()
-    other.selected = true
-    this.syncSelectionToStore()
-    this.scope.view.update()
-    return true
+    return text.selectThreadNeighbor(this, direction)
   }
 
   /**
@@ -7046,101 +6892,19 @@ export class EditorEngine {
     return appearance.clearAppearance(this)
   }
 
-  /** Every text run in the document (annotation labels excluded). */
-  private allTextRuns(): paper.PointText[] {
-    const scope = this.scope
-    const out: paper.PointText[] = []
-    const walk = (node: paper.Item) => {
-      const data = (node as any).data ?? {}
-      if (data.isChrome || data.isPreview || data.isGuide || data.isArtboard || data.annotation) return
-      if (node instanceof scope.PointText) {
-        out.push(node)
-        return
-      }
-      const children = (node as any).children as paper.Item[] | undefined
-      if (children) for (const child of children) walk(child)
-    }
-    for (const layer of this.project.layers) {
-      if (!(layer.data as any)?.isUserLayer) continue
-      for (const child of layer.children) walk(child as paper.Item)
-    }
-    return out
-  }
-
-  /**
-   * Text runs whose content contains the query (AI Find parity).
-   * Empty queries match nothing; matching is case-sensitive and
-   * whole-word on demand.
-   */
+  /** See engine-text.ts. */
   findText(query: string, matchCase = false, wholeWord = false): paper.PointText[] {
-    if (!query) return []
-    const test = (content: string): boolean => {
-      if (wholeWord) {
-        const flags = matchCase ? 'g' : 'gi'
-        try {
-          return new RegExp(`\\b${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, flags).test(content)
-        } catch {
-          return false
-        }
-      }
-      const needle = matchCase ? query : query.toLowerCase()
-      return matchCase ? content.includes(needle) : content.toLowerCase().includes(needle)
-    }
-    return this.allTextRuns().filter((item) => test(String((item as any).content ?? '')))
+    return text.findText(this, query, matchCase, wholeWord)
   }
 
-  /**
-   * Replace the query across selected text runs (AI Change/Change All
-   * parity). Returns runs changed; one history entry.
-   */
+  /** See engine-text.ts. */
   replaceText(find: string, replace: string, matchCase = false, wholeWord = false): number {
-    if (!find) return 0
-    const scope = this.scope
-    const pattern = wholeWord
-      ? new RegExp(`\\b${find.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, matchCase ? 'g' : 'gi')
-      : null
-    let changed = 0
-    for (const item of this.getSelection()) {
-      if ((item as any).locked || !(item instanceof scope.PointText)) continue
-      if ((item as any).data?.annotation) continue
-      const before = String((item as any).content ?? '')
-      let after = before
-      try {
-        after = pattern
-          ? before.replace(pattern, replace)
-          : matchCase
-            ? before.split(find).join(replace)
-            : before.replace(new RegExp(find.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), replace)
-      } catch {
-        continue
-      }
-      if (after !== before) {
-        ;(item as any).content = after
-        changed++
-      }
-    }
-    if (changed > 0) {
-      this.pushHistory('Replace Text')
-      this.scope.view.update()
-    }
-    return changed
+    return text.replaceText(this, find, replace, matchCase, wholeWord)
   }
 
-  /** Word/character totals over the selection (else the document). */
+  /** See engine-text.ts. */
   textStats(): { words: number; chars: number; runs: number } {
-    const scope = this.scope
-    const sel = this.getSelection().filter(
-      (item) => !(item as any).locked && item instanceof scope.PointText && !(item as any).data?.annotation
-    ) as paper.PointText[]
-    const runs = sel.length > 0 ? sel : this.allTextRuns()
-    let words = 0
-    let chars = 0
-    for (const item of runs) {
-      const content = String((item as any).content ?? '')
-      chars += content.length
-      words += content.trim().split(/\s+/).filter(Boolean).length
-    }
-    return { words, chars, runs: runs.length }
+    return text.textStats(this)
   }
 
   /** One preflight finding (print-readiness check). */
