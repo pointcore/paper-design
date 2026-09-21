@@ -336,3 +336,16 @@ export function setSpotForSelection(e: EditorEngine, fill: string | null, stroke
   e.pushHistory('Spot Color')
   e.scope.view.update()
 }
+
+/**
+ * Load the first selected item's appearance into the store defaults
+ * (future shapes; the document is untouched, so no history). Returns
+ * false with an empty selection.
+ */
+export function setDefaultsFromSelection(e: EditorEngine): boolean {
+  const first = e.getSelection()[0]
+  if (!first) return false
+  e.store.updateStyle({ ...e.getStyleFromItem(first) })
+  e.showStatus('Defaults loaded from selection')
+  return true
+}

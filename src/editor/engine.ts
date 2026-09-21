@@ -37,6 +37,7 @@ import * as symbols from './engine-symbols'
 import * as view from './engine-view'
 import * as select from './engine-select'
 import * as text from './engine-text'
+import * as exporter from './engine-export'
 import {
   TRACE_MIN_DIM,
   cleanTraceOptions,
@@ -5879,19 +5880,9 @@ export class EditorEngine {
 
   // ===== System clipboard (SVG exchange) =====
 
-  /** Serialize unlocked selected user items into a standalone SVG string. */
+  /** See engine-export.ts. */
   exportSelectionSVG(): string | null {
-    const items = this.getSelection().filter(
-      (item) => (item.data as any)?.isUserItem && !item.locked
-    )
-    if (items.length === 0) return null
-    const bodies = items.map((item) => {
-      const exported = item.exportSVG()
-      return typeof exported === 'string'
-        ? exported
-        : new XMLSerializer().serializeToString(exported)
-    })
-    return `<svg xmlns="http://www.w3.org/2000/svg">${bodies.join('')}</svg>`
+    return exporter.exportSelectionSVG(this)
   }
 
   /**
@@ -6874,17 +6865,9 @@ export class EditorEngine {
     return text.selectThreadNeighbor(this, direction)
   }
 
-  /**
-   * Load the first selected item's appearance into the store defaults
-   * (future shapes; the document is untouched, so no history). Returns
-   * false with an empty selection.
-   */
+  /** See engine-appearance.ts. */
   setDefaultsFromSelection(): boolean {
-    const first = this.getSelection()[0]
-    if (!first) return false
-    this.store.updateStyle({ ...this.getStyleFromItem(first) })
-    this.showStatus('Defaults loaded from selection')
-    return true
+    return appearance.setDefaultsFromSelection(this)
   }
 
   /** See engine-appearance.ts. */
