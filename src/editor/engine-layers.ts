@@ -253,3 +253,65 @@ export function mergeLayerBelow(e: EditorEngine): boolean {
   e.scope.view.update()
   return true
 }
+
+export function getItemById(e: EditorEngine, id: string): paper.Item | null {
+  if (!id) return null
+  const walk = (item: paper.Item): paper.Item | null => {
+    if ((item.data as any)?.id === id) return item
+    const children = (item as any).children as paper.Item[] | undefined
+    if (children) {
+      for (const child of children) {
+        const found = walk(child)
+        if (found) return found
+      }
+    }
+    return null
+  }
+  for (const layer of e.project.layers) {
+    if (!(layer.data as any)?.isUserLayer) continue
+    for (const child of layer.children) {
+      const found = walk(child as paper.Item)
+      if (found) return found
+    }
+  }
+  return null
+}
+
+/** Select one object-tree entry (shift extends the selection). */
+export function selectItemById(e: EditorEngine, id: string, additive = false): void {
+  const item = getItemById(e, id)
+  if (!item || (item as any).locked) return
+  if (!additive) e.project.deselectAll()
+  item.selected = true
+  e.syncSelectionToStore()
+  e.scope.view.update()
+}
+
+/** Toggle one object-tree entry visibility. */
+export function setItemVisible(e: EditorEngine, id: string, visible: boolean): void {
+  const item = getItemById(e, id)
+  if (!item) return
+  item.visible = visible
+  e.pushHistory(visible ? 'Show' : 'Hide')
+  e.scope.view.update()
+}
+
+/** Toggle one object-tree entry lock. */
+export function setItemLocked(e: EditorEngine, id: string, locked: boolean): void {
+  const item = getItemById(e, id)
+  if (!item) return
+  item.locked = locked
+  e.pushHistory(locked ? 'Lock' : 'Unlock')
+  e.scope.view.update()
+}
+
+/**
+ * Fold or unfold an object-tree group entry. View-only paper metadata:
+ * no history entry, the panel refreshes itself after toggling.
+ */
+export function setTreeCollapsed(e: EditorEngine, id: string, collapsed: boolean): void {
+  const item = getItemById(e, id)
+  if (!item || !(item instanceof e.scope.Group)) return
+  if (collapsed) (item.data as any).treeCollapsed = true
+  else delete (item.data as any).treeCollapsed
+}

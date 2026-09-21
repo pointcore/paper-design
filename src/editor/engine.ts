@@ -2615,37 +2615,14 @@ export class EditorEngine {
   }
 
   /** Find any user-layer item by its document id (depth-first). */
+  /** See engine-layers.ts. */
   getItemById(id: string): paper.Item | null {
-    if (!id) return null
-    const walk = (item: paper.Item): paper.Item | null => {
-      if ((item.data as any)?.id === id) return item
-      const children = (item as any).children as paper.Item[] | undefined
-      if (children) {
-        for (const child of children) {
-          const found = walk(child)
-          if (found) return found
-        }
-      }
-      return null
-    }
-    for (const layer of this.project.layers) {
-      if (!(layer.data as any)?.isUserLayer) continue
-      for (const child of layer.children) {
-        const found = walk(child as paper.Item)
-        if (found) return found
-      }
-    }
-    return null
+    return layers.getItemById(this, id)
   }
 
-  /** Select one object-tree entry (shift extends the selection). */
+  /** See engine-layers.ts. */
   selectItemById(id: string, additive = false): void {
-    const item = this.getItemById(id)
-    if (!item || (item as any).locked) return
-    if (!additive) this.project.deselectAll()
-    item.selected = true
-    this.syncSelectionToStore()
-    this.scope.view.update()
+    layers.selectItemById(this, id, additive)
   }
 
   /** See engine-select.ts. */
@@ -2653,33 +2630,19 @@ export class EditorEngine {
     select.invertSelection(this)
   }
 
-  /** Toggle one object-tree entry visibility. */
+  /** See engine-layers.ts. */
   setItemVisible(id: string, visible: boolean): void {
-    const item = this.getItemById(id)
-    if (!item) return
-    item.visible = visible
-    this.pushHistory(visible ? 'Show' : 'Hide')
-    this.scope.view.update()
+    layers.setItemVisible(this, id, visible)
   }
 
-  /** Toggle one object-tree entry lock. */
+  /** See engine-layers.ts. */
   setItemLocked(id: string, locked: boolean): void {
-    const item = this.getItemById(id)
-    if (!item) return
-    item.locked = locked
-    this.pushHistory(locked ? 'Lock' : 'Unlock')
-    this.scope.view.update()
+    layers.setItemLocked(this, id, locked)
   }
 
-  /**
-   * Fold or unfold an object-tree group entry. View-only paper metadata:
-   * no history entry, the panel refreshes itself after toggling.
-   */
+  /** See engine-layers.ts. */
   setTreeCollapsed(id: string, collapsed: boolean): void {
-    const item = this.getItemById(id)
-    if (!item || !(item instanceof this.scope.Group)) return
-    if (collapsed) (item.data as any).treeCollapsed = true
-    else delete (item.data as any).treeCollapsed
+    layers.setTreeCollapsed(this, id, collapsed)
   }
 
   /** Fold or unfold every group/sublayer in the document (panel menu). */
