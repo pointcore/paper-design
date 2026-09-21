@@ -404,30 +404,9 @@ export class EditorEngine {
     return this.controllers.get(toolName) ?? null
   }
 
-  /**
-   * Current selection reduced to top-most members. Paper groups propagate
-   * the selected flag to their whole subtree (`_selectChildren`), so the
-   * raw list contains every descendant — operating on those as well would
-   * apply every transform/copy/order op twice (once via the group, once
-   * directly). All document ops go through here and therefore treat a
-   * selected group as one unit, like Illustrator.
-   */
+  /** See engine-select.ts. */
   getSelection(): paper.Item[] {
-    return this.topmostItems(this.project.selectedItems as paper.Item[])
-  }
-
-  /** Drop items nested inside another included item (selection de-dup). */
-  private topmostItems(items: paper.Item[]): paper.Item[] {
-    if (items.length < 2) return items.slice()
-    const set = new Set(items)
-    return items.filter((item) => {
-      let at = item.parent
-      while (at) {
-        if (set.has(at as paper.Item)) return false
-        at = at.parent
-      }
-      return true
-    })
+    return select.getSelection(this)
   }
 
   clearSelection() {
@@ -437,41 +416,23 @@ export class EditorEngine {
     this.refreshSelectionChrome()
   }
 
+  /** See engine-select.ts. */
   selectItem(item: paper.Item, addToSelection = false) {
-    if (!addToSelection) {
-      this.project.deselectAll()
-    }
-    item.selected = true
-    this.syncSelectionToStore()
+    select.selectItem(this, item, addToSelection)
   }
 
-  /**
-   * Restore an id list as the selection, skipping missing items (AI
-   * Reselect / saved-selection loading). Returns how many were selected.
-   */
+  /** See engine-select.ts. */
   selectByIds(ids: string[]): number {
-    let n = 0
-    this.project.deselectAll()
-    for (const id of ids) {
-      const item = this.getItemById(id)
-      if (!item || (item as any).locked) continue
-      item.selected = true
-      n++
-    }
-    this.syncSelectionToStore()
-    this.scope.view.update()
-    return n
+    return select.selectByIds(this, ids)
   }
 
-  /** Re-select the previous selection (AI Select > Reselect parity). */
+  /** See engine-select.ts. */
   reselect(): number {
-    const ids = [...(this.store.lastSelection ?? [])]
-    if (ids.length === 0) return 0
-    return this.selectByIds(ids)
+    return select.reselect(this)
   }
 
   syncSelectionToStore() {
-    const ids = this.topmostItems(this.project.selectedItems as paper.Item[]).map(
+    const ids = select.topmostItems(this.project.selectedItems as paper.Item[]).map(
       (item) => (item as any).data?.id as string
     )
     this.store.setSelection(ids.filter(Boolean))

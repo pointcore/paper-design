@@ -12,7 +12,7 @@
 import type paper from 'paper'
 import type { EditorEngine } from './engine'
 import { colorDistanceRgb, colorToCSS, parseCssColor } from './color'
-import { walkUserItems } from './engine-layers'
+import { getItemById, walkUserItems } from './engine-layers'
 
 /**
  * Select every visible unlocked top-level user item across all layers.
@@ -521,4 +521,63 @@ function appearanceLeaves(e: EditorEngine): paper.Item[] {
     for (const child of layer.children) walk(child as paper.Item, layerHidden, layerLocked)
   }
   return out
+}
+
+/**
+ * Current selection reduced to top-most members. Paper groups propagate
+ * the selected flag to their whole subtree (`_selectChildren`), so the
+ * raw list contains every descendant — operating on those as well would
+ * apply every transform/copy/order op twice (once via the group, once
+ * directly). All document ops go through here and therefore treat a
+ * selected group as one unit, like Illustrator.
+ */
+export function getSelection(e: EditorEngine): paper.Item[] {
+  return topmostItems(e.project.selectedItems as paper.Item[])
+}
+
+/** Drop items nested inside another included item (selection de-dup). */
+export function topmostItems(items: paper.Item[]): paper.Item[] {
+  if (items.length < 2) return items.slice()
+  const set = new Set(items)
+  return items.filter((item) => {
+    let at = item.parent
+    while (at) {
+      if (set.has(at as paper.Item)) return false
+      at = at.parent
+    }
+    return true
+  })
+}
+
+export function selectItem(e: EditorEngine, item: paper.Item, addToSelection = false) {
+  if (!addToSelection) {
+    e.project.deselectAll()
+  }
+  item.selected = true
+  e.syncSelectionToStore()
+}
+
+/**
+ * Restore an id list as the selection, skipping missing items (AI
+ * Reselect / saved-selection loading). Returns how many were selected.
+ */
+export function selectByIds(e: EditorEngine, ids: string[]): number {
+  let n = 0
+  e.project.deselectAll()
+  for (const id of ids) {
+    const item = getItemById(e, id)
+    if (!item || (item as any).locked) continue
+    item.selected = true
+    n++
+  }
+  e.syncSelectionToStore()
+  e.scope.view.update()
+  return n
+}
+
+/** Re-select the previous selection (AI Select > Reselect parity). */
+export function reselect(e: EditorEngine): number {
+  const ids = [...(e.store.lastSelection ?? [])]
+  if (ids.length === 0) return 0
+  return selectByIds(e, ids)
 }
