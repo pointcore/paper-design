@@ -7,8 +7,8 @@
  * method body unchanged. The EditorEngine import is type-only, so the
  * runtime dependency flows one way (engine → engine-layers). Layer
  * infrastructure that owns private engine fields (`initLayers`,
- * `getActiveLayer`, `getOverlayLayer`, `getAnnotationLayer`) stays on
- * the engine, as does the object-tree section below it.
+ * `getOverlayLayer`, `getAnnotationLayer`) stays on the engine, as do
+ * grid chrome and the thumbnail render cache.
  */
 import type paper from 'paper'
 import type { EditorEngine } from './engine'
@@ -678,4 +678,16 @@ export function getItemParentId(e: EditorEngine, id: string): string {
     return ((item.parent.data as any)?.id as string | undefined) ?? ''
   }
   return ''
+}
+
+export function getUserItems(e: EditorEngine): paper.Item[] {
+  const items: paper.Item[] = []
+  for (const layer of e.project.layers) {
+    if ((layer.data as any)?.isUserLayer && layer.visible) {
+      layer.children.forEach((child: any) => {
+        if (child.visible && !child.data?.isPreview) items.push(child)
+      })
+    }
+  }
+  return items
 }

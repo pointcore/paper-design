@@ -899,8 +899,9 @@ export class EditorEngine {
     view.zoomAt(this, scale, canvasX, canvasY)
   }
 
+  /** See engine-view.ts. */
   fitToContent() {
-    this.fitBounds(arrange.unitedBoundsOf(this.getUserItems()))
+    view.fitToContent(this)
   }
 
   /** Fit the view to the current selection bounds (View menu). */
@@ -914,56 +915,24 @@ export class EditorEngine {
     return view.navigateArtboards(this, step)
   }
 
+  /** See engine-view.ts. */
   zoomToSelection(): void {
-    this.fitBounds(this.getSelectionBounds())
+    view.zoomToSelection(this)
   }
 
-  /** Fit the view to the active artboard sheet (View menu). */
+  /** See engine-view.ts. */
   zoomToArtboard(): void {
-    this.fitBounds(this.getActiveArtboardRect())
+    view.zoomToArtboard(this)
   }
 
-  /** Reset the view zoom to 100% (View menu, Ctrl+1). */
+  /** See engine-view.ts. */
   zoomToActualSize(): void {
-    this.zoom = 1
-    this.scope.view.zoom = 1
-    this.syncViewBookkeeping()
-    this.store.updateView({ zoom: 1 })
-    this.scope.view.update()
-    this.refreshGrid()
-    this.emitViewChange()
+    view.zoomToActualSize(this)
   }
 
-  /** Zoom the view to frame bounds with padding (ignores empty bounds). */
-  private fitBounds(bounds: paper.Rectangle | null): void {
-    if (!bounds || bounds.width <= 0 || bounds.height <= 0) return
-    const padding = 50
-    const zoom = Math.min(
-      (this.canvas.width - padding * 2) / bounds.width,
-      (this.canvas.height - padding * 2) / bounds.height,
-      100
-    )
-    const v = this.scope.view
-    v.zoom = zoom
-    v.center = bounds.center.clone()
-    this.syncViewBookkeeping()
-    v.update()
-    this.refreshGrid()
-    this.refreshGuideWidths()
-    this.store.updateView({ zoom: this.zoom })
-    this.emitViewChange()
-  }
-
+  /** See engine-layers.ts. */
   getUserItems(): paper.Item[] {
-    const items: paper.Item[] = []
-    for (const layer of this.project.layers) {
-      if ((layer.data as any)?.isUserLayer && layer.visible) {
-        layer.children.forEach((child: any) => {
-          if (child.visible && !child.data?.isPreview) items.push(child)
-        })
-      }
-    }
-    return items
+    return layers.getUserItems(this)
   }
 
   applyStyleToItem(item: paper.Item, style: StyleState) {

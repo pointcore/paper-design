@@ -10,6 +10,7 @@
  */
 import type paper from 'paper'
 import type { EditorEngine } from './engine'
+import * as arrange from './engine-arrange'
 
 /** Center the view on a document point (artboard activation). */
 export function panViewTo(e: EditorEngine, point: paper.Point): void {
@@ -93,4 +94,49 @@ export function navigateArtboards(e: EditorEngine, step: number): boolean {
   e.refreshArtboards()
   panViewTo(e, new e.scope.Point(board.x + board.width / 2, board.y + board.height / 2))
   return true
+}
+
+export function fitToContent(e: EditorEngine) {
+  fitBounds(e, arrange.unitedBoundsOf(e.getUserItems()))
+}
+
+/** Fit the view to the current selection bounds (View menu). */
+export function zoomToSelection(e: EditorEngine): void {
+  fitBounds(e, arrange.getSelectionBounds(e))
+}
+
+/** Fit the view to the active artboard sheet (View menu). */
+export function zoomToArtboard(e: EditorEngine): void {
+  fitBounds(e, e.getActiveArtboardRect())
+}
+
+/** Reset the view zoom to 100% (View menu, Ctrl+1). */
+export function zoomToActualSize(e: EditorEngine): void {
+  e.zoom = 1
+  e.scope.view.zoom = 1
+  e.syncViewBookkeeping()
+  e.store.updateView({ zoom: 1 })
+  e.scope.view.update()
+  e.refreshGrid()
+  e.emitViewChange()
+}
+
+/** Zoom the view to frame bounds with padding (ignores empty bounds). */
+function fitBounds(e: EditorEngine, bounds: paper.Rectangle | null): void {
+  if (!bounds || bounds.width <= 0 || bounds.height <= 0) return
+  const padding = 50
+  const zoom = Math.min(
+    (e.canvas.width - padding * 2) / bounds.width,
+    (e.canvas.height - padding * 2) / bounds.height,
+    100
+  )
+  const v = e.scope.view
+  v.zoom = zoom
+  v.center = bounds.center.clone()
+  e.syncViewBookkeeping()
+  v.update()
+  e.refreshGrid()
+  e.refreshGuideWidths()
+  e.store.updateView({ zoom: e.zoom })
+  e.emitViewChange()
 }
