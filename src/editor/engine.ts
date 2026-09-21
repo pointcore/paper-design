@@ -4362,46 +4362,24 @@ export class EditorEngine {
 
   // ===== Object order / visibility / select-same =====
 
-  /**
-   * Bring the selection to the very front (top of each parent stack).
-   * Returns false (no history) when nothing is selected.
-   */
+  /** See engine-select.ts. */
   bringSelectionToFront(): boolean {
-    const items = this.getSelection().filter((i) => !i.locked)
-    if (items.length === 0) return false
-    items.forEach((i) => i.bringToFront())
-    this.scope.view.update()
-    this.pushHistory('Bring to Front')
-    return true
+    return select.bringSelectionToFront(this)
   }
 
-  /**
-   * Send the selection to the very back. Returns false when empty.
-   */
+  /** See engine-select.ts. */
   sendSelectionToBack(): boolean {
-    const items = this.getSelection().filter((i) => !i.locked)
-    if (items.length === 0) return false
-    items.forEach((i) => i.sendToBack())
-    this.scope.view.update()
-    this.pushHistory('Send to Back')
-    return true
+    return select.sendSelectionToBack(this)
   }
 
-  /**
-   * Move every selected item one step towards the front within its parent.
-   * Items move front-most first so multi-selections keep their order.
-   */
+  /** See engine-select.ts. */
   bringForward(): void {
-    this.shiftSelectedOrder(1)
-    this.pushHistory('Bring Forward')
-    this.scope.view.update()
+    select.bringForward(this)
   }
 
-  /** Move every selected item one step towards the back within its parent. */
+  /** See engine-select.ts. */
   sendBackward(): void {
-    this.shiftSelectedOrder(-1)
-    this.pushHistory('Send Backward')
-    this.scope.view.update()
+    select.sendBackward(this)
   }
 
   /**
@@ -4492,36 +4470,6 @@ export class EditorEngine {
   /** See engine-select.ts. */
   selectAllOnActiveArtboard(): number {
     return select.selectAllOnActiveArtboard(this)
-  }
-
-  /** Swap each selected item with the sibling beside it in `direction`. */
-  private shiftSelectedOrder(direction: 1 | -1): void {
-    const moving = new Set(this.getSelection())
-    if (moving.size === 0) return
-    const byParent = new Map<paper.Item, paper.Item[]>()
-    for (const item of moving) {
-      const parent = item.parent
-      if (!parent) continue
-      const list = byParent.get(parent) ?? []
-      list.push(item)
-      byParent.set(parent, list)
-    }
-    for (const [parent, items] of byParent) {
-      const children = parent.children as paper.Item[]
-      items.sort((a, b) =>
-        direction > 0
-          ? children.indexOf(b) - children.indexOf(a)
-          : children.indexOf(a) - children.indexOf(b)
-      )
-      for (const item of items) {
-        const at = children.indexOf(item)
-        const target = at + direction
-        if (target < 0 || target >= children.length) continue
-        // A selected neighbor travels with the block: leave it in place.
-        if (moving.has(children[target])) continue
-        parent.insertChild(target, item)
-      }
-    }
   }
 
   /** See engine-select.ts. */

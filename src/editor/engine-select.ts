@@ -217,3 +217,75 @@ export function moveSelectionToActiveLayer(e: EditorEngine): number {
   e.scope.view.update()
   return picked.length
 }
+
+/** Swap each selected item with the sibling beside it in `direction`. */
+function shiftSelectedOrder(e: EditorEngine, direction: 1 | -1): void {
+  const moving = new Set(e.getSelection())
+  if (moving.size === 0) return
+  const byParent = new Map<paper.Item, paper.Item[]>()
+  for (const item of moving) {
+    const parent = item.parent
+    if (!parent) continue
+    const list = byParent.get(parent) ?? []
+    list.push(item)
+    byParent.set(parent, list)
+  }
+  for (const [parent, items] of byParent) {
+    const children = parent.children as paper.Item[]
+    items.sort((a, b) =>
+      direction > 0
+        ? children.indexOf(b) - children.indexOf(a)
+        : children.indexOf(a) - children.indexOf(b)
+    )
+    for (const item of items) {
+      const at = children.indexOf(item)
+      const target = at + direction
+      if (target < 0 || target >= children.length) continue
+      // A selected neighbor travels with the block: leave it in place.
+      if (moving.has(children[target])) continue
+      parent.insertChild(target, item)
+    }
+  }
+}
+
+/**
+ * Bring the selection to the very front (top of each parent stack).
+ * Returns false (no history) when nothing is selected.
+ */
+export function bringSelectionToFront(e: EditorEngine): boolean {
+  const items = e.getSelection().filter((i) => !i.locked)
+  if (items.length === 0) return false
+  items.forEach((i) => i.bringToFront())
+  e.scope.view.update()
+  e.pushHistory('Bring to Front')
+  return true
+}
+
+/**
+ * Send the selection to the very back. Returns false when empty.
+ */
+export function sendSelectionToBack(e: EditorEngine): boolean {
+  const items = e.getSelection().filter((i) => !i.locked)
+  if (items.length === 0) return false
+  items.forEach((i) => i.sendToBack())
+  e.scope.view.update()
+  e.pushHistory('Send to Back')
+  return true
+}
+
+/**
+ * Move every selected item one step towards the front within its parent.
+ * Items move front-most first so multi-selections keep their order.
+ */
+export function bringForward(e: EditorEngine): void {
+  shiftSelectedOrder(e, 1)
+  e.pushHistory('Bring Forward')
+  e.scope.view.update()
+}
+
+/** Move every selected item one step towards the back within its parent. */
+export function sendBackward(e: EditorEngine): void {
+  shiftSelectedOrder(e, -1)
+  e.pushHistory('Send Backward')
+  e.scope.view.update()
+}
