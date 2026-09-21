@@ -12,7 +12,7 @@
 import type paper from 'paper'
 import type { EditorEngine } from './engine'
 import { colorDistanceRgb, colorToCSS, parseCssColor } from './color'
-import { getItemById, walkUserItems } from './engine-layers'
+import { getItemById, isClipGroup, walkUserItems } from './engine-layers'
 
 /**
  * Select every visible unlocked top-level user item across all layers.
@@ -290,14 +290,6 @@ export function sendBackward(e: EditorEngine): void {
   shiftSelectedOrder(e, -1)
   e.pushHistory('Send Backward')
   e.scope.view.update()
-}
-
-/** Whether a group clips through a masked child. */
-export function isClipGroup(group: paper.Group): boolean {
-  for (const child of group.children) {
-    if ((child as any).clipMask) return true
-  }
-  return false
 }
 
 /**

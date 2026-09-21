@@ -378,3 +378,304 @@ export function showAll(e: EditorEngine): void {
   if (changed) e.pushHistory('Show All')
   e.scope.view.update()
 }
+
+export function setAllTreeCollapsed(e: EditorEngine, collapsed: boolean): void {
+  for (const item of walkUserItems(e)) {
+    if (item instanceof e.scope.Group && (item.data as any)?.id) {
+      if (collapsed) (item.data as any).treeCollapsed = true
+      else delete (item.data as any).treeCollapsed
+    }
+  }
+  e.scope.view.update()
+}
+
+/** First unused "Sublayer N" name inside a parent container. */
+export function nextSublayerName(parent: paper.Item): string {
+  const names = new Set(
+    ((parent as any).children as paper.Item[]).map(
+      (c) => ((c as any).name as string | undefined) ?? ''
+    )
+  )
+  let n = (parent as any).children.length + 1
+  while (names.has(`Sublayer ${n}`)) n++
+  return `Sublayer ${n}`
+}
+
+/** Whether a group clips through a masked child. */
+export function isClipGroup(group: paper.Group): boolean {
+  for (const child of group.children) {
+    if ((child as any).clipMask) return true
+  }
+  return false
+}
+
+/**
+ * Create an empty AI-style sublayer (a flagged group) inside the active
+ * layer — or inside the selected group/sublayer when one is selected, so
+ * nesting works like Illustrator. Selects the new sublayer.
+ */
+export function createSublayer(e: EditorEngine): paper.Group | null {
+  const scope = e.scope
+  let parent: paper.Item = e.getActiveLayer()
+  const sel = e.getSelection()
+  if (sel.length === 1 && sel[0] instanceof scope.Group && sel[0].parent) {
+    const data = (sel[0].data as any) ?? {}
+    if (data.id && data.textMode !== 'path' && !isClipGroup(sel[0] as paper.Group)) {
+      parent = sel[0]
+    }
+  }
+  if ((parent as any).locked) {
+    e.showStatus('Target is locked')
+    return null
+  }
+  const group = new scope.Group({ insert: false }) as paper.Group
+  group.data.id = e.genId()
+  group.data.isUserItem = true
+  group.data.isSublayer = true
+  ;(group as any).name = nextSublayerName(parent)
+  ;(parent as any).addChild(group)
+  e.clearSelection()
+  group.selected = true
+  e.syncSelectionToStore()
+  e.pushHistory('New Sublayer')
+  e.scope.view.update()
+  return group
+}
+
+/**
+ * Collect the selection into a brand-new top user layer (AI's Collect in
+ * New Layer). Works across layers; the new layer activates and the moved
+ * artwork becomes the selection.
+ */
+export function collectInNewLayer(e: EditorEngine): boolean {
+  const items = e.getSelection().filter((item) => !item.locked && item.parent)
+  if (items.length === 0) return false
+  const ordered = items
+    .slice()
+    .sort((a, b) => (a.isBelow(b) ? -1 : a.isAbove(b) ? 1 : 0))
+  const layer = new e.scope.Layer()
+  const id = e.genId()
+  layer.name = nextUserLayerName(e)
+  layer.data.isUserLayer = true
+  layer.data.layerId = id
+  parkUserLayer(e, layer)
+  for (const node of ordered) layer.addChild(node)
+  layer.activate()
+  e.syncLayersToStore()
+  e.store.setActiveLayer(id)
+  e.syncSelectionToStore()
+  e.pushHistory('Collect in New Layer')
+  e.scope.view.update()
+  return true
+}
+
+/**
+ * Release selected groups/sublayers to layers (AI's Release to Layers):
+ * every direct child of each selected container moves into its own new
+ * user layer named after the child. Empty containers dissolve.
+ */
+export function releaseToLayers(e: EditorEngine): boolean {
+  const scope = e.scope
+  const groups = e.getSelection().filter(
+    (item) =>
+      !item.locked &&
+      item.parent &&
+      item instanceof scope.Group &&
+      (item.data as any)?.id &&
+      (item.data as any)?.textMode !== 'path' &&
+      !isClipGroup(item as paper.Group)
+  ) as paper.Group[]
+  if (groups.length === 0) return false
+  const released: paper.Item[] = []
+  let changed = false
+  for (const group of groups) {
+    const kids = group.children.slice() as paper.Item[]
+    if (kids.length === 0) {
+      group.remove()
+      changed = true
+      continue
+    }
+    let dissolved = false
+    for (const kid of kids) {
+      // Locked children stay behind: releasing must not steal them.
+      if ((kid as any).locked) continue
+      const layer = new scope.Layer()
+      const id = e.genId()
+      const label = ((kid as any).name as string | undefined)?.trim()
+      layer.name = label || nextUserLayerName(e)
+      layer.data.isUserLayer = true
+      layer.data.layerId = id
+      parkUserLayer(e, layer)
+      layer.addChild(kid)
+      released.push(kid)
+      dissolved = true
+    }
+    // Only dissolve containers that actually emptied; locked leftovers
+    // keep their group alive.
+    if (dissolved) {
+      if (group.children.length === 0) group.remove()
+      changed = true
+    }
+  }
+  if (!changed) return false
+  e.syncLayersToStore()
+  const users = e.project.layers.filter((l) => (l.data as any)?.isUserLayer)
+  const last = users[users.length - 1]
+  if (last) e.store.setActiveLayer((last.data as any)?.layerId as string)
+  e.clearSelection()
+  released.forEach((item) => {
+    item.selected = true
+  })
+  e.syncSelectionToStore()
+  e.pushHistory('Release to Layers')
+  e.scope.view.update()
+  return true
+}
+
+/** Rename one object-tree entry (groups, sublayers and leaves). */
+export function renameTreeItem(e: EditorEngine, id: string, name: string): boolean {
+  const item = getItemById(e, id)
+  if (!item) return false
+  const clean = name.trim()
+  if (!clean) return false
+  // Labels render as `name (Kind)`; strip a pasted kind suffix so the
+  // kind never doubles up after repeated renames.
+  const bare = clean.replace(/\s*\((Sublayer|Group|Clipping Mask|Compound Path|Closed Path|Path|Path Text|Area Text|Vertical Text|Text|Image|Symbol|Pattern \w+|Object)\)\s*$/i, '').trim()
+  if (!bare) return false
+  ;(item as any).name = bare
+  e.pushHistory('Rename')
+  e.scope.view.update()
+  return true
+}
+
+/** Whether `node` sits inside `ancestor` (cycle guard for moves). */
+export function isDescendantOf(node: paper.Item, ancestor: paper.Item): boolean {
+  let at = node.parent
+  while (at) {
+    if (at === ancestor) return true
+    at = at.parent
+  }
+  return false
+}
+
+/** Whether the item or any ancestor up to the layer is locked. */
+export function isEffectivelyLocked(e: EditorEngine, item: paper.Item): boolean {
+  let at: paper.Item | null = item
+  while (at && !(at instanceof e.scope.Layer)) {
+    if ((at as any).locked) return true
+    at = at.parent
+  }
+  return !!at && !!(at as any).locked
+}
+
+/**
+ * Move one tree entry to a new parent / position (panel drag-drop).
+ * `destParentId` is a group id, or '' for layer top level (then
+ * `destLayerId` picks the layer, defaulting to the item's own layer).
+ * `destIndex` counts in bottom-first paper order; omitted means append on
+ * top. Returns false when the move is illegal (locked target, cycles).
+ */
+export function moveTreeItem(
+  e: EditorEngine,
+  itemId: string,
+  destParentId: string,
+  destLayerId: string,
+  destIndex?: number
+): boolean {
+  const scope = e.scope
+  const item = getItemById(e, itemId)
+  if (!item || !item.parent) return false
+  if (isEffectivelyLocked(e, item)) {
+    e.showStatus('Item is locked')
+    return false
+  }
+  let destParent: paper.Item
+  if (destParentId) {
+    const group = getItemById(e, destParentId)
+    if (!group || !(group instanceof scope.Group) || !group.parent) return false
+    const data = (group.data as any) ?? {}
+    if (data.textMode === 'path' || isClipGroup(group)) return false
+    if (group === item || isDescendantOf(group, item)) return false
+    destParent = group
+  } else {
+    const layerId = destLayerId || getItemLayerId(e, itemId)
+    const layer = e.project.layers.find((l) => (l.data as any)?.layerId === layerId)
+    if (!layer || !(layer.data as any)?.isUserLayer) return false
+    destParent = layer
+  }
+  if (isEffectivelyLocked(e, destParent)) {
+    e.showStatus('Target is locked')
+    return false
+  }
+  const kids = (destParent as any).children as paper.Item[]
+  const sameParent = (item.parent as unknown) === (destParent as unknown)
+  const from = sameParent ? kids.indexOf(item) : -1
+  let at: number
+  if (typeof destIndex === 'number' && Number.isFinite(destIndex)) {
+    at = Math.min(kids.length, Math.max(0, Math.floor(destIndex)))
+    // Same-parent moves: removing first shifts later slots down by one.
+    if (from >= 0 && from < at) at--
+  } else {
+    at = kids.length
+    if (from >= 0 && from < at) at--
+  }
+  // Dropping back onto the same slot changes nothing: skip history.
+  if (from >= 0 && from === at) {
+    e.syncSelectionToStore()
+    return true
+  }
+  ;(destParent as any).insertChild(at, item)
+  // Keep the layer activation in sync when crossing layers.
+  const layerId = getItemLayerId(e, itemId)
+  if (layerId) e.store.setActiveLayer(layerId)
+  e.syncSelectionToStore()
+  e.pushHistory('Rearrange')
+  e.scope.view.update()
+  return true
+}
+
+/**
+ * Select all unlocked visible top-level artwork on a user layer (AI
+ * target-circle parity). Returns how many were selected; no history
+ * (selection-only, like marquee).
+ */
+export function selectLayerArtwork(e: EditorEngine, layerId: string): number {
+  const layer = e.project.layers.find(
+    (l) => (l.data as any)?.isUserLayer && (l.data as any)?.layerId === layerId
+  )
+  if (!layer || !layer.visible || layer.locked) return 0
+  const tops = (layer.children as unknown as paper.Item[]).filter(
+    (child) => child.visible && !(child as any).locked && !(child as any).data?.isPreview
+  )
+  e.clearSelection()
+  tops.forEach((item) => {
+    item.selected = true
+  })
+  e.syncSelectionToStore()
+  e.scope.view.update()
+  return tops.length
+}
+
+/** Owning user-layer id of one tree entry (follows parents up). */
+export function getItemLayerId(e: EditorEngine, id: string): string {
+  const item = getItemById(e, id)
+  if (!item) return ''
+  let at: paper.Item | null = item
+  while (at) {
+    if (at instanceof e.scope.Layer && (at.data as any)?.isUserLayer) {
+      return (at.data as any)?.layerId as string
+    }
+    at = at.parent
+  }
+  return ''
+}
+
+/** Direct parent group id of one tree entry ('' at layer top level). */
+export function getItemParentId(e: EditorEngine, id: string): string {
+  const item = getItemById(e, id)
+  if (!item || !item.parent) return ''
+  if (item.parent instanceof e.scope.Group) {
+    return ((item.parent.data as any)?.id as string | undefined) ?? ''
+  }
+  return ''
+}
