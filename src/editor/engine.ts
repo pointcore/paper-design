@@ -1851,7 +1851,7 @@ export class EditorEngine {
     if (data.textMode === 'path' || data.textMode === 'area' || data.textMode === 'vertical') {
       return item instanceof scope.Group ? 'group' : 'text'
     }
-    if (item instanceof scope.Group && this.isClipGroup(item)) return 'clip'
+    if (item instanceof scope.Group && select.isClipGroup(item)) return 'clip'
     if (item instanceof scope.PointText) return 'text'
     if (item instanceof scope.CompoundPath) return 'compound'
     if (item instanceof scope.SymbolItem) return 'symbol'
@@ -2035,7 +2035,7 @@ export class EditorEngine {
     else if (data.textMode === 'vertical') kind = 'Vertical Text'
     else if ((data as any).isSublayer) kind = 'Sublayer'
     else if ((data as any).isPatternFill) kind = `Pattern ${(data as any).pattern?.kind ?? ''}`.trim()
-    else if (item instanceof scope.Group && this.isClipGroup(item)) kind = 'Clipping Mask'
+    else if (item instanceof scope.Group && select.isClipGroup(item)) kind = 'Clipping Mask'
     else if (item instanceof scope.PointText) kind = 'Text'
     else if (item instanceof scope.CompoundPath) kind = 'Compound Path'
     else if (item instanceof scope.SymbolItem) kind = 'Symbol'
@@ -2203,7 +2203,7 @@ export class EditorEngine {
     const sel = this.getSelection()
     if (sel.length === 1 && sel[0] instanceof scope.Group && sel[0].parent) {
       const data = (sel[0].data as any) ?? {}
-      if (data.id && data.textMode !== 'path' && !this.isClipGroup(sel[0] as paper.Group)) {
+      if (data.id && data.textMode !== 'path' && !select.isClipGroup(sel[0] as paper.Group)) {
         parent = sel[0]
       }
     }
@@ -2266,7 +2266,7 @@ export class EditorEngine {
         item instanceof scope.Group &&
         (item.data as any)?.id &&
         (item.data as any)?.textMode !== 'path' &&
-        !this.isClipGroup(item as paper.Group)
+        !select.isClipGroup(item as paper.Group)
     ) as paper.Group[]
     if (groups.length === 0) return false
     const released: paper.Item[] = []
@@ -2376,7 +2376,7 @@ export class EditorEngine {
       const group = this.getItemById(destParentId)
       if (!group || !(group instanceof scope.Group) || !group.parent) return false
       const data = (group.data as any) ?? {}
-      if (data.textMode === 'path' || this.isClipGroup(group)) return false
+      if (data.textMode === 'path' || select.isClipGroup(group)) return false
       if (group === item || this.isDescendantOf(group, item)) return false
       destParent = group
     } else {
@@ -3712,84 +3712,19 @@ export class EditorEngine {
     select.sendBackward(this)
   }
 
-  /**
-   * Group the selection (needs 2+ top-level members). The group is placed
-   * explicitly — never via `new Group(items)`, which paper inserts into
-   * `project.activeLayer` (often a chrome layer, hiding the group from the
-   * panel). Shared parents keep the back-most member's slot so contiguous
-   * ranges never jump; cross-parent selections collect into the front-most
-   * member's parent, like Illustrator. Returns false when grouped nothing.
-   */
+  /** See engine-select.ts. */
   groupSelection(): boolean {
-    const items = this.getSelection().filter((item) => item.parent)
-    if (items.length < 2) return false
-    // Back-to-front document order (isAbove/isBelow span layers).
-    const ordered = items
-      .slice()
-      .sort((a, b) => (a.isBelow(b) ? -1 : a.isAbove(b) ? 1 : 0))
-    const shared = ordered.every((item) => item.parent === ordered[0].parent)
-    const anchor = shared ? ordered[0] : ordered[ordered.length - 1]
-    const parent = anchor.parent ?? this.getActiveLayer()
-    let at = parent.children.indexOf(anchor)
-    if (at < 0) at = parent.children.length
-    const group = new this.scope.Group({ insert: false }) as paper.Group
-    for (const node of ordered) group.addChild(node)
-    parent.insertChild(Math.min(at, parent.children.length), group)
-    group.data.id = this.genId()
-    group.data.isUserItem = true
-    this.selectItem(group)
-    this.pushHistory('Group')
-    this.scope.view.update()
-    return true
+    return select.groupSelection(this)
   }
 
-  /**
-   * Ungroup selected groups/sublayers (children keep slot, selection
-   * clears). Clipping masks and path-text runs are skipped — they have
-   * dedicated release commands. Returns false when nothing ungrouped.
-   */
+  /** See engine-select.ts. */
   ungroupSelection(): boolean {
-    const groups = this.getSelection().filter(
-      (i) =>
-        i instanceof this.scope.Group &&
-        (i.data as any)?.id &&
-        (i.data as any)?.textMode !== 'path' &&
-        !this.isClipGroup(i as paper.Group)
-    ) as paper.Group[]
-    if (groups.length === 0) return false
-    const released: paper.Item[] = []
-    groups.forEach((g) => {
-      const children = g.children.slice()
-      const parent = g.parent
-      const at = parent ? parent.children.indexOf(g) : -1
-      children.forEach((c: any) => {
-        if (parent) parent.insertChild(at < 0 ? parent.children.length : at, c)
-        released.push(c)
-      })
-      g.remove()
-    })
-    this.clearSelection()
-    released.forEach((item) => {
-      item.selected = true
-    })
-    this.syncSelectionToStore()
-    this.pushHistory('Ungroup')
-    this.scope.view.update()
-    return true
+    return select.ungroupSelection(this)
   }
 
-  /**
-   * Ungroup recursively until no selected group remains (cycle-guarded).
-   * Each level records its own history entry, like repeated Ungroup.
-   * Returns levels released.
-   */
+  /** See engine-select.ts. */
   ungroupAllSelected(): number {
-    let levels = 0
-    for (let i = 0; i < 100; i++) {
-      if (!this.ungroupSelection()) break
-      levels++
-    }
-    return levels
+    return select.ungroupAllSelected(this)
   }
 
   /** See engine-select.ts. */
@@ -4182,7 +4117,7 @@ export class EditorEngine {
     const scope = this.scope
     const groups = this.getSelection().filter(
       (item) =>
-        !item.locked && item.parent && item instanceof scope.Group && this.isClipGroup(item)
+        !item.locked && item.parent && item instanceof scope.Group && select.isClipGroup(item)
     ) as paper.Group[]
     if (groups.length === 0) return false
     const released: paper.Item[] = []
@@ -4230,13 +4165,7 @@ export class EditorEngine {
     return true
   }
 
-  /** Whether a group clips through a masked child. */
-  private isClipGroup(group: paper.Group): boolean {
-    for (const child of group.children) {
-      if ((child as any).clipMask) return true
-    }
-    return false
-  }
+  // Clip-group predicate lives in engine-select.ts.
 
   /**
    * Place a bitmap image into the active layer, centered on the current

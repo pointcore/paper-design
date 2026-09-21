@@ -289,3 +289,91 @@ export function sendBackward(e: EditorEngine): void {
   e.pushHistory('Send Backward')
   e.scope.view.update()
 }
+
+/** Whether a group clips through a masked child. */
+export function isClipGroup(group: paper.Group): boolean {
+  for (const child of group.children) {
+    if ((child as any).clipMask) return true
+  }
+  return false
+}
+
+/**
+ * Group the selection (needs 2+ top-level members). The group is placed
+ * explicitly — never via `new Group(items)`, which paper inserts into
+ * `project.activeLayer` (often a chrome layer, hiding the group from the
+ * panel). Shared parents keep the back-most member's slot so contiguous
+ * ranges never jump; cross-parent selections collect into the front-most
+ * member's parent, like Illustrator. Returns false when grouped nothing.
+ */
+export function groupSelection(e: EditorEngine): boolean {
+  const items = e.getSelection().filter((item) => item.parent)
+  if (items.length < 2) return false
+  // Back-to-front document order (isAbove/isBelow span layers).
+  const ordered = items
+    .slice()
+    .sort((a, b) => (a.isBelow(b) ? -1 : a.isAbove(b) ? 1 : 0))
+  const shared = ordered.every((item) => item.parent === ordered[0].parent)
+  const anchor = shared ? ordered[0] : ordered[ordered.length - 1]
+  const parent = anchor.parent ?? e.getActiveLayer()
+  let at = parent.children.indexOf(anchor)
+  if (at < 0) at = parent.children.length
+  const group = new e.scope.Group({ insert: false }) as paper.Group
+  for (const node of ordered) group.addChild(node)
+  parent.insertChild(Math.min(at, parent.children.length), group)
+  group.data.id = e.genId()
+  group.data.isUserItem = true
+  e.selectItem(group)
+  e.pushHistory('Group')
+  e.scope.view.update()
+  return true
+}
+
+/**
+ * Ungroup selected groups/sublayers (children keep slot, selection
+ * clears). Clipping masks and path-text runs are skipped — they have
+ * dedicated release commands. Returns false when nothing ungrouped.
+ */
+export function ungroupSelection(e: EditorEngine): boolean {
+  const groups = e.getSelection().filter(
+    (i) =>
+      i instanceof e.scope.Group &&
+      (i.data as any)?.id &&
+      (i.data as any)?.textMode !== 'path' &&
+      !isClipGroup(i as paper.Group)
+  ) as paper.Group[]
+  if (groups.length === 0) return false
+  const released: paper.Item[] = []
+  groups.forEach((g) => {
+    const children = g.children.slice()
+    const parent = g.parent
+    const at = parent ? parent.children.indexOf(g) : -1
+    children.forEach((c: any) => {
+      if (parent) parent.insertChild(at < 0 ? parent.children.length : at, c)
+      released.push(c)
+    })
+    g.remove()
+  })
+  e.clearSelection()
+  released.forEach((item) => {
+    item.selected = true
+  })
+  e.syncSelectionToStore()
+  e.pushHistory('Ungroup')
+  e.scope.view.update()
+  return true
+}
+
+/**
+ * Ungroup recursively until no selected group remains (cycle-guarded).
+ * Each level records its own history entry, like repeated Ungroup.
+ * Returns levels released.
+ */
+export function ungroupAllSelected(e: EditorEngine): number {
+  let levels = 0
+  for (let i = 0; i < 100; i++) {
+    if (!ungroupSelection(e)) break
+    levels++
+  }
+  return levels
+}
