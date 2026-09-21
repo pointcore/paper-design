@@ -200,3 +200,15 @@ export function invertCssColor(css: string): string {
   if (rgba.a >= 1) return `#${hex(r)}${hex(g)}${hex(b)}`
   return `rgba(${r}, ${g}, ${b}, ${Math.round(rgba.a * 100) / 100})`
 }
+
+/**
+ * CSS for a paper color that keeps translucency: toCSS(true) drops the
+ * alpha channel, so translucent colors serialize as rgba() instead.
+ * Opaque colors keep the short hex form (stable select-same keys).
+ * Null for empty / gradient paints.
+ */
+export function colorToCSS(color: any): string | null {
+  if (!color || color.gradient) return null
+  if ((color.alpha ?? 1) < 1) return color.toCSS(false) as string
+  return color.toCSS(true) as string
+}

@@ -9,7 +9,7 @@ import { cursorForTool } from './cursors'
 import { gradientAngleFromVector } from './geometry'
 import { alignSampledPoints, lerp, lerpRgba, rgbaToCss, sampleCountFor } from './blend/blend'
 import type { Rgba } from './color'
-import { colorDistanceRgb, invertCssColor, isOutOfCmykGamut, parseCssColor, rgbToCmyk, shiftCssColor } from './color'
+import { colorDistanceRgb, colorToCSS, invertCssColor, isOutOfCmykGamut, parseCssColor, rgbToCmyk, shiftCssColor } from './color'
 import { parseProjectFile } from './project-file'
 import { recordRecentProject } from './recent-files'
 import type { EditorStore } from './store-types'
@@ -43,6 +43,7 @@ import * as envelope from './engine-envelope'
 import * as masks from './engine-masks'
 import * as patterns from './engine-patterns'
 import * as mesh from './engine-mesh'
+import * as blend from './engine-blend'
 import {
   TRACE_MIN_DIM,
   cleanTraceOptions,
@@ -1054,7 +1055,7 @@ export class EditorEngine {
     if (!fill || !fill.gradient) return null
     const stops = (fill.gradient.stops as any[]).map((stop) => ({
       offset: Number(stop.offset ?? 0),
-      color: (stop.color && this.colorToCSS(stop.color)) || '#000000',
+      color: (stop.color && colorToCSS(stop.color)) || '#000000',
     }))
     if (stops.length === 0) return null
     if (fill.highlight) return { type: 'radial', stops }
@@ -1109,10 +1110,10 @@ export class EditorEngine {
         style.fillColor = null
         style.gradient = baked
       } else {
-        style.fillColor = this.colorToCSS(s.fillColor)
+        style.fillColor = colorToCSS(s.fillColor)
       }
     }
-    style.strokeColor = this.colorToCSS(s.strokeColor)
+    style.strokeColor = colorToCSS(s.strokeColor)
     style.strokeWidth = s.strokeWidth ?? style.strokeWidth
     style.lineCap = (s.strokeCap as any) ?? style.lineCap
     style.lineJoin = (s.strokeJoin as any) ?? style.lineJoin
@@ -1206,14 +1207,14 @@ export class EditorEngine {
       if (!data.isUserItem) continue
       const s = item as any
       if (s.fillColor !== undefined) {
-        const css = this.colorToCSS(s.fillColor)
+        const css = colorToCSS(s.fillColor)
         if (typeof css === 'string' && css.trim().toLowerCase() === oldN) {
           s.fillColor = newColor
           n++
         }
       }
       if (s.strokeColor !== undefined) {
-        const css = this.colorToCSS(s.strokeColor)
+        const css = colorToCSS(s.strokeColor)
         if (typeof css === 'string' && css.trim().toLowerCase() === oldN) {
           s.strokeColor = newColor
           n++
@@ -3095,173 +3096,16 @@ export class EditorEngine {
     return pathfinder.booleanOperation(this, op)
   }
 
-  /**
-   * Sample `count` vertices evenly along a path's arc length (closed
-   * outlines wrap without repeating the first vertex; open outlines include
-   * both endpoints). Returns null for degenerate geometry.
-   */
-  private resamplePathPoints(
-    path: paper.Path,
-    count: number,
-    closed: boolean
-  ): paper.Point[] | null {
-    const len = path.length
-    if (!Number.isFinite(len) || len <= 0) return null
-    const pts: paper.Point[] = []
-    if (closed) {
-      for (let i = 0; i < count; i++) {
-        const pt = path.getPointAt((len * i) / count)
-        if (!pt || !Number.isFinite(pt.x) || !Number.isFinite(pt.y)) return null
-        pts.push(pt)
-      }
-    } else {
-      for (let i = 0; i <= count; i++) {
-        const pt = path.getPointAt(Math.min(len, (len * i) / count))
-        if (!pt || !Number.isFinite(pt.x) || !Number.isFinite(pt.y)) return null
-        pts.push(pt)
-      }
-    }
-    return pts
-  }
+  // Blend vertex math lives in engine-blend.ts.
 
-  /** Solid paint of an item as 8-bit channels, null for gradients/none. */
-  private solidPaintOf(item: paper.Item, key: 'fillColor' | 'strokeColor'): Rgba | null {
-    const paint = (item as any)[key] as any
-    if (!paint || paint.gradient) return null
-    return parseCssColor(this.colorToCSS(paint))
-  }
-
-  /**
-   * AI/CDR "Smooth Color" blend: auto-calculate the number of steps needed
-   * for a smooth color transition between two selected paths. Returns up to
-   * 256 steps (enough for 8-bit-per-channel gradients).
-   */
+  /** See engine-blend.ts. */
   autoBlendSteps(): number {
-    const scope = this.scope
-    const paths = this.getSelection().filter(
-      (item) => !item.locked && item.parent && item instanceof scope.Path
-    ) as paper.Path[]
-    if (paths.length !== 2) return 8
-    const [a, b] = paths
-    const fa = this.solidPaintOf(a, 'fillColor')
-    const fb = this.solidPaintOf(b, 'fillColor')
-    const sa = this.solidPaintOf(a, 'strokeColor')
-    const sb = this.solidPaintOf(b, 'strokeColor')
-    let maxDist = 0
-    if (fa && fb) {
-      const d = Math.abs(fa.r - fb.r) + Math.abs(fa.g - fb.g) + Math.abs(fa.b - fb.b) + Math.abs(fa.a - fb.a)
-      maxDist = Math.max(maxDist, d)
-    }
-    if (sa && sb) {
-      const d = Math.abs(sa.r - sb.r) + Math.abs(sa.g - sb.g) + Math.abs(sa.b - sb.b) + Math.abs(sa.a - sb.a)
-      maxDist = Math.max(maxDist, d)
-    }
-    // Also factor in opacity difference
-    const opa = a.opacity ?? 1
-    const opb = b.opacity ?? 1
-    maxDist = Math.max(maxDist, Math.abs(opa - opb) * 4)
-    // Map 0..4 color distance to 8..256 steps
-    const steps = Math.min(256, Math.max(8, Math.round(maxDist * 64)))
-    return steps
+    return blend.autoBlendSteps(this)
   }
 
-  /**
-   * AI/CDR Object > Blend: build `steps` shapes interpolated between two
-   * unlocked selected paths (blending runs back-to-front). Both outlines
-   * resample to a shared vertex budget, align start/winding, then every step
-   * lerps the geometry plus solid fill/stroke colors, stroke widths and
-   * opacity — gradient paints or a paint present on only one end leave the
-   * matching step paint empty. Shared-parent operands group the whole run at
-   * the back operand's z slot; otherwise the steps stack above the back
-   * operand. One history entry. Returns the steps built, 0 when the
-   * selection or geometry cannot blend.
-   */
+  /** See engine-blend.ts. */
   blendSelection(steps: number): number {
-    const scope = this.scope
-    const count = Math.round(Number(steps))
-    if (!Number.isFinite(count) || count < 1 || count > 200) return 0
-    const paths = this.getSelection().filter(
-      (item) => !item.locked && item.parent && item instanceof scope.Path
-    ) as paper.Path[]
-    if (paths.length !== 2) return 0
-    const [back, front] = paths
-      .slice()
-      .sort((a, b) => (a.isBelow(b) ? -1 : a.isAbove(b) ? 1 : 0))
-
-    // One closure convention for both operands so the vertex streams line up
-    // (a mixed closed/open pair resamples as open).
-    const closed = back.closed && front.closed
-    const budget = sampleCountFor([back.segments.length, front.segments.length])
-    const backPts = this.resamplePathPoints(back, budget, closed)
-    const frontPts = this.resamplePathPoints(front, budget, closed)
-    if (!backPts || !frontPts || backPts.length !== frontPts.length) return 0
-    const alignedFront = alignSampledPoints(backPts, frontPts, closed)
-
-    const fillBack = this.solidPaintOf(back, 'fillColor')
-    const fillFront = this.solidPaintOf(front, 'fillColor')
-    const strokeBack = this.solidPaintOf(back, 'strokeColor')
-    const strokeFront = this.solidPaintOf(front, 'strokeColor')
-    const widthBack = Number.isFinite(back.strokeWidth as number) ? (back.strokeWidth as number) : null
-    const widthFront = Number.isFinite(front.strokeWidth as number) ? (front.strokeWidth as number) : null
-
-    const steps_: paper.Path[] = []
-    for (let i = 1; i <= count; i++) {
-      const t = i / (count + 1)
-      const segs: paper.Point[] = []
-      for (let j = 0; j < backPts.length; j++) {
-        segs.push(
-          new scope.Point(
-            lerp(backPts[j].x, alignedFront[j].x, t),
-            lerp(backPts[j].y, alignedFront[j].y, t)
-          )
-        )
-      }
-      const step = new scope.Path({ segments: segs, closed, insert: false }) as paper.Path
-      try {
-        step.smooth({ type: 'catmull-rom', factor: 0.5 })
-      } catch {
-        // Straight-segment steps beat aborting the whole blend.
-      }
-      if (fillBack && fillFront) {
-        step.fillColor = new scope.Color(rgbaToCss(lerpRgba(fillBack, fillFront, t)))
-      }
-      if (strokeBack && strokeFront) {
-        step.strokeColor = new scope.Color(rgbaToCss(lerpRgba(strokeBack, strokeFront, t)))
-      }
-      if (widthBack !== null && widthFront !== null) step.strokeWidth = lerp(widthBack, widthFront, t)
-      step.strokeCap = back.strokeCap
-      step.strokeJoin = back.strokeJoin
-      step.opacity = lerp(back.opacity, front.opacity, t)
-      step.data.id = this.genId()
-      step.data.isUserItem = true
-      steps_.push(step)
-    }
-
-    const parent = back.parent as paper.Item
-    if (front.parent === back.parent) {
-      const at = parent.children.indexOf(back)
-      const group = new scope.Group({ insert: false }) as paper.Group
-      group.addChild(back)
-      for (const step of steps_) group.addChild(step)
-      group.addChild(front)
-      parent.insertChild(Math.min(Math.max(0, at), parent.children.length), group)
-      group.data.id = this.genId()
-      group.data.isUserItem = true
-      this.selectItem(group)
-    } else {
-      const at = parent.children.indexOf(back)
-      let k = 1
-      for (const step of steps_) {
-        parent.insertChild(Math.min(at + k, parent.children.length), step)
-        k++
-      }
-      this.clearSelection()
-      for (const item of [back, ...steps_, front]) item.selected = true
-      this.syncSelectionToStore()
-    }
-    this.pushHistory('Blend')
-    this.scope.view.update()
-    return count
+    return blend.blendSelection(this, steps)
   }
 
   /**
@@ -4044,13 +3888,13 @@ export class EditorEngine {
     if (tol > 0 && (attribute === 'fill' || attribute === 'stroke')) {
       const paint = (reference as any)[attribute === 'fill' ? 'fillColor' : 'strokeColor'] as any
       if (paint?.gradient) return 0
-      const refCss = this.colorToCSS(paint)
+      const refCss = colorToCSS(paint)
       const refRgba = refCss ? parseCssColor(refCss) : null
       if (!refRgba) return 0
       matches = leaves.filter((leaf) => {
         const other = (leaf as any)[attribute === 'fill' ? 'fillColor' : 'strokeColor'] as any
         if (!other || other.gradient) return refCss === 'none' && !other
-        const css = this.colorToCSS(other)
+        const css = colorToCSS(other)
         const rgba = css ? parseCssColor(css) : null
         if (!rgba) return false
         return colorDistanceRgb(refRgba, rgba) <= tol
@@ -4113,7 +3957,7 @@ export class EditorEngine {
         : (item as any).strokeColor
     ) as any
     if (color && color.gradient) return 'gradient'
-    return this.colorToCSS(color) ?? 'none'
+    return colorToCSS(color) ?? 'none'
   }
 
   /** First style-carrying leaf under an item (itself when it is one). */
@@ -4392,17 +4236,6 @@ export class EditorEngine {
       if ((child as any).clipMask) return true
     }
     return false
-  }
-
-  /**
-   * CSS for a plain color that keeps translucency: toCSS(true) drops the
-   * alpha channel, so translucent colors serialize as rgba() instead.
-   * Opaque colors keep the short hex form (stable select-same keys).
-   */
-  private colorToCSS(color: any): string | null {
-    if (!color || color.gradient) return null
-    if ((color.alpha ?? 1) < 1) return color.toCSS(false) as string
-    return color.toCSS(true) as string
   }
 
   /**
@@ -6198,7 +6031,7 @@ export class EditorEngine {
         for (const key of ['fillColor', 'strokeColor'] as const) {
           const paint = (node as any)[key]
           if (!paint || paint.gradient) continue
-          const css = this.colorToCSS(paint)
+          const css = colorToCSS(paint)
           if (!css) continue
           const rgba = parseCssColor(css)
           if (rgba) {
@@ -6254,7 +6087,7 @@ export class EditorEngine {
       for (const key of ['fillColor', 'strokeColor'] as const) {
         const paint = anyLeaf[key]
         if (!paint || paint.gradient) continue
-        const css = this.colorToCSS(paint)
+        const css = colorToCSS(paint)
         if (!css) continue
         try {
           anyLeaf[key] = new scope.Color(shiftCssColor(css, dh, ds, dl))
@@ -6309,7 +6142,7 @@ export class EditorEngine {
       for (const key of ['fillColor', 'strokeColor'] as const) {
         const paint = anyLeaf[key]
         if (!paint || paint.gradient) continue
-        const css = this.colorToCSS(paint)
+        const css = colorToCSS(paint)
         if (!css) continue
         try {
           anyLeaf[key] = new scope.Color(invertCssColor(css))
