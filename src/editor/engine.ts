@@ -29,6 +29,7 @@ import { inflateHistoryImages, slimHistoryImages } from './history-images'
 import * as artboards from './engine-artboards'
 import * as guides from './engine-guides'
 import * as layers from './engine-layers'
+import * as tree from './engine-tree'
 import * as pathfinder from './engine-pathfinder'
 import * as join from './engine-join'
 import * as compound from './engine-compound'
@@ -1805,208 +1806,16 @@ export class EditorEngine {
   // `data.isSublayer`. They render like layers in the panel, nest freely,
   // and survive snapshots/exports because they are plain groups.
 
-  /** Kind discriminator for one tree entry (drives panel icons). */
-  private itemTreeKind(item: paper.Item): LayerItemNode['kind'] {
-    const scope = this.scope
-    const data = (item.data as any) ?? {}
-    if (data.isPatternTile) return 'path'
-    if (item instanceof scope.Group && (data as any).isSublayer) return 'sublayer'
-    if (data.textMode === 'path' || data.textMode === 'area' || data.textMode === 'vertical') {
-      return item instanceof scope.Group ? 'group' : 'text'
-    }
-    if (item instanceof scope.Group && layers.isClipGroup(item)) return 'clip'
-    if (item instanceof scope.PointText) return 'text'
-    if (item instanceof scope.CompoundPath) return 'compound'
-    if (item instanceof scope.SymbolItem) return 'symbol'
-    if (item instanceof scope.Raster) return 'image'
-    if (item instanceof scope.Group) return 'group'
-    if (item instanceof scope.Path) return 'path'
-    return 'object'
-  }
+  // Tree builders live in engine-tree.ts.
 
-  /** Build one tree node (children attached recursively). */
-  private buildTreeNode(item: paper.Item, layerId: string, parentId: string, depth: number): LayerItemNode | null {
-    const scope = this.scope
-    const data = (item.data as any) ?? {}
-    if (data.isChrome || data.isPreview || data.isGuide || data.annotation) return null
-    if (data.isPatternTile) return null
-    if (
-      item instanceof scope.CompoundPath ||
-      item instanceof scope.Path ||
-      item instanceof scope.PointText ||
-      item instanceof scope.SymbolItem ||
-      item instanceof scope.Raster
-    ) {
-      if (!data.id) return null
-      return {
-        id: data.id as string,
-        name: this.itemTreeLabel(item),
-        depth,
-        visible: item.visible,
-        locked: item.locked,
-        collapsible: false,
-        collapsed: false,
-        kind: this.itemTreeKind(item),
-        layerId,
-        parentId,
-        children: [],
-      }
-    }
-    if (item instanceof scope.Group) {
-      // Tagged groups (artwork groups, sublayers, clip groups, path-text
-      // runs) are entries; untagged wrappers are never passed here — the
-      // append walker splices those before calling this method.
-      if (!data.id) return null
-      const foldable = data.textMode !== 'path' && item.children.length > 0
-      const collapsed = foldable && (data.treeCollapsed as boolean | undefined) === true
-      const node: LayerItemNode = {
-        id: data.id as string,
-        name: this.itemTreeLabel(item),
-        depth,
-        visible: item.visible,
-        locked: item.locked,
-        collapsible: foldable,
-        collapsed,
-        kind: this.itemTreeKind(item),
-        layerId,
-        parentId,
-        children: [],
-      }
-      if (data.textMode === 'path') return node
-      this.appendGroupChildren(item, layerId, node.id, depth + 1, node.children)
-      return node
-    }
-    if (data.id) {
-      return {
-        id: data.id as string,
-        name: this.itemTreeLabel(item),
-        depth,
-        visible: (item as paper.Item).visible,
-        locked: (item as paper.Item).locked,
-        collapsible: false,
-        collapsed: false,
-        kind: this.itemTreeKind(item),
-        layerId,
-        parentId,
-        children: [],
-      }
-    }
-    return null
-  }
-
-  /**
-   * Append one item's tree representation (0..n nodes: untagged groups
-   * splice their children through). Single funnel for layer tops and group
-   * interiors so transparent wrappers never drop siblings at any depth.
-   */
-  private appendTreeNodes(
-    item: paper.Item,
-    layerId: string,
-    parentId: string,
-    depth: number,
-    out: LayerItemNode[]
-  ): void {
-    const scope = this.scope
-    const data = (item.data as any) ?? {}
-    if (data.isChrome || data.isPreview || data.isGuide || data.annotation) return
-    if (data.isPatternTile) return
-    if (item instanceof scope.Group && !data.id) {
-      this.appendGroupChildren(item, layerId, parentId, depth, out)
-      return
-    }
-    const children = (item as any).children as paper.Item[] | undefined
-    const isLeafType =
-      item instanceof scope.CompoundPath ||
-      item instanceof scope.Path ||
-      item instanceof scope.PointText ||
-      item instanceof scope.SymbolItem ||
-      item instanceof scope.Raster
-    if (children && !isLeafType && !(item instanceof scope.Group)) {
-      this.appendGroupChildren(item as unknown as paper.Group, layerId, parentId, depth, out)
-      return
-    }
-    const node = this.buildTreeNode(item, layerId, parentId, depth)
-    if (node) out.push(node)
-  }
-
-  /** Append every child of a container (bottom-first paper order). */
-  private appendGroupChildren(
-    container: paper.Group | paper.Item,
-    layerId: string,
-    parentId: string,
-    depth: number,
-    out: LayerItemNode[]
-  ): void {
-    const children = ((container as any).children as paper.Item[] | undefined) ?? []
-    for (const child of children) {
-      this.appendTreeNodes(child as paper.Item, layerId, parentId, depth, out)
-    }
-  }
-
-  /**
-   * Nested AI-style object tree for one user layer. Collapsed groups keep
-   * their children attached (the panel decides whether to render them), so
-   * expanding never needs a document rescan.
-   */
+  /** See engine-tree.ts. */
   listLayerTree(layerId: string): LayerItemNode[] {
-    const out: LayerItemNode[] = []
-    const layer = this.project.layers.find((l) => (l.data as any)?.layerId === layerId)
-    if (!layer) return out
-    for (const child of layer.children) {
-      this.appendTreeNodes(child as paper.Item, layerId, '', 0, out)
-    }
-    // Render top-first like Illustrator (paper children are bottom-first).
-    out.reverse()
-    const reverseChildren = (nodes: LayerItemNode[]): void => {
-      for (const node of nodes) {
-        if (node.children.length > 1) node.children.reverse()
-        if (node.children.length > 0) reverseChildren(node.children)
-      }
-    }
-    reverseChildren(out)
-    return out
+    return tree.listLayerTree(this, layerId)
   }
 
-  /**
-   * Flat depth-first object entries for one user layer. Path-text glyph
-   * runs stay whole (their group is the entry); untagged plain groups are
-   * transparent containers whose children list at the same depth.
-   * Collapsed groups hide their descendants (panel fold state).
-   */
+  /** See engine-tree.ts. */
   listLayerItems(layerId: string): LayerItemNode[] {
-    const out: LayerItemNode[] = []
-    const flatten = (nodes: LayerItemNode[]): void => {
-      for (const node of nodes) {
-        out.push(node)
-        if (node.collapsible && node.collapsed) continue
-        if (node.children.length > 0) flatten(node.children)
-      }
-    }
-    // listLayerTree is top-first; the legacy flat list is also top-first.
-    flatten(this.listLayerTree(layerId))
-    return out
-  }
-
-  /** Display label for an object-tree entry (imported names win). */
-  private itemTreeLabel(item: paper.Item): string {
-    const scope = this.scope
-    const data = (item.data as any) ?? {}
-    const named = ((item as any).name as string | undefined)?.trim()
-    let kind: string
-    if (data.textMode === 'path') kind = 'Path Text'
-    else if (data.textMode === 'area') kind = 'Area Text'
-    else if (data.textMode === 'vertical') kind = 'Vertical Text'
-    else if ((data as any).isSublayer) kind = 'Sublayer'
-    else if ((data as any).isPatternFill) kind = `Pattern ${(data as any).pattern?.kind ?? ''}`.trim()
-    else if (item instanceof scope.Group && layers.isClipGroup(item)) kind = 'Clipping Mask'
-    else if (item instanceof scope.PointText) kind = 'Text'
-    else if (item instanceof scope.CompoundPath) kind = 'Compound Path'
-    else if (item instanceof scope.SymbolItem) kind = 'Symbol'
-    else if (item instanceof scope.Raster) kind = 'Image'
-    else if (item instanceof scope.Group) kind = 'Group'
-    else if (item instanceof scope.Path) kind = item.closed ? 'Closed Path' : 'Path'
-    else kind = 'Object'
-    return named ? `${named} (${kind})` : kind
+    return tree.listLayerItems(this, layerId)
   }
 
   /** Thumbnail cache: `${historyIndex}:${isolation}:${itemId}` -> data URL. */
