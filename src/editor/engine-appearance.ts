@@ -12,6 +12,8 @@
 import type paper from 'paper'
 import type { EditorEngine } from './engine'
 import { createDefaultStyle } from './store'
+import { colorToCSS, invertCssColor, shiftCssColor } from './color'
+import { firstLeaf } from './engine-select'
 import { linearGradientEndpoints, normalizeAngleDeg } from './geometry'
 import type { AppearanceFill, AppearanceState, AppearanceStroke, StyleState } from './types'
 
@@ -348,4 +350,114 @@ export function setDefaultsFromSelection(e: EditorEngine): boolean {
   e.store.updateStyle({ ...e.getStyleFromItem(first) })
   e.showStatus('Defaults loaded from selection')
   return true
+}
+
+/**
+ * Shift selected artwork through HSL (Recolor-lite: hue rotates by
+ * degrees, saturation/lightness move by percent points). Solid fills
+ * and strokes repaint; gradients, patterns and unparseable paints are
+ * skipped. Returns leaves repainted; one history entry.
+ */
+export function adjustColors(e: EditorEngine, dh: number, ds: number, dl: number): number {
+  if (![dh, ds, dl].every(Number.isFinite)) return 0
+  if (Math.abs(dh) < 1e-9 && Math.abs(ds) < 1e-9 && Math.abs(dl) < 1e-9) return 0
+  const scope = e.scope
+  let changed = 0
+  const repaint = (leaf: paper.Item) => {
+    const anyLeaf = leaf as any
+    let touched = false
+    for (const key of ['fillColor', 'strokeColor'] as const) {
+      const paint = anyLeaf[key]
+      if (!paint || paint.gradient) continue
+      const css = colorToCSS(paint)
+      if (!css) continue
+      try {
+        anyLeaf[key] = new scope.Color(shiftCssColor(css, dh, ds, dl))
+        touched = true
+      } catch {
+        continue
+      }
+    }
+    if (touched) {
+      changed++
+      e.refreshItemGradient(leaf)
+    }
+  }
+  for (const item of e.getSelection()) {
+    if ((item as any).locked) continue
+    const children = (item as any).children as paper.Item[] | undefined
+    if (children && (item instanceof scope.Group)) {
+      // Groups repaint every unlocked leaf (exactly once).
+      const walk = (node: paper.Item) => {
+        if ((node as any).locked) return
+        if (node instanceof scope.Path || node instanceof scope.CompoundPath || node instanceof scope.PointText) {
+          repaint(node)
+        } else {
+          const kids = (node as any).children as paper.Item[] | undefined
+          if (kids) for (const k of kids) walk(k)
+        }
+      }
+      for (const child of children) walk(child)
+    } else {
+      const leaf = firstLeaf(e, item)
+      if (leaf) repaint(leaf)
+    }
+  }
+  if (changed > 0) {
+    e.reflowTextsForItems(e.getSelection())
+    e.pushHistory('Adjust Colors')
+    e.scope.view.update()
+  }
+  return changed
+}
+
+/**
+ * Channel-invert solid fills and strokes on the unlocked selection
+ * (gradients skipped). Returns leaves repainted; one history entry.
+ */
+export function invertPaints(e: EditorEngine): number {
+  const scope = e.scope
+  let changed = 0
+  const repaint = (leaf: paper.Item) => {
+    const anyLeaf = leaf as any
+    let touched = false
+    for (const key of ['fillColor', 'strokeColor'] as const) {
+      const paint = anyLeaf[key]
+      if (!paint || paint.gradient) continue
+      const css = colorToCSS(paint)
+      if (!css) continue
+      try {
+        anyLeaf[key] = new scope.Color(invertCssColor(css))
+        touched = true
+      } catch {
+        continue
+      }
+    }
+    if (touched) changed++
+  }
+  for (const item of e.getSelection()) {
+    if ((item as any).locked) continue
+    const leaf = firstLeaf(e, item)
+    if (!leaf) continue
+    if (leaf !== item && item instanceof scope.Group) {
+      const walk = (node: paper.Item) => {
+        if ((node as any).locked) return
+        if (node instanceof scope.Path || node instanceof scope.CompoundPath || node instanceof scope.PointText) {
+          repaint(node)
+        } else {
+          const kids = (node as any).children as paper.Item[] | undefined
+          if (kids) for (const k of kids) walk(k)
+        }
+      }
+      for (const child of ((item as any).children ?? []) as paper.Item[]) walk(child)
+    } else {
+      repaint(leaf)
+    }
+  }
+  if (changed > 0) {
+    e.reflowTextsForItems(e.getSelection())
+    e.pushHistory('Invert Colors')
+    e.scope.view.update()
+  }
+  return changed
 }

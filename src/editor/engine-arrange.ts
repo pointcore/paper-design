@@ -215,3 +215,33 @@ export function distributeSpacingExact(e: EditorEngine, axis: DistributeAxis, ga
   e.scope.view.update()
   return moved
 }
+
+/**
+ * Match selected items to the first item's width and/or height (layout
+ * staple), scaling about each item's own center so positions hold.
+ * Returns items resized; one history entry.
+ */
+export function matchSize(e: EditorEngine, mode: 'width' | 'height' | 'both'): number {
+  const items = e.getSelection().filter((item) => !item.locked && item.parent)
+  if (items.length < 2) return 0
+  const ref = (items[0] as any).bounds as paper.Rectangle | undefined
+  if (!ref || !(ref.width > 0) || !(ref.height > 0)) return 0
+  let changed = 0
+  for (let i = 1; i < items.length; i++) {
+    const b = (items[i] as any).bounds as paper.Rectangle | undefined
+    if (!b || !(b.width > 0) || !(b.height > 0)) continue
+    const sx = mode === 'height' ? 1 : ref.width / b.width
+    const sy = mode === 'width' ? 1 : ref.height / b.height
+    if (!Number.isFinite(sx) || !Number.isFinite(sy)) continue
+    if (Math.abs(sx - 1) < 1e-9 && Math.abs(sy - 1) < 1e-9) continue
+    items[i].scale(sx, sy, b.center.clone())
+    e.refreshItemGradient(items[i])
+    changed++
+  }
+  if (changed > 0) {
+    e.reflowTextsForItems(items)
+    e.pushHistory(mode === 'width' ? 'Same Width' : mode === 'height' ? 'Same Height' : 'Same Size')
+    e.scope.view.update()
+  }
+  return changed
+}

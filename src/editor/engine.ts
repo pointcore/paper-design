@@ -5595,29 +5595,9 @@ export class EditorEngine {
    * height (layout staple), scaling about each item's own center so
    * positions hold. Returns items resized; one history entry.
    */
+  /** See engine-arrange.ts. */
   matchSize(mode: 'width' | 'height' | 'both'): number {
-    const items = this.getSelection().filter((item) => !item.locked && item.parent)
-    if (items.length < 2) return 0
-    const ref = (items[0] as any).bounds as paper.Rectangle | undefined
-    if (!ref || !(ref.width > 0) || !(ref.height > 0)) return 0
-    let changed = 0
-    for (let i = 1; i < items.length; i++) {
-      const b = (items[i] as any).bounds as paper.Rectangle | undefined
-      if (!b || !(b.width > 0) || !(b.height > 0)) continue
-      const sx = mode === 'height' ? 1 : ref.width / b.width
-      const sy = mode === 'width' ? 1 : ref.height / b.height
-      if (!Number.isFinite(sx) || !Number.isFinite(sy)) continue
-      if (Math.abs(sx - 1) < 1e-9 && Math.abs(sy - 1) < 1e-9) continue
-      items[i].scale(sx, sy, b.center.clone())
-      this.refreshItemGradient(items[i])
-      changed++
-    }
-    if (changed > 0) {
-      this.reflowTextsForItems(items)
-      this.pushHistory(mode === 'width' ? 'Same Width' : mode === 'height' ? 'Same Height' : 'Same Size')
-      this.scope.view.update()
-    }
-    return changed
+    return arrange.matchSize(this, mode)
   }
 
   /**
@@ -5691,114 +5671,14 @@ export class EditorEngine {
     return preflight.preflight(this)
   }
 
-  /**
-   * Shift selected artwork through HSL (Recolor-lite: hue rotates by
-   * degrees, saturation/lightness move by percent points). Solid fills
-   * and strokes repaint; gradients, patterns and unparseable paints are
-   * skipped. Returns leaves repainted; one history entry.
-   */
+  /** See engine-appearance.ts. */
   adjustColors(dh: number, ds: number, dl: number): number {
-    if (![dh, ds, dl].every(Number.isFinite)) return 0
-    if (Math.abs(dh) < 1e-9 && Math.abs(ds) < 1e-9 && Math.abs(dl) < 1e-9) return 0
-    const scope = this.scope
-    let changed = 0
-    const repaint = (leaf: paper.Item) => {
-      const anyLeaf = leaf as any
-      let touched = false
-      for (const key of ['fillColor', 'strokeColor'] as const) {
-        const paint = anyLeaf[key]
-        if (!paint || paint.gradient) continue
-        const css = colorToCSS(paint)
-        if (!css) continue
-        try {
-          anyLeaf[key] = new scope.Color(shiftCssColor(css, dh, ds, dl))
-          touched = true
-        } catch {
-          continue
-        }
-      }
-      if (touched) {
-        changed++
-        this.refreshItemGradient(leaf)
-      }
-    }
-    for (const item of this.getSelection()) {
-      if ((item as any).locked) continue
-      const children = (item as any).children as paper.Item[] | undefined
-      if (children && (item instanceof scope.Group)) {
-        // Groups repaint every unlocked leaf (exactly once).
-        const walk = (node: paper.Item) => {
-          if ((node as any).locked) return
-          if (node instanceof scope.Path || node instanceof scope.CompoundPath || node instanceof scope.PointText) {
-            repaint(node)
-          } else {
-            const kids = (node as any).children as paper.Item[] | undefined
-            if (kids) for (const k of kids) walk(k)
-          }
-        }
-        for (const child of children) walk(child)
-      } else {
-        const leaf = select.firstLeaf(this, item)
-        if (leaf) repaint(leaf)
-      }
-    }
-    if (changed > 0) {
-      this.reflowTextsForItems(this.getSelection())
-      this.pushHistory('Adjust Colors')
-      this.scope.view.update()
-    }
-    return changed
+    return appearance.adjustColors(this, dh, ds, dl)
   }
 
-  /**
-   * Channel-invert solid fills and strokes on the unlocked selection
-   * (gradients skipped). Returns leaves repainted; one history entry.
-   */
+  /** See engine-appearance.ts. */
   invertPaints(): number {
-    const scope = this.scope
-    let changed = 0
-    const repaint = (leaf: paper.Item) => {
-      const anyLeaf = leaf as any
-      let touched = false
-      for (const key of ['fillColor', 'strokeColor'] as const) {
-        const paint = anyLeaf[key]
-        if (!paint || paint.gradient) continue
-        const css = colorToCSS(paint)
-        if (!css) continue
-        try {
-          anyLeaf[key] = new scope.Color(invertCssColor(css))
-          touched = true
-        } catch {
-          continue
-        }
-      }
-      if (touched) changed++
-    }
-    for (const item of this.getSelection()) {
-      if ((item as any).locked) continue
-      const leaf = select.firstLeaf(this, item)
-      if (!leaf) continue
-      if (leaf !== item && item instanceof scope.Group) {
-        const walk = (node: paper.Item) => {
-          if ((node as any).locked) return
-          if (node instanceof scope.Path || node instanceof scope.CompoundPath || node instanceof scope.PointText) {
-            repaint(node)
-          } else {
-            const kids = (node as any).children as paper.Item[] | undefined
-            if (kids) for (const k of kids) walk(k)
-          }
-        }
-        for (const child of ((item as any).children ?? []) as paper.Item[]) walk(child)
-      } else {
-        repaint(leaf)
-      }
-    }
-    if (changed > 0) {
-      this.reflowTextsForItems(this.getSelection())
-      this.pushHistory('Invert Colors')
-      this.scope.view.update()
-    }
-    return changed
+    return appearance.invertPaints(this)
   }
 
   /**
