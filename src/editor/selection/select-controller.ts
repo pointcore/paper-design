@@ -30,6 +30,11 @@ import {
 } from './frame-geometry'
 import { GuideController } from '../guides/guide-controller'
 import { SnapService } from '../snap/snap-service'
+import {
+  charIndexAt as measureCharIndexAt,
+  charRects,
+  type CharMeasureStyle,
+} from './char-measure'
 import { applyToolCursor, cursorForTool, CURSOR_ROTATE, arrowResizeCursor } from '../cursors'
 import type { TextController } from '../text/text-controller'
 
@@ -3098,6 +3103,37 @@ export class SelectController {
   /** Shared canvas 2d context for measuring character widths. */
   private charMeasureCtx: CanvasRenderingContext2D | null = null
 
+  /** Lazily created 2d context (null when the canvas API is unavailable). */
+  private ensureCharMeasureCtx(): CanvasRenderingContext2D | null {
+    if (!this.charMeasureCtx) {
+      const c = document.createElement('canvas')
+      this.charMeasureCtx = c.getContext('2d')
+    }
+    return this.charMeasureCtx
+  }
+
+  /** Plain layout inputs for the char-measure module. */
+  private charStyleOf(item: paper.PointText): CharMeasureStyle {
+    const fontSize = Number(item.fontSize) || 12
+    return {
+      justification: ((item as any).justification as string) ?? 'left',
+      leading: Number((item as any).leading) || fontSize * 1.2,
+      anchorX: item.point.x,
+      anchorY: item.point.y,
+    }
+  }
+
+  /** Apply the item's typography to the shared measure context. */
+  private syncCharMeasureFont(item: paper.PointText): void {
+    const ctx = this.charMeasureCtx
+    if (!ctx) return
+    const fontSize = Number(item.fontSize) || 12
+    const fontFamily = (item.fontFamily as string) || 'Arial'
+    const fontWeight = (item.fontWeight as string | number) ?? 'normal'
+    const fontStyle = ((item as any).fontStyle as string) ?? 'normal'
+    ctx.font = `${fontStyle} ${fontWeight} ${fontSize}px ${fontFamily}`
+  }
+
   /**
    * Find the character index closest to `point` within a PointText item.
    * Handles multi-line text (newlines) by measuring per-line.
@@ -3105,58 +3141,15 @@ export class SelectController {
   private charIndexAt(item: paper.PointText, point: paper.Point): number {
     const content = (item as any).raw as string | undefined ?? item.content
     if (!content || content.length === 0) return 0
-    if (!this.charMeasureCtx) {
-      const c = document.createElement('canvas')
-      this.charMeasureCtx = c.getContext('2d')
-    }
-    const ctx = this.charMeasureCtx
+    const ctx = this.ensureCharMeasureCtx()
     if (!ctx) return 0
-
-    const fontSize = Number(item.fontSize) || 12
-    const fontFamily = (item.fontFamily as string) || 'Arial'
-    const fontWeight = (item.fontWeight as string | number) ?? 'normal'
-    const fontStyle = ((item as any).fontStyle as string) ?? 'normal'
-    ctx.font = `${fontStyle} ${fontWeight} ${fontSize}px ${fontFamily}`
-
-    const justification = ((item as any).justification as string) ?? 'left'
-    const leading = Number((item as any).leading) || fontSize * 1.2
-    const lines = content.split('\n')
-
-    // Determine which line the click falls on.
-    const localY = point.y - item.point.y
-    let lineIdx = Math.round(localY / leading)
-    lineIdx = Math.max(0, Math.min(lineIdx, lines.length - 1))
-
-    // Within the line, find the closest character by x.
-    const line = lines[lineIdx]
-    const localX = point.x - item.point.x
-    const lineW = ctx.measureText(line).width
-
-    let bestOffset = 0
-    let bestDist = Infinity
-    for (let i = 0; i <= line.length; i++) {
-      const advance = ctx.measureText(line.substring(0, i)).width
-      let charX: number
-      if (justification === 'center') {
-        charX = -lineW / 2 + advance
-      } else if (justification === 'right') {
-        charX = -lineW + advance
-      } else {
-        charX = advance
-      }
-      const dist = Math.abs(localX - charX)
-      if (dist < bestDist) {
-        bestDist = dist
-        bestOffset = i
-      }
-    }
-
-    // Convert line-local offset to global character index.
-    let globalIdx = 0
-    for (let i = 0; i < lineIdx; i++) {
-      globalIdx += lines[i].length + 1 // +1 for the \n
-    }
-    return globalIdx + bestOffset
+    this.syncCharMeasureFont(item)
+    return measureCharIndexAt(
+      content,
+      this.charStyleOf(item),
+      { x: point.x, y: point.y },
+      (t) => ctx.measureText(t).width,
+    )
   }
 
   /**
@@ -3166,51 +3159,15 @@ export class SelectController {
   charBounds(item: paper.PointText): DOMRect[] {
     const content = (item as any).raw as string | undefined ?? item.content
     if (!content || content.length === 0) return []
-    if (!this.charMeasureCtx) {
-      const c = document.createElement('canvas')
-      this.charMeasureCtx = c.getContext('2d')
-    }
-    const ctx = this.charMeasureCtx
+    if (!item.bounds) return []
+    const ctx = this.ensureCharMeasureCtx()
     if (!ctx) return []
-
-    const fontSize = Number(item.fontSize) || 12
-    const fontFamily = (item.fontFamily as string) || 'Arial'
-    const fontWeight = (item.fontWeight as string | number) ?? 'normal'
-    const fontStyle = ((item as any).fontStyle as string) ?? 'normal'
-    ctx.font = `${fontStyle} ${fontWeight} ${fontSize}px ${fontFamily}`
-
-    const justification = ((item as any).justification as string) ?? 'left'
-    const leading = Number((item as any).leading) || fontSize * 1.2
-    const bounds = item.bounds
-    if (!bounds) return []
-
-    const lines = content.split('\n')
-    const rects: DOMRect[] = []
-    let globalIdx = 0
-
-    for (let li = 0; li < lines.length; li++) {
-      const line = lines[li]
-      const lineW = ctx.measureText(line).width
-      const lineY = item.point.y + li * leading
-
-      for (let ci = 0; ci < line.length; ci++) {
-        const before = ctx.measureText(line.substring(0, ci)).width
-        const charW = ctx.measureText(line[ci]).width
-        let x: number
-        if (justification === 'center') {
-          x = item.point.x - lineW / 2 + before
-        } else if (justification === 'right') {
-          x = item.point.x - lineW + before
-        } else {
-          x = item.point.x + before
-        }
-        rects.push(new DOMRect(x, lineY, charW, leading))
-        globalIdx++
-      }
-      // Account for the \n character (no visual rect, but advance globalIdx).
-      globalIdx++ // skip newline
-    }
-    return rects
+    this.syncCharMeasureFont(item)
+    return charRects(
+      content,
+      this.charStyleOf(item),
+      (t) => ctx.measureText(t).width,
+    ).map((r) => new DOMRect(r.x, r.y, r.width, r.height))
   }
 
   /** Draw (or refresh) the semi-transparent highlight over the char selection. */
