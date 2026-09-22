@@ -206,28 +206,7 @@
               <el-button size="small" class="icon-btn" type="danger" plain title="No fill" @click="onClearFill">×</el-button>
             </template>
           </div>
-          <template v-if="fillKind === 'gradient'">
-            <div class="prop-row">
-              <el-radio-group v-model="gradientType" size="small" class="seg-full" @change="onGradientChange">
-                <el-radio-button value="linear">Linear</el-radio-button>
-                <el-radio-button value="radial">Radial</el-radio-button>
-              </el-radio-group>
-            </div>
-            <div v-if="gradientType === 'linear'" class="prop-row">
-              <span class="prop-label-sm">Angle</span>
-              <el-input-number v-model="gradientAngle" :min="0" :max="360" size="small" controls-position="right" @change="onGradientChange" />
-              <el-button size="small" class="icon-btn" title="Reverse gradient direction" @click="onGradientReverse">⇄</el-button>
-              <span class="unit">deg</span>
-            </div>
-            <div class="prop-row" v-for="(stop, index) in gradientStops" :key="index">
-              <el-color-picker v-model="stop.color" size="small" show-alpha @change="onGradientChange" />
-              <el-input-number v-model="stop.offset" :min="0" :max="100" size="small" controls-position="right" @change="onGradientChange" />
-              <el-button size="small" class="icon-btn" type="danger" plain :disabled="gradientStops.length <= 2" @click="removeGradientStop(index)">×</el-button>
-            </div>
-            <div class="prop-row">
-              <el-button size="small" plain class="wide-btn" @click="addGradientStop">Add Stop</el-button>
-            </div>
-          </template>
+          <GradientSection v-show="fillKind === 'gradient'" ref="gradientRef" />
           <div class="prop-row">
             <el-color-picker v-model="strokeColorValue" size="small" show-alpha @change="onStrokeChange" />
             <span class="app-name">Stroke</span>
@@ -531,8 +510,9 @@ import {
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
 import { cssToCmykString, isOutOfCmykGamut } from '../../editor/color'
-import { DASH_PRESETS, cleanTextStylePresets, normalizeGradient, normalizePatternFill, parseDashPattern } from '../../editor/property-helpers'
-import type { AlignMode, BooleanOperation, DistributeAxis, FillRule, GradientState, LineCap, LineJoin, PatternFillState, ReferencePoint, RulerUnit, TextAlign, CharRun } from '../../editor/types'
+import { DASH_PRESETS, cleanTextStylePresets, normalizePatternFill, parseDashPattern } from '../../editor/property-helpers'
+import GradientSection from './GradientSection.vue'
+import type { AlignMode, BooleanOperation, DistributeAxis, FillRule, LineCap, LineJoin, PatternFillState, ReferencePoint, RulerUnit, TextAlign, CharRun } from '../../editor/types'
 
 const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
@@ -654,10 +634,9 @@ const opacityValue = ref(Math.round(store.style.opacity * 100))
 
 // Fill kind follows the store gradient (solid when none is set).
 const fillKind = computed(() => (store.style.gradient ? 'gradient' : 'solid'))
-const gradientType = ref<'linear' | 'radial'>('linear')
-const gradientAngle = ref(0)
-// Editable gradient stops (offsets in percent for the inputs).
-const gradientStops = ref<Array<{ offset: number; color: string }>>([])
+// Gradient stop editor lives in GradientSection (v-show keeps it mounted
+// so kind switches can sync + paint synchronously).
+const gradientRef = ref<InstanceType<typeof GradientSection> | null>(null)
 
 /** Mirror the first selected item's solid paints into the Appearance controls. */
 function syncStyleFromSelection() {
@@ -677,16 +656,6 @@ function syncStyleFromSelection() {
   fillRule.value = style.fillRule ?? 'nonzero'
   blendMode.value = style.blendMode
   opacityValue.value = Math.round((style.opacity ?? 1) * 100)
-}
-
-/** Mirror the store gradient into the editable stop list. */
-function syncGradientFromStore() {
-  const gradient = store.style.gradient
-  gradientType.value = gradient?.type ?? 'linear'
-  gradientAngle.value = Math.round(gradient?.angle ?? 0)
-  gradientStops.value = gradient
-    ? gradient.stops.map((stop) => ({ offset: Math.round(stop.offset * 100), color: stop.color }))
-    : []
 }
 
 // ---- Pattern fill (procedural presets rendered as clipped tiles) ----
@@ -1556,38 +1525,11 @@ function onClearFill() {
   e.pushHistory('Clear Fill')
 }
 
-/** Build normalized gradient parameters from the editable stop list. */
-function currentGradient(): GradientState {
-  return normalizeGradient(gradientStops.value, gradientType.value, gradientAngle.value)
-}
-
-/** Write the edited gradient to the store and repaint the selection. */
-function applyGradientToSelection(label: string) {
-  const e = getEngine()
-  if (!e) return
-  const gradient = currentGradient()
-  if (gradient.stops.length === 0) return
-  store.updateStyle({ gradient })
-  syncGradientFromStore()
-  e.getSelection().forEach((item: any) => {
-    e.applyStyleToItem(item, e.store.style)
-  })
-  e.scope.view.update()
-  e.pushCoalescedHistory(label)
-}
-
 function onFillKindChange(kind: 'solid' | 'gradient') {
   const e = getEngine()
   if (!e) return
   if (kind === 'gradient') {
-    if (!store.style.gradient) {
-      const from = store.style.fillColor || '#000000'
-      store.updateStyle({
-        gradient: { type: 'linear', stops: [{ offset: 0, color: from }, { offset: 1, color: '#ffffff' }] },
-      })
-    }
-    syncGradientFromStore()
-    applyGradientToSelection('Change Gradient')
+    gradientRef.value?.activate()
   } else {
     store.updateStyle({ gradient: null })
     e.getSelection().forEach((item: any) => {
@@ -1596,26 +1538,6 @@ function onFillKindChange(kind: 'solid' | 'gradient') {
     e.scope.view.update()
     e.pushCoalescedHistory('Change Fill')
   }
-}
-
-function onGradientChange() {
-  applyGradientToSelection('Change Gradient')
-}
-
-function onGradientReverse() {
-  gradientAngle.value = (Math.round(Number(gradientAngle.value) || 0) + 180) % 360
-  applyGradientToSelection('Reverse Gradient')
-}
-
-function addGradientStop() {
-  gradientStops.value.push({ offset: 50, color: '#808080' })
-  applyGradientToSelection('Change Gradient')
-}
-
-function removeGradientStop(index: number) {
-  if (gradientStops.value.length <= 2) return
-  gradientStops.value.splice(index, 1)
-  applyGradientToSelection('Change Gradient')
 }
 
 function onStrokeChange(val: string) {
@@ -2043,7 +1965,7 @@ function syncTransformFromSelection() {
 // missed without it).
 watch(() => store.selectedItemIds, () => {
   syncTransformFromSelection()
-  syncGradientFromStore()
+  gradientRef.value?.syncFromStore()
   syncStyleFromSelection()
   syncTextFromSelection()
   syncPatternFromSelection()
