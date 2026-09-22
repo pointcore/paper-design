@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import {
+  diagonalCursorForHeading,
+  HANDLE_HEADINGS,
   isCornerHandle,
+  isNearDiagonal,
   localHandlePoint,
   nearestCorner,
+  normAngle180,
   oppositeHandle,
   pointerAngle,
+  resizeCursorForHeading,
   type FrameHandle,
 } from './frame-geometry'
 
@@ -88,5 +93,64 @@ describe('localHandlePoint', () => {
     expect(localHandlePoint(base, 'bottomLeft')).toEqual({ x: 70, y: 120 })
     expect(localHandlePoint(base, 'bottomCenter')).toEqual({ x: 100, y: 120 })
     expect(localHandlePoint(base, 'bottomRight')).toEqual({ x: 130, y: 120 })
+  })
+})
+
+describe('normAngle180', () => {
+  it('wraps into (-180, 180]', () => {
+    expect(normAngle180(0)).toBe(0)
+    expect(normAngle180(180)).toBe(-180)
+    expect(normAngle180(270)).toBe(-90)
+    expect(normAngle180(-190)).toBe(170)
+    expect(normAngle180(720 + 45)).toBe(45)
+  })
+})
+
+describe('HANDLE_HEADINGS', () => {
+  it('points each handle outward clockwise from east', () => {
+    expect(HANDLE_HEADINGS).toEqual({
+      middleRight: 0,
+      bottomRight: 45,
+      bottomCenter: 90,
+      bottomLeft: 135,
+      middleLeft: 180,
+      topLeft: 225,
+      topCenter: 270,
+      topRight: 315,
+    })
+  })
+})
+
+describe('resizeCursorForHeading', () => {
+  it('folds bidirectional headings onto the four axes', () => {
+    expect(resizeCursorForHeading(0)).toBe('ew-resize')
+    expect(resizeCursorForHeading(45)).toBe('nwse-resize')
+    expect(resizeCursorForHeading(90)).toBe('ns-resize')
+    expect(resizeCursorForHeading(135)).toBe('nesw-resize')
+    // 180° folds back onto the horizontal axis.
+    expect(resizeCursorForHeading(180)).toBe('ew-resize')
+    expect(resizeCursorForHeading(-45)).toBe('nesw-resize')
+    expect(resizeCursorForHeading(360 + 90)).toBe('ns-resize')
+  })
+})
+
+describe('diagonalCursorForHeading', () => {
+  it('never shows an axis arrow, only the nearer diagonal', () => {
+    expect(diagonalCursorForHeading(0)).toBe('nwse-resize')
+    expect(diagonalCursorForHeading(90)).toBe('nwse-resize')
+    expect(diagonalCursorForHeading(135)).toBe('nesw-resize')
+    expect(diagonalCursorForHeading(180)).toBe('nwse-resize')
+  })
+})
+
+describe('isNearDiagonal', () => {
+  it('accepts bisectors within half a degree of a diagonal', () => {
+    expect(isNearDiagonal(45)).toBe(true)
+    expect(isNearDiagonal(45.4)).toBe(true)
+    expect(isNearDiagonal(135)).toBe(true)
+    expect(isNearDiagonal(225)).toBe(true)
+    expect(isNearDiagonal(45.6)).toBe(false)
+    expect(isNearDiagonal(0)).toBe(false)
+    expect(isNearDiagonal(90)).toBe(false)
   })
 })

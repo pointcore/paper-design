@@ -14,11 +14,16 @@ import { remainingRuns, roundCornerHandle } from '../geometry'
 import type { AlignMode, DistributeAxis } from '../types'
 import { selectionColorForItem, selectionColorForItems, SELECT_OUTLINE_LEAF_BUDGET, countOutlineLeaves } from './selection-style'
 import {
+  diagonalCursorForHeading,
+  HANDLE_HEADINGS,
   isCornerHandle,
+  isNearDiagonal,
   localHandlePoint,
   nearestCorner,
+  normAngle180,
   oppositeHandle,
   pointerAngle,
+  resizeCursorForHeading,
   type FrameHandle,
   type SelectionFrame,
   type TransformHandle,
@@ -29,50 +34,6 @@ import { applyToolCursor, cursorForTool, CURSOR_ROTATE, arrowResizeCursor } from
 import type { TextController } from '../text/text-controller'
 
 type EditMode = 'select' | 'direct-select'
-
-/** Normalize degrees into (-180, 180]. */
-function normAngle180(deg: number): number {
-  return ((deg + 540) % 360) - 180
-}
-
-/**
- * Outward heading of each scale handle in frame-local space, clockwise
- * degrees from east (screen coords, y down): E=0, SE=45, S=90, SW=135,
- * W=180, NW=225, N=270, NE=315.
- */
-const HANDLE_HEADINGS: Record<FrameHandle, number> = {
-  middleRight: 0,
-  bottomRight: 45,
-  bottomCenter: 90,
-  bottomLeft: 135,
-  middleLeft: 180,
-  topLeft: 225,
-  topCenter: 270,
-  topRight: 315,
-}
-
-/**
- * Resize cursor for a bidirectional axis heading (CSS resize cursors point
- * both ways, so the heading folds modulo 180° into the nearest of the
- * four axes). At angle 0 this reproduces the classic mapping exactly.
- */
-function resizeCursorForHeading(headingDeg: number): string {
-  const h = ((headingDeg % 180) + 180) % 180
-  if (h < 22.5 || h >= 157.5) return 'ew-resize'
-  if (h < 67.5) return 'nwse-resize'
-  if (h < 112.5) return 'ns-resize'
-  return 'nesw-resize'
-}
-
-/**
- * Diagonal-only cursor for corner handles: a corner resizes along its
- * right-angle bisector (45°), so it always shows a diagonal arrow — the
- * nearer of the two diagonals — never an axis arrow.
- */
-function diagonalCursorForHeading(headingDeg: number): string {
-  const h = ((headingDeg % 180) + 180) % 180
-  return Math.abs(h - 45) <= Math.abs(h - 135) ? 'nwse-resize' : 'nesw-resize'
-}
 
 export class SelectController {
   engine: EditorEngine | null = null
@@ -2596,9 +2557,7 @@ export class SelectController {
     const heading = HANDLE_HEADINGS[handle] + tilt
     if (isCornerHandle(handle)) {
       const native = diagonalCursorForHeading(heading)
-      const folded = ((heading % 180) + 180) % 180
-      const nearDiag = Math.min(Math.abs(folded - 45), Math.abs(folded - 135))
-      if (nearDiag < 0.5) return native
+      if (isNearDiagonal(heading)) return native
       return arrowResizeCursor(heading, native)
     }
     return resizeCursorForHeading(heading)

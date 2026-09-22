@@ -67,6 +67,60 @@ export function pointerAngle(point: Xy, center: Xy): number {
   return (Math.atan2(point.y - center.y, point.x - center.x) * 180) / Math.PI
 }
 
+/** Normalize degrees into (-180, 180]. */
+export function normAngle180(deg: number): number {
+  return ((deg + 540) % 360) - 180
+}
+
+/**
+ * Outward heading of each scale handle in frame-local space, clockwise
+ * degrees from east (screen coords, y down): E=0, SE=45, S=90, SW=135,
+ * W=180, NW=225, N=270, NE=315.
+ */
+export const HANDLE_HEADINGS: Record<FrameHandle, number> = {
+  middleRight: 0,
+  bottomRight: 45,
+  bottomCenter: 90,
+  bottomLeft: 135,
+  middleLeft: 180,
+  topLeft: 225,
+  topCenter: 270,
+  topRight: 315,
+}
+
+/**
+ * Resize cursor for a bidirectional axis heading (CSS resize cursors point
+ * both ways, so the heading folds modulo 180° into the nearest of the
+ * four axes). At angle 0 this reproduces the classic mapping exactly.
+ */
+export function resizeCursorForHeading(headingDeg: number): string {
+  const h = ((headingDeg % 180) + 180) % 180
+  if (h < 22.5 || h >= 157.5) return 'ew-resize'
+  if (h < 67.5) return 'nwse-resize'
+  if (h < 112.5) return 'ns-resize'
+  return 'nesw-resize'
+}
+
+/**
+ * Diagonal-only cursor for corner handles: a corner resizes along its
+ * right-angle bisector (45°), so it always shows a diagonal arrow — the
+ * nearer of the two diagonals — never an axis arrow.
+ */
+export function diagonalCursorForHeading(headingDeg: number): string {
+  const h = ((headingDeg % 180) + 180) % 180
+  return Math.abs(h - 45) <= Math.abs(h - 135) ? 'nwse-resize' : 'nesw-resize'
+}
+
+/**
+ * True when a corner bisector lands within half a degree of a native
+ * diagonal (folded modulo 180°): the hover cursor can be a stock diagonal
+ * arrow, otherwise the controller draws an exact-angle double arrow.
+ */
+export function isNearDiagonal(headingDeg: number): boolean {
+  const folded = ((headingDeg % 180) + 180) % 180
+  return Math.min(Math.abs(folded - 45), Math.abs(folded - 135)) < 0.5
+}
+
 /** Nearest frame corner to a point (labels a corner-started rotate drag). */
 export function nearestCorner(point: Xy, positions: Record<FrameHandle, Xy>): FrameHandle {
   const corners: FrameHandle[] = [
