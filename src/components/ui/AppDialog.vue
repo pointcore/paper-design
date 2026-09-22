@@ -452,3 +452,166 @@ onBeforeUnmount(() => detach?.());
   z-index: 3000 !important;
 }
 </style>
+
+<style>
+/* ── Shared dialog body primitives ──
+   Moved here from TopBar's scoped block so every menu component's dialogs
+   share one definition (scoped CSS never crosses the component boundary).
+   :deep() wrappers are dropped: this block is already global, so plain
+   descendant selectors match teleported dialog DOM identically. */
+.settings-body {
+  max-height: 400px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #4a4a4a transparent;
+}
+
+.settings-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.settings-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.settings-body::-webkit-scrollbar-thumb {
+  background: #4a4a4a;
+  border-radius: 4px;
+  border: 2px solid #141414;
+}
+
+.setting-section {
+  padding: 8px 0;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.setting-section:last-child {
+  border-bottom: none;
+}
+
+.setting-title {
+  font-size: 13px;
+  font-weight: bold;
+  color: #4a90d9;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+  gap: 12px;
+}
+
+.setting-row.setting-sub {
+  padding-left: 24px;
+  border-left: 2px solid #4a4a4a;
+  margin-left: 8px;
+}
+
+.setting-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.setting-name {
+  display: block;
+  font-size: 13px;
+  color: #d5d5d5;
+  font-weight: 500;
+}
+
+.setting-desc {
+  display: block;
+  font-size: 11px;
+  color: #8a8a8a;
+  margin-top: 2px;
+}
+
+/* Dark form controls inside AppDialog bodies */
+.app-settings .el-input__wrapper,
+.app-settings .el-input-number .el-input__wrapper {
+  background: #111111;
+  border: 1px solid #3d3d3d;
+  box-shadow: none !important;
+  border-radius: 3px;
+}
+
+.app-settings .el-input__wrapper:hover {
+  border-color: #5a5a5a;
+}
+
+.app-settings .el-input__wrapper.is-focus {
+  border-color: #4a90d9;
+}
+
+.app-settings .el-input__inner {
+  color: #e6e6e6;
+}
+
+.app-settings .el-input__inner::placeholder {
+  color: #6a6a6a;
+}
+
+.app-settings .el-select__wrapper {
+  background: #111111;
+  border: 1px solid #3d3d3d;
+  box-shadow: none !important;
+  border-radius: 3px;
+}
+
+.app-settings .el-select__wrapper:hover {
+  border-color: #5a5a5a;
+}
+
+.app-settings .el-select__wrapper.is-focused {
+  border-color: #4a90d9;
+}
+
+.app-settings .el-select__placeholder {
+  color: #6a6a6a;
+}
+
+.app-settings .el-select__selected-item {
+  color: #e6e6e6;
+}
+
+.app-settings .el-select__suffix,
+.app-settings .el-select__caret {
+  color: #8a8a8a;
+}
+
+.app-settings .el-radio-button__inner {
+  background: #1a1a1a;
+  border-color: #3d3d3d;
+  color: #b5b5b5;
+  box-shadow: none !important;
+}
+
+.app-settings .el-radio-button__orig-radio:checked + .el-radio-button__inner {
+  background: #2f6fbf;
+  border-color: #2f6fbf;
+  color: #fff;
+}
+
+.app-settings .el-radio-button__orig-radio:disabled + .el-radio-button__inner {
+  background: #242424;
+  border-color: #333;
+  color: #5a5a5a;
+}
+
+.app-settings .el-button--small {
+  background: #333333;
+  border-color: #4a4a4a;
+  color: #d5d5d5;
+}
+
+.app-settings .el-button--small:hover {
+  background: #3d3d3d;
+  border-color: #5a5a5a;
+  color: #fff;
+}
+</style>
