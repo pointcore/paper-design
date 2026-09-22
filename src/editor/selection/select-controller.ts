@@ -29,6 +29,13 @@ import {
   type TransformHandle,
 } from './frame-geometry'
 import { GuideController } from '../guides/guide-controller'
+import {
+  advanceScaledFrame,
+  rotateDragStep,
+  scaleDragTotals,
+  scaleStepFromTotals,
+  type RotateDragState,
+} from './transform-math'
 import { SnapService } from '../snap/snap-service'
 import {
   charIndexAt as measureCharIndexAt,
@@ -124,9 +131,7 @@ export class SelectController {
   // snaps the true total to 45-degree increments (snapping the per-step
   // delta instead would drop fractions and lag behind the pointer).
   private transformRotatePivot: paper.Point | null = null
-  private transformRotateLastRaw = 0
-  private transformRotateAccum = 0
-  private transformRotateApplied = 0
+  private transformRotate: RotateDragState = { lastRaw: 0, accum: 0, applied: 0 }
   private transformMoved = false
 
   // Persistent oriented selection frame (center + size + clockwise angle).
@@ -410,9 +415,7 @@ export class SelectController {
     this.transformUseCenter = false
     this.transformLastPoint = null
     this.transformRotatePivot = null
-    this.transformRotateLastRaw = 0
-    this.transformRotateAccum = 0
-    this.transformRotateApplied = 0
+    this.transformRotate = { lastRaw: 0, accum: 0, applied: 0 }
     this.transformMoved = false
   }
 
@@ -2339,10 +2342,7 @@ export class SelectController {
       const pivot = engine.selectionReferencePivot() ?? new engine.scope.Point(f.cx, f.cy)
       this.transformRotatePivot = pivot.clone()
       this.transformCenter = pivot.clone()
-      const startRaw = pointerAngle(event.point, pivot)
-      this.transformRotateLastRaw = startRaw
-      this.transformRotateAccum = 0
-      this.transformRotateApplied = 0
+      this.transformRotate = { lastRaw: pointerAngle(event.point, pivot), accum: 0, applied: 0 }
     } else {
       this.transformHandle = handle
       // AI: Alt scales about the center, otherwise the opposite handle stays
@@ -2390,22 +2390,17 @@ export class SelectController {
     const engine = this.engine
     const pivot = this.transformRotatePivot
     if (!engine || !pivot) return
-    const raw = pointerAngle(point, pivot)
-    const stepRaw = ((raw - this.transformRotateLastRaw + 540) % 360) - 180
-    this.transformRotateAccum += stepRaw
-    this.transformRotateLastRaw = raw
-    const target = (modifiers as any)?.shift
-      ? snapAngle45(this.transformRotateAccum)
-      : this.transformRotateAccum
-    const delta = target - this.transformRotateApplied
-    if (Math.abs(delta) > 1e-9) {
-      engine.rotateSelection(delta, pivot)
-      this.transformRotateApplied = target
+    const step = rotateDragStep(
+      this.transformRotate,
+      pointerAngle(point, pivot),
+      !!(modifiers as any)?.shift
+    )
+    if (Math.abs(step.delta) > 1e-9) {
+      engine.rotateSelection(step.delta, pivot)
       this.transformMoved = true
     }
     // Live readout (status bar), matching the measure tool's convention.
-    const shown = ((this.transformRotateApplied % 360) + 540) % 360 - 180
-    engine.showStatus(`Rotate ${Math.round(shown * 10) / 10}° (Shift: 45°)`)
+    engine.showStatus(`Rotate ${Math.round(step.shown * 10) / 10}° (Shift: 45°)`)
   }
 
   /**
@@ -2445,65 +2440,17 @@ export class SelectController {
     if (!this.transformOpposite || !this.transformCenter) return
 
     const scope = engine.scope
-    const centerW = new scope.Point(base.cx, base.cy)
-    const toLocal = (p: paper.Point) => p.rotate(-base.angle, centerW)
     const pivotW = wantCenter ? this.transformCenter : this.transformOpposite
-    const pL = wantCenter
-      ? { x: base.cx, y: base.cy }
-      : localHandlePoint(base, oppositeHandle(this.transformHandle))
-    const sL = toLocal(new scope.Point(this.transformStartPoint.x, this.transformStartPoint.y))
-    const qL = toLocal(point.clone())
-    const dxs = sL.x - pL.x
-    const dys = sL.y - pL.y
-    const corner = isCornerHandle(this.transformHandle)
-    const horizontalEdge = this.transformHandle === 'middleLeft' || this.transformHandle === 'middleRight'
-    const verticalEdge = this.transformHandle === 'topCenter' || this.transformHandle === 'bottomCenter'
-
-    let fx = 1
-    let fy = 1
-    if (corner || horizontalEdge) {
-      fx = Math.abs(dxs) > 1e-9 ? (qL.x - pL.x) / dxs : 1
-    }
-    if (corner || verticalEdge) {
-      fy = Math.abs(dys) > 1e-9 ? (qL.y - pL.y) / dys : 1
-    }
-    if (!Number.isFinite(fx)) fx = 1
-    if (!Number.isFinite(fy)) fy = 1
-
-    if (modifiers && modifiers.shift && corner) {
-      // Uniform proportions: dominant magnitude wins, each axis keeps its
-      // own flip sign so Shift never invents a new mirror.
-      const mag = Math.max(Math.abs(fx), Math.abs(fy))
-      fx = (fx < 0 ? -1 : 1) * mag
-      fy = (fy < 0 ? -1 : 1) * mag
-    }
-
-    // Clamp totals: cap runaway zoom, floor off zero so pivot crossing flips
-    // in one bounded step instead of dividing by ~0.
-    const startW = Math.max(base.w, 1e-9)
-    const startH = Math.max(base.h, 1e-9)
-    const MIN_SIZE = 0.5
-    const MAX_SCALE = 100
-    const minFx = MIN_SIZE / startW
-    const minFy = MIN_SIZE / startH
-    if (corner || horizontalEdge) {
-      const s = fx < 0 ? -1 : 1
-      const a = Math.abs(fx)
-      fx = s * Math.max(minFx, Math.min(MAX_SCALE, a))
-    }
-    if (corner || verticalEdge) {
-      const s = fy < 0 ? -1 : 1
-      const a = Math.abs(fy)
-      fy = s * Math.max(minFy, Math.min(MAX_SCALE, a))
-    }
-
-    const lastFx = Math.abs(this.transformLastTotalFx) < 1e-12 ? 1 : this.transformLastTotalFx
-    const lastFy = Math.abs(this.transformLastTotalFy) < 1e-12 ? 1 : this.transformLastTotalFy
-    let stepFx = fx / lastFx
-    let stepFy = fy / lastFy
-    if (!Number.isFinite(stepFx)) stepFx = 1
-    if (!Number.isFinite(stepFy)) stepFy = 1
-    if (Math.abs(stepFx - 1) < 1e-9 && Math.abs(stepFy - 1) < 1e-9) return
+    const totals = scaleDragTotals(
+      base,
+      this.transformHandle as FrameHandle,
+      { x: this.transformStartPoint.x, y: this.transformStartPoint.y },
+      { x: point.x, y: point.y },
+      wantCenter,
+      !!(modifiers as any)?.shift
+    )
+    const step = scaleStepFromTotals(totals.fx, totals.fy, this.transformLastTotalFx, this.transformLastTotalFy)
+    if (!step) return
 
     const P = new scope.Point(pivotW.x, pivotW.y)
     const th = base.angle
@@ -2516,14 +2463,14 @@ export class SelectController {
         continue
       }
       if (!skipSpin) item.rotate(-th, P)
-      item.scale(stepFx, stepFy, P)
+      item.scale(step.stepFx, step.stepFy, P)
       if (!skipSpin) item.rotate(th, P)
       engine.refreshItemGradient(item)
       applied = true
     }
     if (!applied) return
-    this.transformLastTotalFx = fx
-    this.transformLastTotalFy = fy
+    this.transformLastTotalFx = totals.fx
+    this.transformLastTotalFy = totals.fy
     this.transformMoved = true
     // Locked members staying behind break rigid tracking — drop the frame
     // so the next paint rebuilds it from live bounds.
@@ -2534,14 +2481,7 @@ export class SelectController {
     // Advance the tracked frame from the totals (signed factors keep flips
     // honest); the angle never changes under scaling.
     if (this.frame) {
-      const f = this.frame
-      f.w = base.w * Math.abs(fx)
-      f.h = base.h * Math.abs(fy)
-      const clx = pL.x + (base.cx - pL.x) * fx
-      const cly = pL.y + (base.cy - pL.y) * fy
-      const cw = new scope.Point(clx, cly).rotate(base.angle, centerW)
-      f.cx = cw.x
-      f.cy = cw.y
+      Object.assign(this.frame, advanceScaledFrame(base, totals.pivotLocal, totals.fx, totals.fy))
     }
   }
 
@@ -3213,12 +3153,4 @@ export class SelectController {
       if ((child.data as any)?.isCharHighlight) child.remove()
     }
   }
-}
-
-/**
- * Snap a clockwise angle in degrees to the nearest 45-degree increment,
- * matching the Shift-constrain convention used by the pen and shape tools.
- */
-function snapAngle45(deg: number): number {
-  return Math.round(deg / 45) * 45
 }
