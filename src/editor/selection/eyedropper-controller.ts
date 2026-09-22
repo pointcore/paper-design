@@ -10,6 +10,7 @@
  */
 import { EditorEngine } from '../engine'
 import { applyToolCursor } from '../cursors'
+import { normalizeAlign } from '../text/text-align'
 
 export class EyedropperController {
   engine: EditorEngine | null = null
@@ -153,7 +154,9 @@ export class EyedropperController {
       })
       const justification = ((leaf as any).justification as string) ?? 'left'
       engine.store.updateParagraphStyle({
-        align: justification === 'center' ? 'center' : justification === 'right' ? 'right' : 'left',
+        // Prefer the stored intent (justify survives on data.align even
+        // though paper.js renders it left-aligned on canvas).
+        align: normalizeAlign((itemData as { align?: unknown }).align ?? justification),
       })
       // Also pick up fill color from the run if present.
       if (charStyleOverrides.fillColor) {

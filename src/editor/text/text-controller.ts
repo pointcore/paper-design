@@ -18,7 +18,7 @@
 import { EditorEngine } from '../engine'
 import { SnapService } from '../snap/snap-service'
 import { applyToolCursor } from '../cursors'
-import type { TextAlign } from '../types'
+import { cssTextAlignFor, normalizeAlign, paperJustificationFor } from './text-align'
 
 /** Text creation / editing mode, resolved from the active text tool. */
 type TextKind = 'point' | 'area' | 'path' | 'vertical'
@@ -40,14 +40,6 @@ const TOP_TO_BASELINE = 0.9
 
 /** Minimum drag span in document units that counts as an area frame. */
 const MIN_FRAME_SPAN = 5
-
-/** Maps the store's TextAlign onto paper.js justification values. */
-const JUSTIFICATIONS: Record<TextAlign, 'left' | 'center' | 'right'> = {
-  left: 'left',
-  center: 'center',
-  right: 'right',
-  justify: 'left',
-}
 
 export class TextController {
   engine: EditorEngine | null = null
@@ -538,7 +530,8 @@ export class TextController {
     const engine = this.engine!
     const scope = engine.scope
     const charStyle = engine.store.charStyle
-    const justification = JUSTIFICATIONS[engine.store.paragraphStyle.align] ?? 'left'
+    const align = normalizeAlign(engine.store.paragraphStyle.align)
+    const justification = paperJustificationFor(align)
     const fillColor = engine.store.style.fillColor || '#000000'
 
     const text = new scope.PointText({
@@ -557,6 +550,10 @@ export class TextController {
     text.data.isUserItem = true
     text.data.textMode = data.textMode
     text.data.raw = data.raw
+    // True paragraph alignment, including justify (paper justification
+    // above is only the canvas approximation). Serialized with the
+    // document, so Save/Open round-trips the intent.
+    text.data.align = align
     text.data.openType = { ...charStyle.openType }
     if (data.frame) text.data.frame = { ...data.frame }
     engine.getActiveLayer().addChild(text)
@@ -783,7 +780,8 @@ export class TextController {
   private frameAnchor(frame: TextFrame): paper.Point {
     const engine = this.engine!
     const scope = engine.scope
-    const justification = JUSTIFICATIONS[engine.store.paragraphStyle.align] ?? 'left'
+    // Justify anchors like left on canvas (see text-align.ts).
+    const justification = paperJustificationFor(normalizeAlign(engine.store.paragraphStyle.align))
     const x =
       justification === 'center'
         ? frame.x + frame.width / 2
@@ -977,23 +975,30 @@ export class TextController {
     const engine = this.engine!
     if (this.editingItem) {
       const item = this.editingItem
+      const data = (item as any).data ?? {}
+      const align = normalizeAlign(
+        (data as { align?: unknown }).align ?? (item as any).justification
+      )
       return {
         fontFamily: item.fontFamily || 'Arial',
         fontWeight: (item.fontWeight as string | number) ?? 'normal',
         fontStyle: ((item as any).fontStyle as string) ?? 'normal',
         fontSize: Number(item.fontSize) || 12,
         color: item.fillColor ? item.fillColor.toCSS(true) : '#000000',
-        justification: ((item as any).justification as 'left' | 'center' | 'right') ?? 'left',
+        justification: paperJustificationFor(align),
+        cssAlign: cssTextAlignFor(align),
       }
     }
     const charStyle = engine.store.charStyle
+    const align = normalizeAlign(engine.store.paragraphStyle.align)
     return {
       fontFamily: charStyle.fontFamily,
       fontWeight: charStyle.fontWeight,
       fontStyle: charStyle.fontStyle,
       fontSize: charStyle.fontSize,
       color: engine.store.style.fillColor || '#000000',
-      justification: JUSTIFICATIONS[engine.store.paragraphStyle.align] ?? 'left',
+      justification: paperJustificationFor(align),
+      cssAlign: cssTextAlignFor(align),
     }
   }
 
@@ -1058,7 +1063,7 @@ export class TextController {
     style.caretColor = type.color
     // Keep the text growing from the anchor edge that paper.js will anchor
     // the committed PointText to.
-    style.textAlign = type.justification
+    style.textAlign = type.cssAlign
     if (type.justification === 'center') {
       style.transform = 'translateX(-50%)'
     } else if (type.justification === 'right') {
@@ -1303,6 +1308,7 @@ export class TextController {
     group.data.textMode = (item.data as any)?.textMode ?? 'point'
     group.data.raw = (item as any).raw ?? content
     group.data.openType = { ...((item.data as any)?.openType ?? {}) }
+    group.data.align = normalizeAlign((item.data as any)?.align)
     if ((item.data as any)?.frame) group.data.frame = { ...(item.data as any).frame }
     if ((item.data as any)?.annotation) group.data.annotation = true
     if ((item.data as any)?.isCallout) group.data.isCallout = true
