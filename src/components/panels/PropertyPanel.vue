@@ -145,46 +145,7 @@
           <span class="prop-label">Transform</span>
         </div>
         <div v-show="open.transform" class="prop-body">
-          <div class="tf-grid">
-            <div class="ref-grid tf-ref">
-              <div
-                v-for="rp in refPoints"
-                :key="rp"
-                class="ref-cell"
-                :class="{ active: store.referencePoint === rp }"
-                @click="onReferencePointChange(rp)"
-              />
-            </div>
-            <div class="tf-cell">
-              <span>X</span>
-              <el-input-number v-model="posX" :precision="1" size="small" controls-position="right" @change="onTransformChange" />
-            </div>
-            <div class="tf-cell">
-              <span>W</span>
-              <el-input-number v-model="posW" :precision="1" :min="0.1" size="small" controls-position="right" @change="onTransformChange" />
-              <el-button size="small" class="icon-btn wh-link" :type="whLink ? 'primary' : ''" :title="whLink ? 'Aspect ratio locked' : 'Lock aspect ratio'" @click="whLink = !whLink">&#9935;</el-button>
-            </div>
-            <div class="tf-cell">
-              <span>Y</span>
-              <el-input-number v-model="posY" :precision="1" size="small" controls-position="right" @change="onTransformChange" />
-            </div>
-            <div class="tf-cell">
-              <span>H</span>
-              <el-input-number v-model="posH" :precision="1" :min="0.1" size="small" controls-position="right" @change="onTransformChange" />
-            </div>
-          </div>
-          <div class="prop-row">
-            <span class="prop-label-sm">Rotate</span>
-            <el-input-number v-model="rotateBy" :precision="1" size="small" controls-position="right" placeholder="deg" @change="onRotateByChange" />
-            <el-button size="small" class="icon-btn" title="Rotate a copy (keeps the original)" @click="onRotateCopy">⧉</el-button>
-            <el-button size="small" class="icon-btn" :type="store.transform.flipH ? 'primary' : ''" title="Flip Horizontal" @click="onFlipH">⇔</el-button>
-            <el-button size="small" class="icon-btn" :type="store.transform.flipV ? 'primary' : ''" title="Flip Vertical" @click="onFlipV">⇕</el-button>
-          </div>
-          <div class="prop-row">
-            <span class="prop-label-sm">Skew</span>
-            <el-input-number v-model="skewXBy" :precision="1" size="small" controls-position="right" placeholder="X deg" @change="onSkewChange" />
-            <el-input-number v-model="skewYBy" :precision="1" size="small" controls-position="right" placeholder="Y deg" @change="onSkewChange" />
-          </div>
+          <TransformSection ref="transformRef" />
         </div>
       </div>
 
@@ -315,34 +276,7 @@
           <span class="prop-label">Align</span>
         </div>
         <div v-show="open.align" class="prop-body">
-          <div class="btn-row">
-            <el-radio-group v-model="alignTarget" size="small">
-              <el-radio-button value="selection">Selection</el-radio-button>
-              <el-radio-button value="board">Artboard</el-radio-button>
-              <el-radio-button value="key">Key</el-radio-button>
-            </el-radio-group>
-          </div>
-          <div class="btn-grid-3">
-            <el-button size="small" class="grid-btn" :disabled="!store.hasSelection" @click="onAlign('left', 'Align Left')">Left</el-button>
-            <el-button size="small" class="grid-btn" :disabled="!store.hasSelection" @click="onAlign('centerX', 'Align Center')">Center</el-button>
-            <el-button size="small" class="grid-btn" :disabled="!store.hasSelection" @click="onAlign('right', 'Align Right')">Right</el-button>
-            <el-button size="small" class="grid-btn" :disabled="!store.hasSelection" @click="onAlign('top', 'Align Top')">Top</el-button>
-            <el-button size="small" class="grid-btn" :disabled="!store.hasSelection" @click="onAlign('centerY', 'Align Middle')">Middle</el-button>
-            <el-button size="small" class="grid-btn" :disabled="!store.hasSelection" @click="onAlign('bottom', 'Align Bottom')">Bottom</el-button>
-          </div>
-          <div class="btn-grid-2">
-            <el-button size="small" class="grid-btn" :disabled="store.selectedItemIds.length < 3" @click="onDistribute('horizontal')">Distr H</el-button>
-            <el-button size="small" class="grid-btn" :disabled="store.selectedItemIds.length < 3" @click="onDistribute('vertical')">Distr V</el-button>
-          </div>
-          <div class="btn-grid-2">
-            <el-button size="small" class="grid-btn" :disabled="store.selectedItemIds.length < 3" @click="onDistributeGap('horizontal')">Gap H</el-button>
-            <el-button size="small" class="grid-btn" :disabled="store.selectedItemIds.length < 3" @click="onDistributeGap('vertical')">Gap V</el-button>
-          </div>
-          <div class="btn-grid-3">
-            <el-button size="small" class="grid-btn" title="Average sub-selected anchors horizontally" @click="onAverage('horizontal')">Avg H</el-button>
-            <el-button size="small" class="grid-btn" title="Average sub-selected anchors vertically" @click="onAverage('vertical')">Avg V</el-button>
-            <el-button size="small" class="grid-btn" title="Average sub-selected anchors on both axes" @click="onAverage('both')">Avg Both</el-button>
-          </div>
+          <AlignSection />
         </div>
       </div>
 
@@ -352,34 +286,7 @@
           <span class="prop-label">Path</span>
         </div>
         <div v-show="open.path" class="prop-body">
-          <div class="btn-grid-2">
-            <el-button size="small" class="grid-btn" :disabled="booleanOperandCount() < 2" @click="onBoolean('unite')">Unite</el-button>
-            <el-button size="small" class="grid-btn" :disabled="booleanOperandCount() < 2" @click="onBoolean('subtract')">Subtract</el-button>
-            <el-button size="small" class="grid-btn" :disabled="booleanOperandCount() < 2" @click="onBoolean('intersect')">Intersect</el-button>
-            <el-button size="small" class="grid-btn" :disabled="booleanOperandCount() < 2" @click="onBoolean('exclude')">Exclude</el-button>
-          </div>
-          <div class="prop-row">
-            <span class="prop-label-sm">Offset</span>
-            <el-input-number v-model="offsetDist" size="small" controls-position="right" title="Positive expands, negative insets" />
-            <el-select v-model="offsetJoin" size="small" class="flex-ctl" title="Join">
-              <el-option value="miter" label="Miter" />
-              <el-option value="round" label="Round" />
-              <el-option value="bevel" label="Bevel" />
-            </el-select>
-            <el-button size="small" class="grid-btn" :disabled="!store.hasSelection" @click="onOffset">Apply</el-button>
-          </div>
-          <div class="btn-grid-2">
-            <el-button size="small" class="grid-btn" :disabled="!store.hasSelection" title="Add a midpoint anchor to every curve" @click="onAddAnchors">Add Anchors</el-button>
-            <el-button size="small" class="grid-btn" :disabled="!store.hasSelection" title="Reverse path direction" @click="onReverse">Reverse</el-button>
-          </div>
-          <div class="prop-row">
-            <el-button size="small" plain class="wide-btn" title="Split paths at sub-selected anchors (Direct Select)" @click="onSplitAnchors">Split at Anchors</el-button>
-          </div>
-          <div class="prop-row">
-            <span class="prop-label-sm">Fillet</span>
-            <el-input-number v-model="filletRadius" :min="0.5" :max="500" size="small" controls-position="right" title="Round sharp corners" />
-            <el-button size="small" class="grid-btn" :disabled="!store.hasSelection" @click="onFillet">Apply</el-button>
-          </div>
+          <PathSection />
         </div>
       </div>
     </div>
@@ -398,7 +305,10 @@ import { DASH_PRESETS, parseDashPattern } from '../../editor/property-helpers'
 import GradientSection from './GradientSection.vue'
 import PatternSection from './PatternSection.vue'
 import TextSection from './TextSection.vue'
-import type { AlignMode, BooleanOperation, DistributeAxis, FillRule, LineCap, LineJoin, ReferencePoint, RulerUnit } from '../../editor/types'
+import AlignSection from './AlignSection.vue'
+import PathSection from './PathSection.vue'
+import TransformSection from './TransformSection.vue'
+import type { FillRule, LineCap, LineJoin, RulerUnit } from '../../editor/types'
 
 const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
@@ -526,6 +436,8 @@ const gradientRef = ref<InstanceType<typeof GradientSection> | null>(null)
 const patternRef = ref<InstanceType<typeof PatternSection> | null>(null)
 // Text editor lives in TextSection (self-gated on a selected text item).
 const textRef = ref<InstanceType<typeof TextSection> | null>(null)
+// Transform editor lives in TransformSection (synced on selection changes).
+const transformRef = ref<InstanceType<typeof TransformSection> | null>(null)
 
 /** Mirror the first selected item's solid paints into the Appearance controls. */
 function syncStyleFromSelection() {
@@ -614,31 +526,6 @@ const blendModes = [
   { value: 'saturation', label: 'Saturation' },
   { value: 'color', label: 'Color' },
   { value: 'luminosity', label: 'Luminosity' },
-]
-
-const posX = ref(0)
-const posY = ref(0)
-const posW = ref(0)
-const posH = ref(0)
-// AI transform-panel aspect lock: when on, editing one dimension derives
-// the other from the ratio the selection had before this edit.
-const whLink = ref(false)
-let lastPosW = 0
-let lastPosH = 0
-// Relative rotation in degrees applied on change, then reset to zero.
-const rotateBy = ref(0)
-// Relative skew in degrees applied on change, then reset to zero.
-const skewXBy = ref(0)
-const skewYBy = ref(0)
-
-// Align target: united selection, active artboard, or picked key object.
-const alignTarget = ref<'selection' | 'board' | 'key'>('selection')
-
-// Nine-point reference anchors in grid order.
-const refPoints: ReferencePoint[] = [
-  'top-left', 'top-center', 'top-right',
-  'middle-left', 'center', 'middle-right',
-  'bottom-left', 'bottom-center', 'bottom-right',
 ]
 
 /** Object-type label shown under the tab, like AI ("Path", "Text", ...). */
@@ -834,303 +721,11 @@ function onOpacityChange(val: number) {
   e.pushCoalescedHistory('Change Opacity')
 }
 
-function onTransformChange() {
-  const e = getEngine()
-  if (!e) return
-  if (!Number.isFinite(posW.value) || !Number.isFinite(posH.value)) return
-  if (posW.value <= 0 || posH.value <= 0) return
-  // Aspect lock: whichever dimension the user touched drives the other at
-  // the pre-edit ratio (lastPos values are synced on every panel resync).
-  if (whLink.value && lastPosW > 0 && lastPosH > 0) {
-    const wMoved = Math.abs(posW.value - lastPosW) > 1e-9
-    const hMoved = Math.abs(posH.value - lastPosH) > 1e-9
-    if (wMoved && !hMoved) {
-      posH.value = Math.max(0.1, Math.round(((posW.value * lastPosH) / lastPosW) * 10) / 10)
-    } else if (hMoved && !wMoved) {
-      posW.value = Math.max(0.1, Math.round(((posH.value * lastPosW) / lastPosH) * 10) / 10)
-    }
-  }
-  // X/Y address the reference point; W/H scale about it so it stays fixed.
-  // Multi-selections act on their united bounds (AI): every member keeps
-  // its relative layout instead of being stretched to the same size.
-  const ref = store.referencePoint
-  const items = (e.getSelection() as any[]).filter((item) => {
-    if (!item || item.locked) return false
-    const b = item.bounds
-    return !!b && b.width > 0 && b.height > 0
-  })
-  if (items.length === 0) return
-  let united = items[0].bounds.clone()
-  for (let i = 1; i < items.length; i++) {
-    united = united.unite(items[i].bounds)
-  }
-  if (!united || united.width <= 0 || united.height <= 0) return
-  const anchor = e.referencePointForRect(united, ref)
-  const dx = posX.value - anchor.x
-  const dy = posY.value - anchor.y
-  const scaleX = posW.value / united.width
-  const scaleY = posH.value / united.height
-  const pivot = new e.scope.Point(posX.value, posY.value)
-  items.forEach((item: any) => {
-    if (dx !== 0 || dy !== 0) {
-      item.position = item.position.add(new e!.scope.Point(dx, dy))
-    }
-    item.scale(scaleX, scaleY, pivot)
-    e.refreshItemGradient(item)
-  })
-  e.reflowTextsForItems(items)
-  e.scope.view.update()
-  e.pushCoalescedHistory('Transform')
-  lastPosW = posW.value
-  lastPosH = posH.value
-}
-
-function onReferencePointChange(point: ReferencePoint) {
-  store.setReferencePoint(point)
-  // X/Y display follows the reference point, so resync the panel.
-  syncTransformFromSelection()
-}
-
-function onRotateByChange(val: number | undefined) {
-  const e = getEngine()
-  if (!e || !val) {
-    rotateBy.value = 0
-    return
-  }
-  const pivot = e.selectionReferencePivot() ?? e.getSelectionBounds()?.center
-  if (!pivot) {
-    rotateBy.value = 0
-    return
-  }
-  e.rotateSelection(val, pivot)
-  e.pushHistory('Rotate')
-  e.stampSelectionFrame()
-  rotateBy.value = 0
-}
-
-function onRotateCopy() {
-  const e = getEngine()
-  const val = Number(rotateBy.value)
-  if (!e || !val) {
-    rotateBy.value = 0
-    store.setStatusMessage('Enter degrees, then Rotate Copy')
-    return
-  }
-  const pivot = e.selectionReferencePivot() ?? e.getSelectionBounds()?.center
-  if (!pivot) {
-    rotateBy.value = 0
-    return
-  }
-  if (!e.rotateCopy(val, pivot)) {
-    store.setStatusMessage('Rotate Copy needs unlocked artwork')
-  }
-  e.stampSelectionFrame()
-  rotateBy.value = 0
-}
-
-function onSkewChange() {
-  const e = getEngine()
-  const skewX = skewXBy.value || 0
-  const skewY = skewYBy.value || 0
-  skewXBy.value = 0
-  skewYBy.value = 0
-  if (!e || (skewX === 0 && skewY === 0)) return
-  const pivot = e.selectionReferencePivot() ?? e.getSelectionBounds()?.center
-  if (!pivot) return
-  e.skewSelection(skewX, skewY, pivot)
-  e.pushHistory('Skew')
-  e.stampSelectionFrame()
-}
-
-function onFlipH() {
-  const e = getEngine()
-  if (!e) return
-  const pivot = e.selectionReferencePivot() ?? e.getSelectionBounds()?.center
-  if (!pivot) return
-  e.flipSelection('horizontal', pivot)
-  e.pushHistory('Flip Horizontal')
-  e.stampSelectionFrame()
-}
-
-function onFlipV() {
-  const e = getEngine()
-  if (!e) return
-  const pivot = e.selectionReferencePivot() ?? e.getSelectionBounds()?.center
-  if (!pivot) return
-  e.flipSelection('vertical', pivot)
-  e.pushHistory('Flip Vertical')
-  e.stampSelectionFrame()
-}
-
-function onAlign(mode: AlignMode, label: string) {
-  const e = getEngine()
-  if (!e) return
-  const t = (alignTarget as any).value ?? 'selection'
-  const target = t === 'board'
-    ? e.getActiveArtboardRect() ?? undefined
-    : t === 'key'
-      ? (e as any).getKeyObjectBounds?.() ?? undefined
-      : undefined
-  // Direct-select sub-selection first (anchors); falls through to objects.
-  const sc = e.getController('direct-select') as {
-    alignSubselection?: (m: AlignMode, t?: paper.Rectangle | null) => boolean | null
-  } | null
-  const sub = sc?.alignSubselection?.(mode, target ?? null) ?? null
-  if (sub === true) return
-  if (sub === false) {
-    store.setStatusMessage('Nothing to align in the sub-selection')
-    return
-  }
-  if (e.alignSelection(mode, target)) {
-    e.pushHistory(label)
-  } else {
-    store.setStatusMessage('Align needs 2+ objects, a board, or a key object')
-  }
-}
-
-function onDistribute(axis: DistributeAxis) {
-  const e = getEngine()
-  if (!e) return
-  const sc = e.getController('direct-select') as {
-    distributeSubselection?: (a: DistributeAxis) => boolean | null
-  } | null
-  const sub = sc?.distributeSubselection?.(axis) ?? null
-  if (sub === true) return
-  if (sub === false) {
-    store.setStatusMessage('Distribute needs 3+ sub-selected anchors')
-    return
-  }
-  if (e.distributeSelection(axis)) {
-    e.pushHistory(axis === 'horizontal' ? 'Distribute Horizontally' : 'Distribute Vertically')
-  }
-}
-
-function onDistributeGap(axis: DistributeAxis) {
-  const e = getEngine()
-  if (!e) return
-  const sc = e.getController('direct-select') as {
-    distributeSubselection?: (a: DistributeAxis) => boolean | null
-  } | null
-  const sub = sc?.distributeSubselection?.(axis) ?? null
-  if (sub === true) return
-  if (sub === false) {
-    store.setStatusMessage('Distribute needs 3+ sub-selected anchors')
-    return
-  }
-  if (e.distributeSpacing(axis)) {
-    e.pushHistory('Distribute Gaps')
-  }
-}
-
-function onAverage(axis: 'horizontal' | 'vertical' | 'both') {
-  const e = getEngine()
-  if (!e) return
-  const sc = e.getController('direct-select') as {
-    averageSubselection?: (a: 'horizontal' | 'vertical' | 'both') => boolean | null
-  } | null
-  const sub = sc?.averageSubselection?.(axis) ?? null
-  if (sub === true) return
-  store.setStatusMessage('Average needs 2+ sub-selected anchors')
-}
-
-/** Number of selected unlocked paths usable as boolean operands. */
-function booleanOperandCount(): number {
-  const e = getEngine()
-  if (!e) return 0
-  return e.getSelection().filter(
-    (item) =>
-      !item.locked &&
-      (item instanceof e.scope.Path || item instanceof e.scope.CompoundPath)
-  ).length
-}
-
-function onBoolean(op: BooleanOperation) {
-  const e = getEngine()
-  if (!e) return
-  if (!e.booleanOperation(op)) {
-    store.setStatusMessage('Boolean needs at least two unlocked paths')
-  }
-}
-
-const offsetDist = ref(10)
-const offsetJoin = ref<'miter' | 'round' | 'bevel'>('miter')
-const filletRadius = ref(8)
-
-function onOffset() {
-  const e = getEngine()
-  if (!e) return
-  const d = Number(offsetDist.value)
-  if (!Number.isFinite(d) || Math.abs(d) < 1e-9) {
-    store.setStatusMessage('Offset needs a non-zero distance')
-    return
-  }
-  if (e.offsetPaths(d, offsetJoin.value) === 0) {
-    store.setStatusMessage('Offset needs a path selection')
-  }
-}
-
-function onAddAnchors() {
-  const e = getEngine()
-  if (!e) return
-  if (e.addAnchorPoints() === 0) {
-    store.setStatusMessage('Add Anchors needs a path selection')
-  }
-}
-
-function onReverse() {
-  const e = getEngine()
-  if (!e) return
-  if (e.reversePaths() === 0) {
-    store.setStatusMessage('Reverse needs a path selection')
-  }
-}
-
-function onSplitAnchors() {
-  const e = getEngine()
-  if (!e) return
-  const sc = e.getController('direct-select') as {
-    splitAtSelectedAnchors?: () => boolean | null
-  } | null
-  const sub = sc?.splitAtSelectedAnchors?.() ?? null
-  if (sub === true) return
-  store.setStatusMessage('Split needs sub-selected anchors (Direct Select)')
-}
-
-function onFillet() {
-  const e = getEngine()
-  if (!e) return
-  const sc = e.getController('direct-select') as {
-    roundSelectedCorners?: (radius: number) => number
-  } | null
-  const n = sc?.roundSelectedCorners?.(Number(filletRadius.value) || 0) ?? 0
-  if (n === 0) {
-    store.setStatusMessage('Fillet needs sharp corners selected')
-  }
-}
-
-/** Read the selection bounds (united for multi-selections) into the fields. */
-function syncTransformFromSelection() {
-  const e = getEngine()
-  if (!e || !store.hasSelection) return
-  const items = e.getSelection()
-  if (items.length === 0) return
-  const b = (items.length > 1 ? e.getSelectionBounds() : null) ?? (items[0] as any).bounds
-  if (!b) return
-  const anchor = e.referencePointForRect(b, store.referencePoint)
-  posX.value = Math.round(anchor.x * 10) / 10
-  posY.value = Math.round(anchor.y * 10) / 10
-  posW.value = Math.round(b.width * 10) / 10
-  posH.value = Math.round(b.height * 10) / 10
-  lastPosW = posW.value
-  lastPosH = posH.value
-  rotateBy.value = 0
-}
-
 // `immediate` covers the panel mounting after a selection already exists
 // (the panel is v-if'd on hasSelection, so its first selection change is
 // missed without it).
 watch(() => store.selectedItemIds, () => {
-  syncTransformFromSelection()
+  transformRef.value?.syncFromStore()
   gradientRef.value?.syncFromStore()
   textRef.value?.syncFromStore()
   syncStyleFromSelection()
