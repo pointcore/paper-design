@@ -15,6 +15,7 @@ import type { AlignMode, DistributeAxis } from '../types'
 import { selectionColorForItem, selectionColorForItems, SELECT_OUTLINE_LEAF_BUDGET, countOutlineLeaves } from './selection-style'
 import {
   diagonalCursorForHeading,
+  frameHandlePositions,
   HANDLE_HEADINGS,
   isCornerHandle,
   isNearDiagonal,
@@ -24,6 +25,7 @@ import {
   oppositeHandle,
   pointerAngle,
   resizeCursorForHeading,
+  toFrameLocal,
   type FrameHandle,
   type SelectionFrame,
   type TransformHandle,
@@ -318,33 +320,25 @@ export class SelectController {
   /** World-space corner / edge positions of an oriented frame. */
   private frameCorners(f: SelectionFrame): Record<FrameHandle, paper.Point> {
     const scope = this.engine!.scope
-    const c = new scope.Point(f.cx, f.cy)
-    const at = (ox: number, oy: number) =>
-      new scope.Point(f.cx + ox, f.cy + oy).rotate(f.angle, c)
-    const hw = f.w / 2
-    const hh = f.h / 2
-    const TL = at(-hw, -hh)
-    const TR = at(hw, -hh)
-    const BR = at(hw, hh)
-    const BL = at(-hw, hh)
-    const mid = (a: paper.Point, b: paper.Point) =>
-      new scope.Point((a.x + b.x) / 2, (a.y + b.y) / 2)
+    const positions = frameHandlePositions(f)
+    const pt = (p: { x: number; y: number }): paper.Point => new scope.Point(p.x, p.y)
     return {
-      topLeft: TL,
-      topCenter: mid(TL, TR),
-      topRight: TR,
-      middleLeft: mid(TL, BL),
-      middleRight: mid(TR, BR),
-      bottomLeft: BL,
-      bottomCenter: mid(BL, BR),
-      bottomRight: BR,
+      topLeft: pt(positions.topLeft),
+      topCenter: pt(positions.topCenter),
+      topRight: pt(positions.topRight),
+      middleLeft: pt(positions.middleLeft),
+      middleRight: pt(positions.middleRight),
+      bottomLeft: pt(positions.bottomLeft),
+      bottomCenter: pt(positions.bottomCenter),
+      bottomRight: pt(positions.bottomRight),
     }
   }
 
   /** Map a world point into the frame's local (unrotated) space. */
   private frameToLocal(p: paper.Point, f: SelectionFrame): paper.Point {
     const scope = this.engine!.scope
-    return p.clone().rotate(-f.angle, new scope.Point(f.cx, f.cy))
+    const local = toFrameLocal({ x: p.x, y: p.y }, f)
+    return new scope.Point(local.x, local.y)
   }
 
   attachEngine(engine: EditorEngine) {

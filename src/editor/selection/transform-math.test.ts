@@ -2,12 +2,12 @@ import { describe, expect, it } from 'vitest'
 import {
   advanceScaledFrame,
   rotateDragStep,
-  rotateXy,
   scaleDragTotals,
   scaleStepFromTotals,
   snapAngle45,
   type RotateDragState,
 } from './transform-math'
+import { rotateXy } from './frame-geometry'
 
 describe('snapAngle45', () => {
   it('snaps to the nearest 45° increment', () => {
@@ -16,23 +16,6 @@ describe('snapAngle45', () => {
     expect(snapAngle45(23)).toBe(45)
     expect(snapAngle45(-30)).toBe(-45)
     expect(snapAngle45(400)).toBe(405)
-  })
-})
-
-describe('rotateXy', () => {
-  it('reproduces paper.js Point.rotate', () => {
-    const a = rotateXy({ x: 1, y: 0 }, 90, { x: 0, y: 0 })
-    expect(a.x).toBeCloseTo(0, 9)
-    expect(a.y).toBeCloseTo(1, 9)
-    const b = rotateXy({ x: 0, y: 1 }, -90, { x: 0, y: 0 })
-    expect(b.x).toBeCloseTo(1, 9)
-    expect(b.y).toBeCloseTo(0, 9)
-    const p = { x: 3, y: 4 }
-    const c = { x: 1, y: 1 }
-    const there = rotateXy(p, 37, c)
-    const back = rotateXy(there, -37, c)
-    expect(back.x).toBeCloseTo(p.x, 9)
-    expect(back.y).toBeCloseTo(p.y, 9)
   })
 })
 

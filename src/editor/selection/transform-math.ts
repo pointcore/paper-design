@@ -12,7 +12,7 @@
  * history — everything here is unit-locked.
  */
 import type { Xy } from '../geometry'
-import { isCornerHandle, localHandlePoint, oppositeHandle, type FrameHandle } from './frame-geometry'
+import { isCornerHandle, localHandlePoint, oppositeHandle, rotateXy, type FrameHandle } from './frame-geometry'
 
 /**
  * Snap a clockwise angle in degrees to the nearest 45-degree increment,
@@ -20,16 +20,6 @@ import { isCornerHandle, localHandlePoint, oppositeHandle, type FrameHandle } fr
  */
 export function snapAngle45(deg: number): number {
   return Math.round(deg / 45) * 45
-}
-
-/** Rotate a point around a center by degrees (paper.js convention). */
-export function rotateXy(p: Xy, deg: number, center: Xy): Xy {
-  const rad = (deg * Math.PI) / 180
-  const cos = Math.cos(rad)
-  const sin = Math.sin(rad)
-  const dx = p.x - center.x
-  const dy = p.y - center.y
-  return { x: center.x + dx * cos - dy * sin, y: center.y + dx * sin + dy * cos }
 }
 
 /** Accumulated rotate-drag state (mirrors the controller's grab fields). */

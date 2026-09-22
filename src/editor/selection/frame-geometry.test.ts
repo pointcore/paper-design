@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   diagonalCursorForHeading,
+  frameHandlePositions,
   HANDLE_HEADINGS,
   isCornerHandle,
   isNearDiagonal,
@@ -10,7 +11,10 @@ import {
   oppositeHandle,
   pointerAngle,
   resizeCursorForHeading,
+  rotateXy,
+  toFrameLocal,
   type FrameHandle,
+  type SelectionFrame,
 } from './frame-geometry'
 
 const pt = (x: number, y: number) => ({ x, y })
@@ -152,5 +156,56 @@ describe('isNearDiagonal', () => {
     expect(isNearDiagonal(45.6)).toBe(false)
     expect(isNearDiagonal(0)).toBe(false)
     expect(isNearDiagonal(90)).toBe(false)
+  })
+})
+
+describe('rotateXy', () => {
+  it('reproduces paper.js Point.rotate', () => {
+    const a = rotateXy({ x: 1, y: 0 }, 90, { x: 0, y: 0 })
+    expect(a.x).toBeCloseTo(0, 9)
+    expect(a.y).toBeCloseTo(1, 9)
+    const b = rotateXy({ x: 0, y: 1 }, -90, { x: 0, y: 0 })
+    expect(b.x).toBeCloseTo(1, 9)
+    expect(b.y).toBeCloseTo(0, 9)
+    const p = { x: 3, y: 4 }
+    const c = { x: 1, y: 1 }
+    const there = rotateXy(p, 37, c)
+    const back = rotateXy(there, -37, c)
+    expect(back.x).toBeCloseTo(p.x, 9)
+    expect(back.y).toBeCloseTo(p.y, 9)
+  })
+})
+
+describe('frameHandlePositions / toFrameLocal', () => {
+  const frame: SelectionFrame = { cx: 100, cy: 100, w: 60, h: 40, angle: 0, selKey: '', version: 0 }
+
+  it('matches the local layout on an unrotated frame', () => {
+    const pos = frameHandlePositions(frame)
+    expect(pos.topLeft).toEqual({ x: 70, y: 80 })
+    expect(pos.topCenter).toEqual({ x: 100, y: 80 })
+    expect(pos.middleRight).toEqual({ x: 130, y: 100 })
+    expect(pos.bottomRight).toEqual({ x: 130, y: 120 })
+  })
+
+  it('rotates corners about the center on a tilted frame', () => {
+    const tilted: SelectionFrame = { ...frame, angle: 90 }
+    const pos = frameHandlePositions(tilted)
+    // Local topLeft (70, 80) rides 90° clockwise about (100, 100).
+    expect(pos.topLeft.x).toBeCloseTo(120, 9)
+    expect(pos.topLeft.y).toBeCloseTo(70, 9)
+    // Edges stay midpoints of their rotated corners.
+    expect(pos.topCenter.x).toBeCloseTo((pos.topLeft.x + pos.topRight.x) / 2, 9)
+    expect(pos.topCenter.y).toBeCloseTo((pos.topLeft.y + pos.topRight.y) / 2, 9)
+  })
+
+  it('inverts the tilt mapping', () => {
+    const tilted: SelectionFrame = { ...frame, angle: 30 }
+    const world = frameHandlePositions(tilted).bottomRight
+    const local = toFrameLocal(world, tilted)
+    expect(local.x).toBeCloseTo(130, 9)
+    expect(local.y).toBeCloseTo(120, 9)
+    const center = toFrameLocal({ x: 100, y: 100 }, tilted)
+    expect(center.x).toBeCloseTo(100, 9)
+    expect(center.y).toBeCloseTo(100, 9)
   })
 })

@@ -156,3 +156,39 @@ export function localHandlePoint(
     case 'bottomRight': return { x: base.cx + hw, y: base.cy + hh }
   }
 }
+
+/** Rotate a point around a center by degrees (paper.js convention). */
+export function rotateXy(p: Xy, deg: number, center: Xy): Xy {
+  const rad = (deg * Math.PI) / 180
+  const cos = Math.cos(rad)
+  const sin = Math.sin(rad)
+  const dx = p.x - center.x
+  const dy = p.y - center.y
+  return { x: center.x + dx * cos - dy * sin, y: center.y + dx * sin + dy * cos }
+}
+
+/** World-space corner / edge positions of an oriented frame. */
+export function frameHandlePositions(frame: SelectionFrame): Record<FrameHandle, Xy> {
+  const center = { x: frame.cx, y: frame.cy }
+  const at = (local: Xy): Xy => rotateXy(local, frame.angle, center)
+  const TL = at(localHandlePoint(frame, 'topLeft'))
+  const TR = at(localHandlePoint(frame, 'topRight'))
+  const BR = at(localHandlePoint(frame, 'bottomRight'))
+  const BL = at(localHandlePoint(frame, 'bottomLeft'))
+  const mid = (a: Xy, b: Xy): Xy => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 })
+  return {
+    topLeft: TL,
+    topCenter: mid(TL, TR),
+    topRight: TR,
+    middleLeft: mid(TL, BL),
+    middleRight: mid(TR, BR),
+    bottomLeft: BL,
+    bottomCenter: mid(BL, BR),
+    bottomRight: BR,
+  }
+}
+
+/** Map a world point into the frame's local (unrotated) space. */
+export function toFrameLocal(p: Xy, frame: SelectionFrame): Xy {
+  return rotateXy(p, -frame.angle, { x: frame.cx, y: frame.cy })
+}
