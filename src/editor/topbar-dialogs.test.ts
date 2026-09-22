@@ -6,12 +6,16 @@ import {
   EXPORT_SCALES,
   MAX_RASTER_DIM,
   PAGE_PRESETS,
+  defaultBoardsExport,
   defaultExportForm,
   matchPagePreset,
   preflightKindLabel,
   preflightSeverity,
   rasterFailText,
+  resolveBoardsToExport,
+  sanitizeBoardsExport,
   sanitizeExportForm,
+  selectableBoardIds,
 } from './topbar-dialogs'
 
 describe('preflightKindLabel / preflightSeverity', () => {
@@ -87,5 +91,43 @@ describe('rasterFailText', () => {
     expect(over).toContain('20000x100')
     expect(over).toContain('16384')
     expect(rasterFailText({ width: 100, height: 20000 })).toContain('100x20000')
+  })
+})
+
+describe('sanitizeBoardsExport', () => {
+  it('keeps valid forms intact', () => {
+    const form = { format: 'svg', scale: 1, quality: 0.75 } as const
+    expect(sanitizeBoardsExport(form)).toEqual(form)
+  })
+
+  it('falls back per field on corrupt input', () => {
+    expect(sanitizeBoardsExport({ format: 'gif', scale: 9, quality: 1 })).toEqual(
+      defaultBoardsExport()
+    )
+    expect(sanitizeBoardsExport(null)).toEqual(defaultBoardsExport())
+    expect(sanitizeBoardsExport('zzz')).toEqual(defaultBoardsExport())
+  })
+
+  it('round-trips through JSON (persistence contract)', () => {
+    const form = defaultBoardsExport()
+    expect(sanitizeBoardsExport(JSON.parse(JSON.stringify(form)))).toEqual(form)
+  })
+})
+
+describe('board export filtering', () => {
+  const boards = [
+    { id: 'a', width: 100, height: 100 },
+    { id: 'b', width: 0, height: 100 },
+    { id: 'c', width: 50, height: 50 },
+  ]
+
+  it('pre-ticks only boards with a real size', () => {
+    expect(selectableBoardIds(boards)).toEqual(['a', 'c'])
+  })
+
+  it('resolves checked boards in document order', () => {
+    expect(resolveBoardsToExport(boards, ['c', 'a', 'b'])).toEqual([boards[0], boards[2]])
+    expect(resolveBoardsToExport(boards, ['b'])).toEqual([])
+    expect(resolveBoardsToExport(boards, [])).toEqual([])
   })
 })

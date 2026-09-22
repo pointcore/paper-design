@@ -129,3 +129,53 @@ export function rasterFailText(size: { width: number; height: number } | null): 
     ? `Too large (${size.width}x${size.height}px, ${MAX_RASTER_DIM} max) — lower the scale`
     : null
 }
+
+/** Persisted boards-export dialog state (JSON-serializable for localStorage). */
+export interface BoardsExportPersisted {
+  format: 'png' | 'jpeg' | 'svg' | 'pdf'
+  scale: number
+  quality: number
+}
+
+export function defaultBoardsExport(): BoardsExportPersisted {
+  return { format: 'png', scale: 2, quality: 0.92 }
+}
+
+/**
+ * Sanitize loaded boards-export state (storage may be corrupt or
+ * hand-edited): unknown fields fall back to defaults, like the raster
+ * export form above.
+ */
+export function sanitizeBoardsExport(v: unknown): BoardsExportPersisted {
+  const fallback = defaultBoardsExport()
+  if (!v || typeof v !== 'object') return fallback
+  const raw = v as Partial<BoardsExportPersisted>
+  return {
+    format:
+      raw.format === 'png' || raw.format === 'jpeg' || raw.format === 'svg' || raw.format === 'pdf'
+        ? raw.format
+        : fallback.format,
+    scale: raw.scale === 1 || raw.scale === 2 || raw.scale === 3 ? raw.scale : fallback.scale,
+    quality:
+      raw.quality === 0.92 || raw.quality === 0.75 || raw.quality === 0.55
+        ? raw.quality
+        : fallback.quality,
+  }
+}
+
+/** Minimal board shape for export filtering (degenerate boards never export). */
+export interface ExportableBoard {
+  id: string
+  width: number
+  height: number
+}
+
+/** Ids of boards with a real size (the dialog pre-ticks exactly these). */
+export function selectableBoardIds<T extends ExportableBoard>(boards: T[]): string[] {
+  return boards.filter((b) => b.width > 0 && b.height > 0).map((b) => b.id)
+}
+
+/** Checked boards with a real size, in document order. */
+export function resolveBoardsToExport<T extends ExportableBoard>(boards: T[], checked: string[]): T[] {
+  return boards.filter((b) => checked.includes(b.id) && b.width > 0 && b.height > 0)
+}

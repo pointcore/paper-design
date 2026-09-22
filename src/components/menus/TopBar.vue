@@ -1058,6 +1058,7 @@ import { clearRecentProjects, listRecentProjects, loadRecentProjectText } from '
 import { useEditorStore } from '../../editor/store'
 import { withBusy, yieldToUI } from '../../editor/busy'
 import {
+  defaultBoardsExport,
   EXPORT_FORMATS,
   EXPORT_QUALITIES,
   EXPORT_SCALES,
@@ -1066,7 +1067,10 @@ import {
   preflightKindLabel,
   preflightSeverity,
   rasterFailText,
+  resolveBoardsToExport,
+  sanitizeBoardsExport,
   sanitizeExportForm,
+  selectableBoardIds,
 } from '../../editor/topbar-dialogs'
 import type { EditorEngine } from '../../editor/engine'
 import type { RulerUnit, RasterExportFormat, RasterExportArea, EnvelopePreset } from '../../editor/types'
@@ -1381,27 +1385,16 @@ function onSaveConfirm() {
 
 const boardsVisible = ref(false)
 const boardsForm = reactive({
-  format: 'png' as 'png' | 'jpeg' | 'svg' | 'pdf',
-  scale: 2,
-  quality: 0.92,
+  ...defaultBoardsExport(),
   checked: [] as string[],
 })
 try {
   const raw = localStorage.getItem('vve.boardsExport')
-  if (raw) {
-    const saved = JSON.parse(raw) as Partial<typeof boardsForm>
-    if (saved.format === 'png' || saved.format === 'jpeg' || saved.format === 'svg' || saved.format === 'pdf') {
-      boardsForm.format = saved.format
-    }
-    if (saved.scale === 1 || saved.scale === 2 || saved.scale === 3) boardsForm.scale = saved.scale
-    if (saved.quality === 0.92 || saved.quality === 0.75 || saved.quality === 0.55) {
-      boardsForm.quality = saved.quality
-    }
-  }
+  if (raw) Object.assign(boardsForm, sanitizeBoardsExport(JSON.parse(raw)))
 } catch { /* private mode: defaults stand */ }
 
 function openBoardsExport() {
-  boardsForm.checked = store.artboards.filter((b) => b.width > 0 && b.height > 0).map((b) => b.id)
+  boardsForm.checked = selectableBoardIds(store.artboards)
   boardsVisible.value = true
 }
 function boardsToggle(id: string) {
@@ -1410,9 +1403,7 @@ function boardsToggle(id: string) {
     : [...boardsForm.checked, id]
 }
 function boardsCheckAll(on: boolean) {
-  boardsForm.checked = on
-    ? store.artboards.filter((b) => b.width > 0 && b.height > 0).map((b) => b.id)
-    : []
+  boardsForm.checked = on ? selectableBoardIds(store.artboards) : []
 }
 async function onBoardsExportConfirm() {
   const e = engineRef?.value
@@ -1420,7 +1411,7 @@ async function onBoardsExportConfirm() {
     boardsVisible.value = false
     return
   }
-  const boards = store.artboards.filter((b) => boardsForm.checked.includes(b.id) && b.width > 0 && b.height > 0)
+  const boards = resolveBoardsToExport(store.artboards, boardsForm.checked)
   if (boards.length === 0) {
     store.setStatusMessage('Tick at least one artboard')
     return
