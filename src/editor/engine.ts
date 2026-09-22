@@ -13,7 +13,6 @@ import { colorDistanceRgb, colorToCSS, invertCssColor, isOutOfCmykGamut, parseCs
 import { parseProjectFile } from './project-file'
 import { recordRecentProject } from './recent-files'
 import type { EditorStore } from './store-types'
-import { SnapService } from './snap/snap-service'
 import {
   parseCdrBytes,
   cdrMmToPx,
@@ -25,8 +24,7 @@ import {
 import { yieldToUI, type ProgressReport } from './busy'
 import { alignToPixel } from './pixel'
 import { MAX_MERGE_ROWS, mergeTemplate } from './data-merge'
-import { inflateHistoryImages, slimHistoryImages } from './history-images'
-import { MAX_HISTORY_BYTES, MIN_HISTORY_ENTRIES, evictCountForBudget } from './history-budget'
+import * as history from './engine-history'
 import * as artboards from './engine-artboards'
 import * as guides from './engine-guides'
 import * as layers from './engine-layers'
@@ -64,14 +62,6 @@ const PROJECT_FILE_APP = 'vue-vector-editor'
 /** Current project file format version. */
 const PROJECT_FILE_VERSION = 2
 
-/** Document metadata snapshotted alongside each history entry. */
-export interface HistoryDocMeta {
-  artboards: ArtboardMeta[]
-  activeArtboardId: string
-  bleed: number
-  pageSize: { width: number; height: number }
-}
-
 /** Result of a CDR open/import operation. */
 export interface CdrImportResult {
   pages: number
@@ -90,7 +80,8 @@ export class EditorEngine {
   private overlayLayer: paper.Layer | null = null
   private annotationLayer: paper.Layer | null = null
   private guideLayer: paper.Layer | null = null
-  private gridLayer: paper.Layer | null = null
+  /** Internal: engine-history detaches this during snapshots (regenerable view cache). */
+  gridLayer: paper.Layer | null = null
 
   zoom = 1
   center = { x: 0, y: 0 }
@@ -102,11 +93,12 @@ export class EditorEngine {
 
   history: HistoryEntry[] = []
   historyIndex = -1
-  private historySnapshots: string[] = []
+  /** Internal: snapshot strings, owned by engine-history.ts. */
+  historySnapshots: string[] = []
   /** Document metadata riding alongside each paper snapshot (undoable). */
-  private historyMeta: Array<HistoryDocMeta | null> = []
+  historyMeta: Array<history.HistoryDocMeta | null> = []
   /** Byte length of each snapshot; drives the memory-budget eviction. */
-  private historySizes: number[] = []
+  historySizes: number[] = []
 
   // Font registry for PDF embedding: maps font family name → { data: ArrayBuffer, style: string }
   private static fontRegistry = new Map<string, { data: ArrayBuffer; style: string; weight: number }>()
@@ -134,9 +126,10 @@ export class EditorEngine {
     // index 0, where undo() (which requires index > 0) silently refuses,
     // so the very first operation could never be taken back.
     this.history = [{ name: 'New Document', icon: '', timestamp: Date.now() }]
-    this.historySnapshots = [this.snapshotProject()]
-    this.historySizes = [this.historySnapshots[0]?.length ?? 0]
-    this.historyMeta = [this.captureDocMeta()]
+    const seed = history.snapshotProject(this)
+    this.historySnapshots = [seed]
+    this.historySizes = [seed?.length ?? 0]
+    this.historyMeta = [history.captureDocMeta(this)]
     this.historyIndex = 0
     this.store.setHistory(this.history, this.historyIndex)
     this.markSaved()
@@ -1275,131 +1268,31 @@ export class EditorEngine {
   // Pattern group builders live in engine-patterns.ts.
 
   // ===== History =====
+  //
+  // Bodies live in engine-history.ts; these facades keep the public API
+  // stable for the controllers and panels that call them.
 
+  /** See engine-history.ts. */
   snapshotProject(): string {
-    // History diet (C5): inline bitmap pixels are replaced by sidecar
-    // tokens so 100 snapshots share one copy of each distinct image.
-    // Project files (snapshotProjectObject) stay self-contained.
-    const obj = this.withCleanScene(
-      () => (this.project as any).exportJSON({ asString: false }) as unknown,
-    )
-    return JSON.stringify(slimHistoryImages(obj, this.historyImageStore))
+    return history.snapshotProject(this)
+  }
+
+  /** See engine-history.ts. */
+  snapshotProjectObject(): Record<string, unknown> | unknown[] {
+    return history.snapshotProjectObject(this)
   }
 
   /**
    * Session sidecar for history-snapshot bitmaps: content-hash -> dataURL.
    * Never pruned within a session (distinct images only, so it stays
    * bounded); snapshots reference it by token, files embed pixels directly.
+   * Internal: owned by engine-history.ts.
    */
-  private historyImageStore = new Map<string, string>()
+  historyImageStore = new Map<string, string>()
 
-  /** Snapshot as a plain object for v2 project files (no double encoding). */
-  snapshotProjectObject(): Record<string, unknown> | unknown[] {
-    return this.withCleanScene(
-      () => (this.project as any).exportJSON({ asString: false }) as Record<string, unknown> | unknown[]
-    )
-  }
-
-  /**
-   * Run `fn` with regenerable scene content detached: grid lines plus
-   * editing chrome and drag previews. Everything is re-attached in order
-   * afterwards, so history snapshots and project files stay lean.
-   */
-  private withCleanScene<T>(fn: () => T): T {
-    // Grid lines are regenerable view cache: keep them out of history and
-    // project files (they used to bloat snapshots and resurrect as stale
-    // duplicates after undo). Children are stashed and restored in order.
-    const grid =
-      this.gridLayer && this.gridLayer.parent ? this.gridLayer : null
-    const stashed = grid ? grid.removeChildren() : null
-    // Same for editing chrome and drag previews (selection outlines,
-    // anchors, handles, rubber bands): flagged isChrome / isPreview, kept
-    // out of snapshots and re-attached afterwards in index order.
-    const stashedChrome: Array<{ item: paper.Item; parent: paper.Item; index: number }> = []
-    const collect = (item: paper.Item): void => {
-      const children = ((item as any).children as paper.Item[] | undefined) ?? []
-      for (const child of children.slice()) collect(child as paper.Item)
-      const data = (item as any).data ?? {}
-      if (!(data.isChrome || data.isPreview)) return
-      const parent = item.parent as paper.Item | null
-      if (!parent) return
-      stashedChrome.push({ item, parent, index: parent.children.indexOf(item) })
-      item.remove()
-    }
-    for (const layer of this.project.layers.slice()) collect(layer as paper.Item)
-    try {
-      return fn()
-    } finally {
-      if (grid && stashed) grid.addChildren(stashed)
-      const byParent = new Map<paper.Item, Array<{ item: paper.Item; index: number }>>()
-      for (const entry of stashedChrome) {
-        const list = byParent.get(entry.parent) ?? []
-        list.push({ item: entry.item, index: entry.index })
-        byParent.set(entry.parent, list)
-      }
-      for (const [parent, list] of byParent) {
-        list.sort((a, b) => a.index - b.index)
-        for (const { item, index } of list) {
-          parent.insertChild(Math.min(index, parent.children.length), item)
-        }
-      }
-    }
-  }
-
+  /** See engine-history.ts. */
   restoreSnapshot(snapshot: string | Record<string, unknown> | unknown[]) {
-    this.restoreSnapshotWithMeta(snapshot, null)
-  }
-
-  /**
-   * Restore paper state plus, when provided, the document metadata riding
-   * alongside history entries (artboards, bleed, page size) so board ops
-   * participate in undo/redo like artwork ops do.
-   */
-  private restoreSnapshotWithMeta(
-    snapshot: string | Record<string, unknown> | unknown[],
-    meta: HistoryDocMeta | null
-  ) {
-    // Project#importJSON appends a fresh layer stack whenever it runs (its
-    // layer-merge path only triggers for an empty active layer of matching
-    // type), so the project must be cleared first or every undo/redo would
-    // duplicate the whole document.
-    this.clearIsolationState()
-    this.project.clear()
-    // History snapshots carry image tokens (see snapshotProject): inflate
-    // them from the session sidecar. Full-fidelity payloads (project files,
-    // pre-diet snapshots) pass through untouched.
-    const raw = typeof snapshot === 'string' ? (JSON.parse(snapshot) as unknown) : snapshot
-    this.project.importJSON(inflateHistoryImages(raw, this.historyImageStore) as string)
-    if (meta) {
-      const page = meta.pageSize
-      if (page && Number.isFinite(page.width) && Number.isFinite(page.height) && page.width > 0 && page.height > 0) {
-        this.store.setPageSize(page.width, page.height)
-      }
-      this.store.setBleed(Number(meta.bleed) || 0)
-      if (Array.isArray(meta.artboards) && meta.artboards.length > 0) {
-        this.store.setArtboards(meta.artboards.map((b) => ({ ...b })))
-        if (typeof meta.activeArtboardId === 'string') {
-          this.store.setActiveArtboard(meta.activeArtboardId)
-        }
-      }
-    }
-    // Paste offsets step from the source: restart the stepping after any
-    // restore so undo/redo cannot walk pastes out of the viewport.
-    this.pasteCount = 0
-    // Isolation hides ride in snapshots as plain visible=false: lift the
-    // flagged ones so undo during isolation cannot hide artwork forever
-    // (the mode itself is already dropped above).
-    for (const item of layers.walkUserItems(this)) {
-      if ((item.data as any)?.isolationHidden) {
-        item.visible = true
-        delete (item.data as any).isolationHidden
-      }
-    }
-    this.geometryVersion++
-    this.syncLayersToStore()
-    this.syncSelectionToStore()
-    this.refreshArtboards()
-    this.scope.view.update()
+    history.restoreSnapshot(this, snapshot)
   }
 
   /**
@@ -1422,129 +1315,34 @@ export class EditorEngine {
     | { kind: 'scale'; sx: number; sy: number; pivot: paper.Point }
     | null = null
 
-  /** History entries that provably preserve selection geometry (no reset). */
-  private static readonly FRAME_SAFE_HISTORY = new Set([
-    'Add Guide', 'Move Guide', 'Delete Guide',
-    'Change Fill', 'Clear Fill', 'Change Stroke', 'Clear Stroke',
-    'Change Stroke Style', 'Change Dash Pattern', 'Change Blend Mode',
-    'Change Opacity', 'Spot Color',
-    'Eyedropper',
-    'Bring to Front', 'Bring Forward', 'Send Backward', 'Send to Back',
-    'Rearrange',
-    'Lock', 'Unlock', 'Show', 'Hide', 'Show All', 'Unlock All',
-    'New Sublayer', 'Duplicate Layer', 'Merge Layer Below', 'Rename',
-    'New Artboard', 'Delete Artboard', 'Rename Artboard', 'Move Artboard',
-    'Resize Artboard', 'Change Bleed', 'Layer Opacity',
-    'Duplicate',
-  ])
-
-  /** Shared snap service for invalidating the document-wide cache. */
-  private static readonly snapService = new SnapService()
-
   /** Bump the geometry version (invalidates untracked selection frames). */
   bumpGeometryVersion() {
     this.geometryVersion++
   }
 
+  /** See engine-history.ts. */
   pushHistory(name: string, icon: string = '') {
-    const snapshot = this.snapshotProject()
-    this.history = this.history.slice(0, this.historyIndex + 1)
-    this.historySnapshots = this.historySnapshots.slice(0, this.historyIndex + 1)
-    this.historySizes = this.historySizes.slice(0, this.historyIndex + 1)
-    this.historyMeta = this.historyMeta.slice(0, this.historyIndex + 1)
-    this.history.push({ name, icon, timestamp: Date.now() })
-    this.historySnapshots.push(snapshot)
-    this.historySizes.push(snapshot?.length ?? 0)
-    this.historyMeta.push(this.captureDocMeta())
-    const limit = this.store.historyLimit || 100
-    const evict = evictCountForBudget(this.historySizes, MAX_HISTORY_BYTES, limit, MIN_HISTORY_ENTRIES)
-    for (let i = 0; i < evict; i++) {
-      this.history.shift()
-      this.historySnapshots.shift()
-      this.historySizes.shift()
-      this.historyMeta.shift()
-    }
-    this.historyIndex = this.history.length - 1
-    this.store.setHistory(this.history, this.historyIndex)
-    this.store.bumpRevision()
-    if (!EditorEngine.FRAME_SAFE_HISTORY.has(name)) {
-      this.geometryVersion++
-      // Invalidate snap cache when document geometry changes.
-      EditorEngine.snapService.invalidateCache()
-    }
+    history.pushHistory(this, name, icon)
   }
 
-  /** Document metadata snapshot riding alongside each history entry. */
-  private captureDocMeta(): HistoryDocMeta {
-    return {
-      artboards: this.store.artboards.map((board) => ({ ...board })),
-      activeArtboardId: this.store.activeArtboardId,
-      bleed: Number(this.store.bleed) || 0,
-      pageSize: { ...this.store.pageSize },
-    }
-  }
-
+  /** See engine-history.ts. */
   undo() {
-    if (this.historyIndex > 0) {
-      this.historyIndex--
-      this.restoreSnapshotWithMeta(
-        this.historySnapshots[this.historyIndex],
-        this.historyMeta[this.historyIndex] ?? null
-      )
-      this.store.setHistoryIndex(this.historyIndex)
-      this.store.bumpRevision()
-      // Invalidate snap cache after undo (document geometry may have changed).
-      EditorEngine.snapService.invalidateCache()
-    }
+    history.undo(this)
   }
 
+  /** See engine-history.ts. */
   redo() {
-    if (this.historyIndex < this.history.length - 1) {
-      this.historyIndex++
-      this.restoreSnapshotWithMeta(
-        this.historySnapshots[this.historyIndex],
-        this.historyMeta[this.historyIndex] ?? null
-      )
-      this.store.setHistoryIndex(this.historyIndex)
-      this.store.bumpRevision()
-      // Invalidate snap cache after redo (document geometry may have changed).
-      EditorEngine.snapService.invalidateCache()
-    }
+    history.redo(this)
   }
 
-  /**
-   * Jump the document to a history entry. Snapshots are whole-project
-   * JSON, so a direct restore is equivalent to replaying every step and
-   * stays O(1) even for far jumps.
-   */
+  /** See engine-history.ts. */
   jumpToHistory(index: number): void {
-    if (this.history.length === 0) return
-    const clamped = Math.min(this.history.length - 1, Math.max(0, index))
-    if (clamped === this.historyIndex) return
-    this.historyIndex = clamped
-    this.restoreSnapshotWithMeta(
-      this.historySnapshots[this.historyIndex],
-      this.historyMeta[this.historyIndex] ?? null
-    )
-    this.store.setHistoryIndex(this.historyIndex)
-    this.store.bumpRevision()
+    history.jumpToHistory(this, index)
   }
 
-  /** Drop the whole history stack (history panel clear action). */
+  /** See engine-history.ts. */
   clearHistory(): void {
-    this.history = []
-    this.historySnapshots = []
-    this.historySizes = []
-    this.historyMeta = []
-    this.historyIndex = -1
-    this.store.setHistory([], -1)
-    // Clearing drops undo history; the document content itself is untouched,
-    // so the dirty flag must keep its previous value. It used to call
-    // markSaved() here, which reported an edited document as saved and
-    // suppressed the New/Open/reload warnings right after losing undo.
-    this.clearSelection()
-    this.clearIsolationState()
-    this.thumbCache?.clear?.()
+    history.clearHistory(this)
   }
 
   /** Mark the current revision as the saved (clean) one. */
@@ -1644,7 +1442,7 @@ export class EditorEngine {
     this.clearSelection()
     this.clipboardItems = []
     this.pasteCount = 0
-    this.resetHistory('Open Project')
+    history.resetHistory(this, 'Open Project')
     this.refreshArtboards()
     this.refreshGrid()
     this.refreshGuides()
@@ -1672,7 +1470,7 @@ export class EditorEngine {
     this.clearSelection()
     this.clipboardItems = []
     this.pasteCount = 0
-    this.resetHistory('New Document')
+    history.resetHistory(this, 'New Document')
     this.refreshArtboards()
     this.refreshGrid()
     this.refreshGuides()
@@ -1746,23 +1544,6 @@ export class EditorEngine {
     layers.pointActiveLayerAtRestoredStack(this)
   }
 
-  /** Drop the whole history stack and start over with a single entry. */
-  private resetHistory(name: string): void {
-    this.history = []
-    this.historySnapshots = []
-    this.historySizes = []
-    this.historyMeta = []
-    this.historyIndex = -1
-    this.store.setHistory([], -1)
-    // Bitmap stash is keyed by item id and belongs to the outgoing document.
-    this.imageStash.clear()
-    // Same for the history image sidecar: the new baseline snapshot
-    // re-registers the live document's pixels on the pushHistory below.
-    this.historyImageStore.clear()
-    this.pushHistory(name)
-    this.markSaved()
-  }
-
   /** See engine-layers.ts. */
   moveUserLayer(layerId: string, toUserIndex: number): boolean {
     return layers.moveUserLayer(this, layerId, toUserIndex)
@@ -1799,6 +1580,11 @@ export class EditorEngine {
 
   /** Thumbnail cache: `${historyIndex}:${isolation}:${itemId}` -> data URL. */
   private thumbCache = new Map<string, string>()
+
+  /** Drop cached layer-tree thumbnails (history jumps change the artwork). */
+  clearThumbCache(): void {
+    this.thumbCache.clear()
+  }
 
   /**
    * Small SVG preview of one object-tree entry for the Layers panel.
@@ -2558,41 +2344,10 @@ export class EditorEngine {
    * Record a history entry, coalescing with the previous one when it shares
    * the name and landed inside `windowMs`. Lets held-down keys (nudge)
    * share one undo step instead of flooding the history panel.
+   * See engine-history.ts.
    */
   pushCoalescedHistory(name: string, windowMs = 1200) {
-    const now = Date.now()
-    const last = this.history[this.historyIndex]
-    // Only coalesce with the top of the stack. After an undo the cursor sits
-    // mid-stack, and merging into that past entry overwrote its snapshot
-    // while the redo branch behind it stayed — redo then jumped to a state
-    // that no longer matched its own baseline.
-    const atTop = this.historyIndex === this.history.length - 1
-    if (atTop && last && last.name === name && now - last.timestamp < windowMs) {
-      const snapshot = this.snapshotProject()
-      this.historySnapshots[this.historyIndex] = snapshot
-      this.historySizes[this.historyIndex] = snapshot?.length ?? 0
-      this.historyMeta[this.historyIndex] = this.captureDocMeta()
-      last.timestamp = now
-      this.store.setHistory(this.history, this.historyIndex)
-      this.store.bumpRevision()
-      this.enforceHistoryBudget()
-    } else {
-      this.pushHistory(name)
-    }
-  }
-
-  /** Evict oldest entries until the stack fits count + byte budgets. */
-  private enforceHistoryBudget(): void {
-    const limit = this.store.historyLimit || 100
-    const evict = evictCountForBudget(this.historySizes, MAX_HISTORY_BYTES, limit, MIN_HISTORY_ENTRIES)
-    for (let i = 0; i < evict; i++) {
-      this.history.shift()
-      this.historySnapshots.shift()
-      this.historySizes.shift()
-      this.historyMeta.shift()
-    }
-    this.historyIndex = this.history.length - 1
-    this.store.setHistory(this.history, this.historyIndex)
+    history.pushCoalescedHistory(this, name, windowMs)
   }
 
   /** See engine-arrange.ts. */
@@ -3741,6 +3496,11 @@ export class EditorEngine {
    */
   private imageStash = new Map<string, string>()
 
+  /** Drop stashed pre-edit pixels (the document they belonged to is gone). */
+  clearImageStash(): void {
+    this.imageStash.clear()
+  }
+
   /**
    * Remember a raster's current pixels once, so destructive bitmap ops
    * (adjust / downsample / replace) stay reversible via Reset Image.
@@ -4005,8 +3765,8 @@ export class EditorEngine {
     this.scope.view.update()
   }
 
-  /** Drop isolation state without touching visibility (snapshot truth wins). */
-  private clearIsolationState(): void {
+  /** Drop isolation state without touching visibility (snapshot truth wins). Also used by engine-history restores. */
+  clearIsolationState(): void {
     this.isolationRoot = null
     this.isolationBackup.clear()
     this.store.setIsolationActive(false)
@@ -4060,6 +3820,11 @@ export class EditorEngine {
   private clipboardBoard: { x: number; y: number } = { x: 0, y: 0 }
   /** How many pastes have been made from the current clipboard content. */
   private pasteCount = 0
+
+  /** Restart paste-offset stepping (history restores land back at the source). */
+  resetPasteOffset(): void {
+    this.pasteCount = 0
+  }
 
   /**
    * Copy the current selection onto the internal clipboard as detached
@@ -4521,7 +4286,7 @@ export class EditorEngine {
     this.syncSelectionToStore()
     this.clipboardItems = []
     this.pasteCount = 0
-    this.resetHistory('Open CDR')
+    history.resetHistory(this, 'Open CDR')
     this.store.setDocumentName(stem)
     this.refreshArtboards()
     this.refreshGrid()
