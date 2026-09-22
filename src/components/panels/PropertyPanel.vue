@@ -531,7 +531,7 @@ import {
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
 import { cssToCmykString, isOutOfCmykGamut } from '../../editor/color'
-import { DASH_PRESETS, cleanTextStylePresets, parseDashPattern } from '../../editor/property-helpers'
+import { DASH_PRESETS, cleanTextStylePresets, normalizeGradient, normalizePatternFill, parseDashPattern } from '../../editor/property-helpers'
 import type { AlignMode, BooleanOperation, DistributeAxis, FillRule, GradientState, LineCap, LineJoin, PatternFillState, ReferencePoint, RulerUnit, TextAlign, CharRun } from '../../editor/types'
 
 const store = useEditorStore()
@@ -749,13 +749,14 @@ function syncPatternFromSelection() {
 }
 
 function currentPattern(): PatternFillState {
-  return {
+  return normalizePatternFill({
     kind: patternKind.value,
-    color: patternColor.value || '#000000',
-    background: patternTransparent.value ? null : (patternBackground.value || null),
-    scale: Math.min(4, Math.max(0.25, Number(patternScale.value) || 1)),
-    angle: Number(patternAngle.value) || 0,
-  }
+    color: patternColor.value,
+    background: patternBackground.value,
+    transparent: patternTransparent.value,
+    scale: patternScale.value,
+    angle: patternAngle.value,
+  })
 }
 
 function onApplyPattern() {
@@ -1557,16 +1558,7 @@ function onClearFill() {
 
 /** Build normalized gradient parameters from the editable stop list. */
 function currentGradient(): GradientState {
-  const stops = gradientStops.value
-    .map((stop) => ({
-      offset: Math.min(1, Math.max(0, (Number(stop.offset) || 0) / 100)),
-      color: stop.color || '#000000',
-    }))
-    .sort((a, b) => a.offset - b.offset)
-  const angle = gradientType.value === 'linear'
-    ? ((Number(gradientAngle.value) || 0) % 360 + 360) % 360
-    : undefined
-  return angle === undefined ? { type: gradientType.value, stops } : { type: gradientType.value, stops, angle }
+  return normalizeGradient(gradientStops.value, gradientType.value, gradientAngle.value)
 }
 
 /** Write the edited gradient to the store and repaint the selection. */

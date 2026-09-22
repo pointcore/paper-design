@@ -5,7 +5,7 @@
  * Paper.js, so everything here is unit-locked; the panel keeps only the
  * reactive shell and the engine calls.
  */
-import type { CharStyle, ParagraphStyle, TextStylePreset } from './types'
+import type { CharStyle, GradientState, ParagraphStyle, PatternFillState, TextStylePreset } from './types'
 
 /** Dash presets for the stroke section (empty value means solid). */
 export const DASH_PRESETS: Array<{ value: string; label: string }> = [
@@ -52,4 +52,57 @@ export function cleanTextStylePresets(list: unknown): TextStylePreset[] {
       char: p.char as CharStyle,
       paragraph: p.paragraph as ParagraphStyle,
     }))
+}
+
+/** One editable gradient stop row (offsets in percent, 0-100). */
+export interface GradientStopInput {
+  offset: unknown
+  color?: unknown
+}
+
+/**
+ * Build normalized gradient parameters from editable stop rows: offsets
+ * clamp to 0-1, missing colors fall back to black, stops sort by offset,
+ * and linear gradients carry a normalized 0-360 direction (radial has no
+ * angle field at all).
+ */
+export function normalizeGradient(
+  stops: GradientStopInput[],
+  type: GradientState['type'],
+  angle: unknown
+): GradientState {
+  const clean = (stops ?? [])
+    .map((stop) => ({
+      offset: Math.min(1, Math.max(0, (Number(stop.offset) || 0) / 100)),
+      color: (typeof stop.color === 'string' && stop.color) || '#000000',
+    }))
+    .sort((a, b) => a.offset - b.offset)
+  if (type !== 'linear') return { type, stops: clean }
+  const normalized = ((Number(angle) || 0) % 360 + 360) % 360
+  return { type, stops: clean, angle: normalized }
+}
+
+/** Editable pattern-fill rows from the appearance section. */
+export interface PatternFillInput {
+  kind: PatternFillState['kind']
+  color?: unknown
+  background?: unknown
+  transparent: unknown
+  scale: unknown
+  angle: unknown
+}
+
+/**
+ * Build a pattern-fill state from panel rows: missing motif paint falls
+ * back to black, transparent switches drop the background, and the tile
+ * density clamps to the 0.25-4 range the renderer supports.
+ */
+export function normalizePatternFill(v: PatternFillInput): PatternFillState {
+  return {
+    kind: v.kind,
+    color: (typeof v.color === 'string' && v.color) || '#000000',
+    background: v.transparent ? null : ((typeof v.background === 'string' && v.background) || null),
+    scale: Math.min(4, Math.max(0.25, Number(v.scale) || 1)),
+    angle: Number(v.angle) || 0,
+  }
 }
