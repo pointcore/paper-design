@@ -1540,7 +1540,7 @@ function onFillChange(val: string) {
     }
   })
   e.scope.view.update()
-  e.pushHistory('Change Fill')
+  e.pushCoalescedHistory('Change Fill')
 }
 
 function onClearFill() {
@@ -1581,7 +1581,7 @@ function applyGradientToSelection(label: string) {
     e.applyStyleToItem(item, e.store.style)
   })
   e.scope.view.update()
-  e.pushHistory(label)
+  e.pushCoalescedHistory(label)
 }
 
 function onFillKindChange(kind: 'solid' | 'gradient') {
@@ -1602,7 +1602,7 @@ function onFillKindChange(kind: 'solid' | 'gradient') {
       e.applyStyleToItem(item, e.store.style)
     })
     e.scope.view.update()
-    e.pushHistory('Change Fill')
+    e.pushCoalescedHistory('Change Fill')
   }
 }
 
@@ -1636,7 +1636,7 @@ function onStrokeChange(val: string) {
     }
   })
   e.scope.view.update()
-  e.pushHistory('Change Stroke')
+  e.pushCoalescedHistory('Change Stroke')
 }
 
 function onClearStroke() {
@@ -1716,7 +1716,7 @@ function onDashOffsetChange() {
     if (item.dashOffset !== undefined) item.dashOffset = offset
   })
   e.scope.view.update()
-  e.pushHistory('Change Dash Offset')
+  e.pushCoalescedHistory('Change Dash Offset')
 }
 
 function onFillRuleChange(val: FillRule) {
@@ -1751,7 +1751,7 @@ function onOpacityChange(val: number) {
     item.opacity = opacity
   })
   e.scope.view.update()
-  e.pushHistory('Change Opacity')
+  e.pushCoalescedHistory('Change Opacity')
 }
 
 function onTransformChange() {
@@ -1800,7 +1800,7 @@ function onTransformChange() {
   })
   e.reflowTextsForItems(items)
   e.scope.view.update()
-  e.pushHistory('Transform')
+  e.pushCoalescedHistory('Transform')
   lastPosW = posW.value
   lastPosH = posH.value
 }

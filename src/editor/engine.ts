@@ -26,6 +26,7 @@ import { yieldToUI, type ProgressReport } from './busy'
 import { alignToPixel } from './pixel'
 import { MAX_MERGE_ROWS, mergeTemplate } from './data-merge'
 import { inflateHistoryImages, slimHistoryImages } from './history-images'
+import { MAX_HISTORY_BYTES, MIN_HISTORY_ENTRIES, evictCountForBudget } from './history-budget'
 import * as artboards from './engine-artboards'
 import * as guides from './engine-guides'
 import * as layers from './engine-layers'
@@ -104,6 +105,8 @@ export class EditorEngine {
   private historySnapshots: string[] = []
   /** Document metadata riding alongside each paper snapshot (undoable). */
   private historyMeta: Array<HistoryDocMeta | null> = []
+  /** Byte length of each snapshot; drives the memory-budget eviction. */
+  private historySizes: number[] = []
 
   // Font registry for PDF embedding: maps font family name → { data: ArrayBuffer, style: string }
   private static fontRegistry = new Map<string, { data: ArrayBuffer; style: string; weight: number }>()
@@ -132,6 +135,7 @@ export class EditorEngine {
     // so the very first operation could never be taken back.
     this.history = [{ name: 'New Document', icon: '', timestamp: Date.now() }]
     this.historySnapshots = [this.snapshotProject()]
+    this.historySizes = [this.historySnapshots[0]?.length ?? 0]
     this.historyMeta = [this.captureDocMeta()]
     this.historyIndex = 0
     this.store.setHistory(this.history, this.historyIndex)
@@ -1446,14 +1450,18 @@ export class EditorEngine {
     const snapshot = this.snapshotProject()
     this.history = this.history.slice(0, this.historyIndex + 1)
     this.historySnapshots = this.historySnapshots.slice(0, this.historyIndex + 1)
+    this.historySizes = this.historySizes.slice(0, this.historyIndex + 1)
     this.historyMeta = this.historyMeta.slice(0, this.historyIndex + 1)
     this.history.push({ name, icon, timestamp: Date.now() })
     this.historySnapshots.push(snapshot)
+    this.historySizes.push(snapshot?.length ?? 0)
     this.historyMeta.push(this.captureDocMeta())
     const limit = this.store.historyLimit || 100
-    if (this.history.length > limit) {
+    const evict = evictCountForBudget(this.historySizes, MAX_HISTORY_BYTES, limit, MIN_HISTORY_ENTRIES)
+    for (let i = 0; i < evict; i++) {
       this.history.shift()
       this.historySnapshots.shift()
+      this.historySizes.shift()
       this.historyMeta.shift()
     }
     this.historyIndex = this.history.length - 1
@@ -1526,6 +1534,7 @@ export class EditorEngine {
   clearHistory(): void {
     this.history = []
     this.historySnapshots = []
+    this.historySizes = []
     this.historyMeta = []
     this.historyIndex = -1
     this.store.setHistory([], -1)
@@ -1741,6 +1750,7 @@ export class EditorEngine {
   private resetHistory(name: string): void {
     this.history = []
     this.historySnapshots = []
+    this.historySizes = []
     this.historyMeta = []
     this.historyIndex = -1
     this.store.setHistory([], -1)
@@ -2558,14 +2568,31 @@ export class EditorEngine {
     // that no longer matched its own baseline.
     const atTop = this.historyIndex === this.history.length - 1
     if (atTop && last && last.name === name && now - last.timestamp < windowMs) {
-      this.historySnapshots[this.historyIndex] = this.snapshotProject()
+      const snapshot = this.snapshotProject()
+      this.historySnapshots[this.historyIndex] = snapshot
+      this.historySizes[this.historyIndex] = snapshot?.length ?? 0
       this.historyMeta[this.historyIndex] = this.captureDocMeta()
       last.timestamp = now
       this.store.setHistory(this.history, this.historyIndex)
       this.store.bumpRevision()
+      this.enforceHistoryBudget()
     } else {
       this.pushHistory(name)
     }
+  }
+
+  /** Evict oldest entries until the stack fits count + byte budgets. */
+  private enforceHistoryBudget(): void {
+    const limit = this.store.historyLimit || 100
+    const evict = evictCountForBudget(this.historySizes, MAX_HISTORY_BYTES, limit, MIN_HISTORY_ENTRIES)
+    for (let i = 0; i < evict; i++) {
+      this.history.shift()
+      this.historySnapshots.shift()
+      this.historySizes.shift()
+      this.historyMeta.shift()
+    }
+    this.historyIndex = this.history.length - 1
+    this.store.setHistory(this.history, this.historyIndex)
   }
 
   /** See engine-arrange.ts. */
