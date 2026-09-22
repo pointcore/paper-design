@@ -303,28 +303,7 @@
           <span class="prop-label">Pattern</span>
         </div>
         <div v-show="open.pattern" class="prop-body">
-          <div class="prop-row">
-            <el-select v-model="patternKind" size="small" class="flex-ctl" title="Pattern preset">
-              <el-option v-for="p in patternPresets" :key="p.value" :label="p.label" :value="p.value" />
-            </el-select>
-            <el-color-picker v-model="patternColor" size="small" show-alpha title="Motif color" />
-          </div>
-          <div class="prop-row">
-            <span class="prop-label-sm">Back</span>
-            <el-color-picker v-model="patternBackground" size="small" show-alpha title="Background" :disabled="patternTransparent" />
-            <el-button size="small" class="grid-btn" :type="patternTransparent ? 'primary' : ''" title="Transparent background" @click="patternTransparent = !patternTransparent">None</el-button>
-          </div>
-          <div class="prop-row">
-            <span class="prop-label-sm">Scale</span>
-            <el-input-number v-model="patternScale" :min="0.25" :max="4" :step="0.25" :precision="2" size="small" controls-position="right" />
-            <span class="prop-label-sm">Angle</span>
-            <el-input-number v-model="patternAngle" :min="0" :max="180" :step="15" size="small" controls-position="right" />
-          </div>
-          <div class="btn-grid-2">
-            <el-button size="small" class="grid-btn" :disabled="!canApplyPattern" @click="onApplyPattern">Apply</el-button>
-            <el-button size="small" class="grid-btn" :disabled="!isPatternSelected" @click="onRemovePattern">Remove</el-button>
-          </div>
-          <div v-if="patternHint" class="ai-desc">{{ patternHint }}</div>
+          <PatternSection ref="patternRef" />
         </div>
       </div>
 
@@ -510,9 +489,10 @@ import {
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
 import { cssToCmykString, isOutOfCmykGamut } from '../../editor/color'
-import { DASH_PRESETS, cleanTextStylePresets, normalizePatternFill, parseDashPattern } from '../../editor/property-helpers'
+import { DASH_PRESETS, cleanTextStylePresets, parseDashPattern } from '../../editor/property-helpers'
 import GradientSection from './GradientSection.vue'
-import type { AlignMode, BooleanOperation, DistributeAxis, FillRule, LineCap, LineJoin, PatternFillState, ReferencePoint, RulerUnit, TextAlign, CharRun } from '../../editor/types'
+import PatternSection from './PatternSection.vue'
+import type { AlignMode, BooleanOperation, DistributeAxis, FillRule, LineCap, LineJoin, ReferencePoint, RulerUnit, TextAlign, CharRun } from '../../editor/types'
 
 const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
@@ -637,6 +617,8 @@ const fillKind = computed(() => (store.style.gradient ? 'gradient' : 'solid'))
 // Gradient stop editor lives in GradientSection (v-show keeps it mounted
 // so kind switches can sync + paint synchronously).
 const gradientRef = ref<InstanceType<typeof GradientSection> | null>(null)
+// Pattern editor lives in PatternSection (same shell contract).
+const patternRef = ref<InstanceType<typeof PatternSection> | null>(null)
 
 /** Mirror the first selected item's solid paints into the Appearance controls. */
 function syncStyleFromSelection() {
@@ -656,98 +638,6 @@ function syncStyleFromSelection() {
   fillRule.value = style.fillRule ?? 'nonzero'
   blendMode.value = style.blendMode
   opacityValue.value = Math.round((style.opacity ?? 1) * 100)
-}
-
-// ---- Pattern fill (procedural presets rendered as clipped tiles) ----
-
-const patternPresets: Array<{ value: PatternFillState['kind']; label: string }> = [
-  { value: 'dots', label: 'Dots' },
-  { value: 'stripes', label: 'Stripes' },
-  { value: 'grid', label: 'Grid' },
-  { value: 'crosshatch', label: 'Crosshatch' },
-]
-
-const patternKind = ref<PatternFillState['kind']>('dots')
-const patternColor = ref('#000000')
-const patternBackground = ref('#ffffff')
-const patternTransparent = ref(false)
-const patternScale = ref(1)
-const patternAngle = ref(45)
-const isPatternSelected = ref(false)
-const canApplyPattern = ref(false)
-const patternHint = ref('')
-
-/** Read pattern state from the current selection into the panel. */
-function syncPatternFromSelection() {
-  const e = getEngine()
-  isPatternSelected.value = false
-  canApplyPattern.value = false
-  patternHint.value = ''
-  if (!e || !store.hasSelection) return
-  const items = e.getSelection()
-  if (items.length === 0) return
-  const first = items[0] as any
-  const found = e.getPatternFromItem(first)
-  if (found) {
-    isPatternSelected.value = true
-    patternKind.value = found.kind
-    patternColor.value = found.color || '#000000'
-    patternTransparent.value = !found.background
-    patternBackground.value = found.background || '#ffffff'
-    patternScale.value = found.scale || 1
-    patternAngle.value = found.angle || 0
-  } else if (store.style.pattern) {
-    const p = store.style.pattern
-    patternKind.value = p.kind
-    patternColor.value = p.color
-    patternTransparent.value = !p.background
-    patternBackground.value = p.background || '#ffffff'
-    patternScale.value = p.scale
-    patternAngle.value = p.angle
-  }
-  canApplyPattern.value = items.some((item: any) => {
-    if (e.isPatternGroup(item)) return true
-    const name = String(item?.className ?? item?.constructor?.name ?? '')
-    return /path/i.test(name)
-  })
-  if (!canApplyPattern.value) {
-    patternHint.value = 'Select a path to apply a pattern.'
-  } else if (isPatternSelected.value) {
-    patternHint.value = 'Pattern moves/scales with its shape. Remove before boolean ops.'
-  }
-}
-
-function currentPattern(): PatternFillState {
-  return normalizePatternFill({
-    kind: patternKind.value,
-    color: patternColor.value,
-    background: patternBackground.value,
-    transparent: patternTransparent.value,
-    scale: patternScale.value,
-    angle: patternAngle.value,
-  })
-}
-
-function onApplyPattern() {
-  const e = getEngine()
-  if (!e) return
-  const applied = e.applyPatternFill(currentPattern())
-  syncPatternFromSelection()
-  if (applied === 0) {
-    store.setStatusMessage('Pattern needs a path selection')
-  }
-}
-
-function onRemovePattern() {
-  const e = getEngine()
-  if (!e) return
-  if (e.removePatternFill() === 0) {
-    // Also covers Release Clipping Mask on a pattern group.
-    if (!e.releaseClippingMask()) {
-      store.setStatusMessage('Select a pattern to remove')
-    }
-  }
-  syncPatternFromSelection()
 }
 
 const lineCap = ref<LineCap>(store.style.lineCap)
@@ -1968,7 +1858,7 @@ watch(() => store.selectedItemIds, () => {
   gradientRef.value?.syncFromStore()
   syncStyleFromSelection()
   syncTextFromSelection()
-  syncPatternFromSelection()
+  patternRef.value?.syncFromStore()
   syncSpotFromSelection()
 }, { immediate: true })
 </script>
