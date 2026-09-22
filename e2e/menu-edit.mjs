@@ -52,7 +52,7 @@ async function openEdit() {
 
 async function clickMenuItem(name) {
   await openEdit()
-  await page.getByRole('menuitem', { name }).click()
+  await page.getByRole('menuitem', { name, exact: true }).click()
 }
 
 // Fixture: one selected rect.

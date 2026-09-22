@@ -64,7 +64,7 @@ async function artCount() {
 
 async function clickMenuItem(name) {
   await page.locator('.top-bar').getByText('File', { exact: true }).click()
-  await page.getByRole('menuitem', { name }).click()
+  await page.getByRole('menuitem', { name, exact: true }).click()
 }
 
 /* ---------- New Document with dirty confirm accepted ---------- */

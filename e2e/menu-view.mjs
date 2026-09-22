@@ -27,7 +27,7 @@ await page.waitForFunction(() => window.__engine__ && window.__store__)
 
 async function clickMenuItem(name) {
   await page.locator('.top-bar').getByText('View', { exact: true }).click()
-  await page.getByRole('menuitem', { name }).click()
+  await page.getByRole('menuitem', { name, exact: true }).click()
 }
 
 /* ---------- Zoom In via the menu ---------- */
