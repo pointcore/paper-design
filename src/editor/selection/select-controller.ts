@@ -33,6 +33,7 @@ import { SnapService } from '../snap/snap-service'
 import {
   charIndexAt as measureCharIndexAt,
   charRects,
+  toVisibleIndex,
   type CharMeasureStyle,
 } from './char-measure'
 import { applyToolCursor, cursorForTool, CURSOR_ROTATE, arrowResizeCursor } from '../cursors'
@@ -3180,8 +3181,11 @@ export class SelectController {
     if (sel.itemId !== id) return
 
     const rects = this.charBounds(item)
-    const start = sel.start
-    const end = Math.min(sel.end, rects.length)
+    // Selection endpoints are raw-content indices (newlines count);
+    // boxes hold visible characters only.
+    const content = (item as any).raw as string | undefined ?? item.content
+    const start = toVisibleIndex(content, sel.start)
+    const end = Math.min(toVisibleIndex(content, sel.end), rects.length)
     const overlay = engine.getOverlayLayer()
     const zoom = engine.zoom || 1
 

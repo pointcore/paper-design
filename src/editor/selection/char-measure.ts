@@ -85,6 +85,22 @@ export function charIndexAt(
 }
 
 /**
+ * Map a raw-content index (newlines count, as produced by charIndexAt and
+ * the keyboard handlers) onto a visible-character index (newlines skipped,
+ * matching charRects output). Without this the highlight drifts right past
+ * every preceding newline on multi-line text.
+ */
+export function toVisibleIndex(content: string, globalIdx: number): number {
+  if (!content) return 0
+  const clamped = Math.max(0, Math.min(globalIdx, content.length))
+  let visible = clamped
+  for (let i = 0; i < clamped; i++) {
+    if (content[i] === '\n') visible--
+  }
+  return visible
+}
+
+/**
  * Per-character boxes in document coordinates (multi-line aware).
  * Newlines advance the layout but produce no box, so the array holds
  * exactly one entry per visible character.

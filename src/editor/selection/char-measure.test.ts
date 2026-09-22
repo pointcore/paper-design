@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   charIndexAt,
   charRects,
+  toVisibleIndex,
   type CharMeasureStyle,
 } from './char-measure'
 
@@ -74,8 +75,35 @@ describe('charRects', () => {
   })
 
   it('emits one box per visible character (newlines produce none)', () => {
-    // Locks the current layout: highlight indexing past a newline is a
-    // known off-by-newlines gap (global indices vs box indices).
     expect(charRects('a\nb\nc', left, measure)).toHaveLength(3)
+  })
+})
+
+describe('toVisibleIndex', () => {
+  it('is the identity when there are no newlines', () => {
+    expect(toVisibleIndex('abcd', 0)).toBe(0)
+    expect(toVisibleIndex('abcd', 2)).toBe(2)
+    expect(toVisibleIndex('abcd', 4)).toBe(4)
+  })
+
+  it('subtracts one per preceding newline', () => {
+    // "ab\ncde": raw 3 is the 'c', the third visible box.
+    expect(toVisibleIndex('ab\ncde', 3)).toBe(2)
+    expect(toVisibleIndex('ab\ncde', 5)).toBe(4)
+    expect(toVisibleIndex('a\nb\nc', 4)).toBe(2)
+  })
+
+  it('clamps out-of-range input', () => {
+    expect(toVisibleIndex('ab\ncde', -5)).toBe(0)
+    expect(toVisibleIndex('ab\ncde', 99)).toBe(5)
+    expect(toVisibleIndex('', 3)).toBe(0)
+  })
+
+  it('round-trips the highlight range for multi-line text', () => {
+    // Selecting "cde" (raw 3..6) must highlight boxes 2..5.
+    const content = 'ab\ncde'
+    expect(toVisibleIndex(content, 3)).toBe(2)
+    expect(toVisibleIndex(content, 6)).toBe(5)
+    expect(charRects(content, left, measure)).toHaveLength(5)
   })
 })
