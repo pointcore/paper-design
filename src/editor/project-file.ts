@@ -67,3 +67,21 @@ function looksLikeProjectSnapshot(value: unknown): boolean {
   // non-empty layer stack for the same no-silent-wipe reason.
   return Array.isArray(layers) && layers.length > 0
 }
+
+/**
+ * Cheap whole-file probe used by recovery / recent-files / versions before
+ * any parse. Matches the same markers `looksLikeProjectSnapshot` accepts
+ * (Paper's native `["Class", {...}]` tuple form, either nested for v2 or
+ * as an escaped JSON string for v1, plus a hand-made object envelope with
+ * a `layers` array) — requiring a top-level `"layers"` key alone rejects
+ * every real file `exportProjectFile()` writes.
+ */
+export function looksLikeProjectFileText(fileText: string): boolean {
+  if (typeof fileText !== 'string' || fileText.length === 0) return false
+  if (!fileText.includes('"snapshot"')) return false
+  return (
+    /\["[A-Za-z]+",/.test(fileText) ||
+    /\[\\"[A-Za-z]+\\",/.test(fileText) ||
+    fileText.includes('"layers"')
+  )
+}

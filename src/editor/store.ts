@@ -176,6 +176,13 @@ export const useEditorStore = defineStore('editor', {
     history: [] as HistoryEntry[],
     /** History index (-1 means empty) */
     historyIndex: -1,
+    /**
+     * Layer-tree / thumbnail version: bumped on history that can change
+     * structure or item pixels. Pure Move/Nudge leave both unchanged, so
+     * the Layers panel skips a full tree rebuild and thumbnail re-render
+     * on ordinary drags (historyIndex still tracks undo position).
+     */
+    structureEpoch: 0,
     /** Monotonic document revision, bumped by every history mutation */
     revision: 0,
     /** Revision value captured at the last save / open / new */
@@ -353,9 +360,13 @@ export const useEditorStore = defineStore('editor', {
     /** Set selected items (stashes the previous set for Reselect) */
     setSelection(itemIds: string[]) {
       const next = [...itemIds]
+      // O(n) membership via Set: a large CDR import can select thousands of
+      // items, and next.every(id => prev.includes(id)) was O(n²) on every
+      // click-driven syncSelectionToStore.
+      const prevSet = new Set(this.selectedItemIds)
       const same =
         next.length === this.selectedItemIds.length &&
-        next.every((id) => this.selectedItemIds.includes(id))
+        next.every((id) => prevSet.has(id))
       if (!same && this.selectedItemIds.length > 0) {
         this.lastSelection = [...this.selectedItemIds]
       }
@@ -468,6 +479,14 @@ export const useEditorStore = defineStore('editor', {
     /** Record that the document changed (undo/redo/clear included). */
     bumpRevision() {
       this.revision++
+    },
+
+    /**
+     * Invalidate the Layers tree and item thumbnails. Not called for pure
+     * translation (Move/Nudge): node metadata and rendered pixels match.
+     */
+    bumpStructureEpoch() {
+      this.structureEpoch++
     },
 
     /** Capture the current revision as the saved (clean) one. */

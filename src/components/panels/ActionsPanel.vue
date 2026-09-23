@@ -613,6 +613,15 @@ function restoreVersion(id: string) {
   const e = engineRef?.value
   const v = namedVersions.value.find((x) => x.id === id)
   if (!v || !e) return
+  // importProjectFile resets history and marks the document saved, so a
+  // stray click would drop both the undo stack and the dirty flag with no
+  // way back — mirror the File > Open confirmation before replacing.
+  if (
+    store.hasUnsavedChanges &&
+    !window.confirm(`Replace current unsaved changes with version "${v.name}"?`)
+  ) {
+    return
+  }
   try {
     e.importProjectFile(v.fileText)
     diffVersionId.value = ''

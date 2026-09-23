@@ -3,7 +3,7 @@
  * This guards the data-loss-sensitive open path without needing Paper.js.
  */
 import { describe, expect, it } from 'vitest'
-import { MAX_PROJECT_FILE_BYTES, parseProjectFile } from './project-file'
+import { MAX_PROJECT_FILE_BYTES, looksLikeProjectFileText, parseProjectFile } from './project-file'
 
 const MAX_VERSION = 2
 
@@ -102,5 +102,29 @@ describe('parseProjectFile', () => {
     expect(() => parseProjectFile(big, MAX_VERSION)).toThrow(
       'Project file too large (over 150 MB)'
     )
+  })
+})
+
+describe('looksLikeProjectFileText', () => {
+  it('accepts real exportProjectFile() output (tuple snapshot, no layers key)', () => {
+    expect(looksLikeProjectFileText(envelope())).toBe(true)
+  })
+
+  it('accepts v1 string snapshots (escaped tuple form)', () => {
+    expect(
+      looksLikeProjectFileText(envelope({ version: 1, snapshot: JSON.stringify(realSnapshot()) }))
+    ).toBe(true)
+  })
+
+  it('accepts hand-made object envelopes with a layers array', () => {
+    expect(looksLikeProjectFileText('{"snapshot":{"layers":[{"name":"User"}]}}')).toBe(true)
+  })
+
+  it('rejects junk without a snapshot or project markers', () => {
+    expect(looksLikeProjectFileText('')).toBe(false)
+    expect(looksLikeProjectFileText('{"a":1}')).toBe(false)
+    expect(looksLikeProjectFileText('{"snapshot":1}')).toBe(false)
+    expect(looksLikeProjectFileText('hello')).toBe(false)
+    expect(looksLikeProjectFileText(42 as unknown as string)).toBe(false)
   })
 })

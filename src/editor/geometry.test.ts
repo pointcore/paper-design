@@ -186,21 +186,21 @@ describe('chooseJoinEnds', () => {
     // A ends where B starts: no walk flips.
     expect(chooseJoinEnds(pt(0, 0), pt(10, 0), pt(10, 0), pt(20, 0))).toEqual({
       firstUsesFirst: false,
-      secondUsesFirst: true,
+      secondUsesFirst: false,
     })
   })
 
   it('joins tail-to-tail when the far ends touch', () => {
     expect(chooseJoinEnds(pt(0, 0), pt(10, 0), pt(20, 0), pt(10, 0))).toEqual({
       firstUsesFirst: false,
-      secondUsesFirst: false,
+      secondUsesFirst: true,
     })
   })
 
   it('joins head-to-head when the starts touch', () => {
     expect(chooseJoinEnds(pt(10, 0), pt(0, 0), pt(10, 0), pt(20, 0))).toEqual({
       firstUsesFirst: true,
-      secondUsesFirst: true,
+      secondUsesFirst: false,
     })
   })
 
@@ -208,15 +208,15 @@ describe('chooseJoinEnds', () => {
     // aFirst (0,0) sits 1 unit from bLast (1,0); every other pair is far.
     expect(chooseJoinEnds(pt(0, 0), pt(50, 0), pt(100, 0), pt(1, 0))).toEqual({
       firstUsesFirst: true,
-      secondUsesFirst: false,
+      secondUsesFirst: true,
     })
   })
 
   it('bridges a gap through the nearest pair', () => {
-    // A runs 0→10, B runs 30→40 on the same line: tails meet across the gap.
+    // A runs 0→10, B runs 30→40 on the same line: A's tail meets B's head.
     expect(chooseJoinEnds(pt(0, 0), pt(10, 0), pt(30, 0), pt(40, 0))).toEqual({
       firstUsesFirst: false,
-      secondUsesFirst: true,
+      secondUsesFirst: false,
     })
   })
 
@@ -224,12 +224,12 @@ describe('chooseJoinEnds', () => {
     // Both head-to-tail and tail-to-head measure zero here.
     expect(chooseJoinEnds(pt(0, 0), pt(10, 0), pt(10, 0), pt(0, 0))).toEqual({
       firstUsesFirst: false,
-      secondUsesFirst: true,
+      secondUsesFirst: false,
     })
     // Fully coincident ends collapse to the same first pair.
     expect(chooseJoinEnds(pt(5, 5), pt(5, 5), pt(5, 5), pt(5, 5))).toEqual({
       firstUsesFirst: false,
-      secondUsesFirst: true,
+      secondUsesFirst: false,
     })
   })
 
@@ -237,13 +237,13 @@ describe('chooseJoinEnds', () => {
     const nan = Number.NaN
     expect(
       chooseJoinEnds(pt(0, 0), pt(nan, nan), pt(100, 0), pt(1, 0))
-    ).toEqual({ firstUsesFirst: true, secondUsesFirst: false })
+    ).toEqual({ firstUsesFirst: true, secondUsesFirst: true })
   })
 
   it('falls back to the first pair when everything is degenerate', () => {
     const nan = Number.NaN
     expect(
       chooseJoinEnds(pt(nan, nan), pt(nan, nan), pt(nan, nan), pt(nan, nan))
-    ).toEqual({ firstUsesFirst: false, secondUsesFirst: true })
+    ).toEqual({ firstUsesFirst: false, secondUsesFirst: false })
   })
 })

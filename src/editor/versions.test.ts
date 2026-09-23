@@ -17,7 +17,9 @@ function fileText(overrides: Record<string, unknown> = {}): string {
     version: 2,
     pageSize: { width: 1920, height: 1080 },
     bleed: 0,
-    snapshot: { layers: [{ name: 'Layer 1' }] },
+    // Real exportProjectFile() shape: Paper native ["Class", {...}] tuples,
+    // no top-level "layers" key (see project-file.ts).
+    snapshot: [['Layer', { name: 'Layer 1' }]],
     artboards: [{ id: 'b1', name: 'Artboard 1', x: 0, y: 0, width: 1920, height: 1080 }],
     activeArtboardId: 'b1',
     ...overrides,
@@ -37,6 +39,11 @@ function version(overrides: Partial<NamedVersion> = {}): NamedVersion {
 describe('isValidNamedVersion', () => {
   it('accepts a well-formed entry', () => {
     expect(isValidNamedVersion(version())).toBe(true)
+  })
+
+  it('accepts the object-shaped snapshot hand-made envelopes still use', () => {
+    const v = version({ fileText: '{"snapshot":{"layers":[{"name":"L"}]}}' })
+    expect(isValidNamedVersion(v)).toBe(true)
   })
 
   it('rejects blank names, bad timestamps and non-project payloads', () => {
@@ -121,7 +128,7 @@ describe('diffProjectFiles', () => {
         { id: 'b1', name: 'Cover', x: 0, y: 0, width: 1000, height: 800 },
         { id: 'b2', name: 'Inside', x: 0, y: 0, width: 500, height: 500 },
       ],
-      snapshot: { layers: [{ name: 'Layer 1' }, { name: 'Layer 2' }] },
+      snapshot: [['Layer', { name: 'Layer 1' }], ['Layer', { name: 'Layer 2' }]],
     })
     const lines = diffProjectFiles(before, after)
     expect(lines.some((l) => l.includes('Bleed'))).toBe(true)

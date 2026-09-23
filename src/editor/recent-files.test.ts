@@ -6,7 +6,9 @@ function entry(name: string, savedAt: number, fileText?: string) {
     id: `recent-${name}`,
     name,
     savedAt,
-    fileText: fileText ?? '{"version":2,"snapshot":{"layers":[{"name":"User"}]}}',
+    // Real exportProjectFile() shape: Paper native ["Class", {...}] tuples,
+    // no top-level "layers" key (see project-file.ts).
+    fileText: fileText ?? '{"version":2,"snapshot":[["Layer",{"name":"User"}]]}',
   }
 }
 
@@ -30,7 +32,10 @@ describe('normalizeRecentList', () => {
   })
 
   it('dedupes by name keeping the newest save', () => {
-    const list = normalizeRecentList([entry('a', 100), entry('a', 500, '{"version":2,"snapshot":{"layers":[{"n":"newer"}]}}')])
+    const list = normalizeRecentList([
+      entry('a', 100),
+      entry('a', 500, '{"version":2,"snapshot":[["Layer",{"name":"newer"}]]}'),
+    ])
     expect(list).toHaveLength(1)
     expect(list[0].savedAt).toBe(500)
   })

@@ -41,6 +41,17 @@ const FRAME_SAFE_HISTORY = new Set([
 ])
 
 /**
+ * History names that leave the layer-tree structure and every item
+ * thumbnail visually unchanged (pure translation). Everything else must
+ * bump store.structureEpoch and drop the thumbnail cache so the Layers
+ * panel does not keep serving pre-edit pixels.
+ */
+export const TRANSLATION_ONLY_HISTORY: ReadonlySet<string> = new Set([
+  'Move',
+  'Nudge',
+])
+
+/**
  * Shared snap service for invalidating the document-wide cache.
  * (Controllers own their own SnapService instances; this one only serves
  * the history entry points, which every document mutation funnels through.)
@@ -163,6 +174,10 @@ function restoreSnapshotWithMeta(
     }
   }
   e.geometryVersion++
+  // Undo/redo/jump can restore any structure or pixels — never safe to
+  // keep the previous tree/thumbnail epoch (unlike pure Move/Nudge).
+  e.store.bumpStructureEpoch()
+  e.clearThumbCache()
   e.syncLayersToStore()
   e.syncSelectionToStore()
   e.refreshArtboards()
@@ -200,6 +215,28 @@ export function pushHistory(e: EditorEngine, name: string, icon: string = '') {
   e.historyIndex = e.history.length - 1
   e.store.setHistory(e.history, e.historyIndex)
   e.store.bumpRevision()
+  invalidateGeometryDependents(e, name)
+  invalidatePanelDependents(e, name)
+}
+
+/**
+ * Layer-tree / thumbnail cache invalidation for a history name. Pure
+ * translation (Move/Nudge) is skipped: node labels/flags match and a
+ * moved item's thumbnail is pixel-identical once the viewBox follows
+ * its bounds.
+ */
+function invalidatePanelDependents(e: EditorEngine, name: string): void {
+  if (TRANSLATION_ONLY_HISTORY.has(name)) return
+  e.store.bumpStructureEpoch()
+  e.clearThumbCache()
+}
+
+/**
+ * Bump the geometry version and snap cache for non-frame-safe history
+ * entries (shared by pushHistory and the pushCoalescedHistory merge path,
+ * which both replace document state without going through undo/redo).
+ */
+function invalidateGeometryDependents(e: EditorEngine, name: string): void {
   if (!FRAME_SAFE_HISTORY.has(name)) {
     e.geometryVersion++
     // Invalidate snap cache when document geometry changes.
@@ -229,6 +266,11 @@ export function pushCoalescedHistory(e: EditorEngine, name: string, windowMs = 1
     e.store.setHistory(e.history, e.historyIndex)
     e.store.bumpRevision()
     enforceHistoryBudget(e)
+    // A merged geometry change still moves artwork: without this, rapid
+    // successive Transform edits leave the selection frame and snap cache
+    // pinned to the first entry's geometry until the next full push.
+    invalidateGeometryDependents(e, name)
+    invalidatePanelDependents(e, name)
   } else {
     pushHistory(e, name)
   }

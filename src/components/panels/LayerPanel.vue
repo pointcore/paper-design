@@ -174,16 +174,18 @@ const displayedLayers = computed(() => {
   if (!q) return all
   return all.filter((l) => l.name.toLowerCase().includes(q) || layerHasMatch(l.id, q))
 })
-// Object-tree entries per layer, rebuilt on document changes (every
-// mutation records history, so the history index is a sufficient document
-// version) plus local tree ticks for metadata-only toggles such as folding.
+// Object-tree entries per layer, rebuilt when structure or item pixels
+// can change (structureEpoch — pure Move/Nudge leave both stable) plus
+// local tree ticks for metadata-only toggles such as folding.
 // Selection is deliberately excluded: row highlights read
 // store.selectedItemIds directly, and rebuilding 600+ rows plus thumbnails
 // on every click made selection feel frozen on imported pages.
 const treeTick = ref(0)
 const treeKey = computed(() =>
   [
-    store.historyIndex,
+    store.structureEpoch,
+    // Isolation flips item.visible without recording history.
+    store.isolationActive ? 1 : 0,
     treeTick.value,
     store.layers
       .map((l) => `${l.id}:${l.name}:${l.visible}:${l.locked}:${l.opacity}:${l.expand}`)

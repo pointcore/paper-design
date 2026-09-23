@@ -6,6 +6,7 @@
  * Entries are keyed by file name (saving again refreshes the entry),
  * newest first, capped. A localStorage fallback covers broken IndexedDB.
  */
+import { looksLikeProjectFileText } from './project-file'
 
 export interface RecentFileMeta {
   id: string
@@ -61,12 +62,7 @@ export function normalizeRecentList(
     const fileText = rec.fileText
     if (!name) continue
     if (typeof savedAt !== 'number' || !Number.isFinite(savedAt) || savedAt <= 0) continue
-    if (
-      typeof fileText !== 'string' ||
-      fileText.length === 0 ||
-      !fileText.includes('"snapshot"') ||
-      !fileText.includes('"layers"')
-    ) {
+    if (typeof fileText !== 'string' || fileText.length === 0 || !looksLikeProjectFileText(fileText)) {
       continue
     }
     const id = typeof rec.id === 'string' && rec.id ? rec.id : `recent-${name}`

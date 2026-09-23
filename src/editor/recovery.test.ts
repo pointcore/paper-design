@@ -4,13 +4,23 @@ import { validateRecoveryPayload } from './recovery'
 function validPayload() {
   return {
     savedAt: Date.now(),
-    fileText: '{"app":"vue-vector-editor","version":2,"snapshot":{"layers":[{"name":"User"}]}}',
+    // Real exportProjectFile() shape: Paper native ["Class", {...}] tuples,
+    // no top-level "layers" key (see project-file.ts).
+    fileText: '{"app":"vue-vector-editor","version":2,"snapshot":[["Layer",{"name":"User"}]]}',
   }
 }
 
 describe('validateRecoveryPayload', () => {
   it('accepts a well-formed payload', () => {
     const p = validPayload()
+    expect(validateRecoveryPayload(p)).toEqual(p)
+  })
+
+  it('accepts the object-shaped snapshot hand-made envelopes still use', () => {
+    const p = {
+      savedAt: Date.now(),
+      fileText: '{"snapshot":{"layers":[{"name":"User"}]}}',
+    }
     expect(validateRecoveryPayload(p)).toEqual(p)
   })
 

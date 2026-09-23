@@ -7,6 +7,7 @@
  * which clears the mirror. A localStorage fallback covers profiles where
  * IndexedDB is unavailable or broken (private-mode quirks).
  */
+import { looksLikeProjectFileText } from './project-file'
 
 export interface RecoveryPayload {
   /** Wall-clock ms when the snapshot was written. */
@@ -55,7 +56,7 @@ export function validateRecoveryPayload(value: unknown): RecoveryPayload | null 
   }
   // Cheap probe that this is plausibly a project file — the same markers the
   // project-file parser looks for before handing data to Paper.
-  if (!fileText.includes('"snapshot"') || !fileText.includes('"layers"')) return null
+  if (!looksLikeProjectFileText(fileText)) return null
   return { savedAt, fileText }
 }
 

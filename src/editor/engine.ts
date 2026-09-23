@@ -1578,10 +1578,10 @@ export class EditorEngine {
     return tree.listLayerItems(this, layerId)
   }
 
-  /** Thumbnail cache: `${historyIndex}:${isolation}:${itemId}` -> data URL. */
+  /** Thumbnail cache: `${structureEpoch}:${isolation}:${itemId}` -> data URL. */
   private thumbCache = new Map<string, string>()
 
-  /** Drop cached layer-tree thumbnails (history jumps change the artwork). */
+  /** Drop cached layer-tree thumbnails (structure/pixel changes bump the epoch). */
   clearThumbCache(): void {
     this.thumbCache.clear()
   }
@@ -1599,7 +1599,7 @@ export class EditorEngine {
     // Symbol <use> nodes need definition context that a lone export cannot
     // guarantee; the panel falls back to a glyph for those.
     if (item instanceof scope.SymbolItem) return null
-    const key = `${this.historyIndex}:${this.store.isolationActive ? 1 : 0}:${id}`
+    const key = `${this.store.structureEpoch}:${this.store.isolationActive ? 1 : 0}:${id}`
     const hit = this.thumbCache.get(key)
     if (hit !== undefined) return hit || null
     if (this.thumbCache.size > 500) this.thumbCache.clear()

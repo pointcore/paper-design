@@ -72,6 +72,7 @@ export class SelectController {
   // never accumulate and releasing a snap does not jump).
   private dragItemStartPositions: paper.Point[] = []
   private dragPointerStart: paper.Point | null = null
+  private dragStartNeedsSnap = false
   private dragStartBounds: paper.Rectangle | null = null
   private marqueeRect: paper.Path | null = null
   private marqueeLayer: paper.Layer | null = null
@@ -694,14 +695,18 @@ export class SelectController {
         this.dragItemStartPositions = this.dragItems.map(
           (item) => (item.position as paper.Point).clone()
         )
-        this.dragPointerStart = this.snapService.snapPoint(event.point, this.dragItems).clone()
+        // Defer snap until the first real drag frame: snapPoint may cold-
+        // rebuild the document-wide anchor cache (O(segments) after a Move
+        // invalidates it). A plain click never calls dragObjects, so the
+        // import→click path skips that walk entirely.
+        this.dragPointerStart = event.point.clone()
+        this.dragStartNeedsSnap = true
         this.dragStartBounds = engine.getSelectionBounds()?.clone() ?? null
         this.dragStartFrame = this.frame ? { x: this.frame.cx, y: this.frame.cy } : null
         this.dragStart = { x: event.point.x, y: event.point.y }
         this.grab = 'object'
-        // Move cue while the object follows the pointer (AI keeps the arrow,
-        // but the move affordance reads better on the web canvas).
-        engine.canvas.style.cursor = 'move'
+        // Move cue is applied on the first drag frame (not here) so a
+        // plain click never parks the cross-shaped cursor.
       } else {
         // Shift starts an additive marquee. The old early return made
         // Shift-drag a complete no-op and left marqueeShift permanently
@@ -782,15 +787,37 @@ export class SelectController {
         // recorded end position (and the history entry below) is exact.
         this.flushQueuedDrag()
         this.isDragging = false
+        // Restore the tool cursor before the O(document) history snapshot:
+        // mousedown parks the move affordance (cross-shaped) on the canvas,
+        // and a plain click used to freeze on it for the whole pushHistory.
+        engine.canvas.style.cursor = cursorForTool(this.mode)
         this.reflowEditedPaths()
         // Total drag delta from the tracked start positions feeds
         // Transform Again (AI repeats drag moves too).
         const startPos = this.dragItemStartPositions[0]
         const endPos = this.dragItems[0]?.position as paper.Point | undefined
+        let moved = false
         if (startPos && endPos) {
-          engine.recordTransformMove(endPos.x - startPos.x, endPos.y - startPos.y)
+          const dx = endPos.x - startPos.x
+          const dy = endPos.y - startPos.y
+          engine.recordTransformMove(dx, dy)
+          moved = dx !== 0 || dy !== 0
         }
-        engine.pushHistory('Move')
+        // A zero-displacement click still enters this branch (mousedown
+        // arms isDragging unconditionally) — pushing 'Move' there snapshotted
+        // the whole document, rebuilt every layer thumbnail and dirtied the
+        // snap cache on each casual click.
+        if (!moved) {
+          for (let i = 1; i < this.dragItems.length; i++) {
+            const s = this.dragItemStartPositions[i]
+            const p = this.dragItems[i]?.position
+            if (s && p && (p.x !== s.x || p.y !== s.y)) {
+              moved = true
+              break
+            }
+          }
+        }
+        if (moved) engine.pushHistory('Move')
         engine.stampSelectionFrame()
       } else if (this.grab === 'anchor' || this.grab === 'anchor-group' || this.grab === 'handle' || this.grab === 'segment') {
         this.reflowEditedPaths()
@@ -2651,6 +2678,16 @@ export class SelectController {
     const engine = this.engine
     if (!engine || this.dragItems.length === 0) return
     if (!this.dragPointerStart || !this.dragStartBounds) return
+    if (this.dragStartNeedsSnap) {
+      this.dragPointerStart = this.snapService.snapPoint(
+        this.dragPointerStart,
+        this.dragItems
+      ).clone()
+      this.dragStartNeedsSnap = false
+      // Move cue while the object follows the pointer (AI keeps the arrow,
+      // but the move affordance reads better on the web canvas).
+      engine.canvas.style.cursor = 'move'
+    }
     const snapped = this.snapService.snapPoint(point, this.dragItems)
     const dx = snapped.x - this.dragPointerStart.x
     const dy = snapped.y - this.dragPointerStart.y

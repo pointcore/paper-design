@@ -127,11 +127,17 @@ export function chooseJoinEnds(aFirst: Xy, aLast: Xy, bFirst: Xy, bLast: Xy): Jo
     }
     return Math.hypot(p.x - q.x, p.y - q.y)
   }
+  // `usesFirst` is a walk-direction flag for pushOriented: first path ends
+  // with firstUsesFirst ? aFirst : aLast; second path starts with
+  // secondUsesFirst ? bLast : bFirst (reversed walk starts at the last
+  // segment). The four pairs therefore encode as:
+  //   aLast→bFirst  { false, false }   aLast→bLast   { false, true }
+  //   aFirst→bFirst { true,  false }   aFirst→bLast  { true,  true }
   const pairs: Array<[number, JoinEnds]> = [
-    [dist(aLast, bFirst), { firstUsesFirst: false, secondUsesFirst: true }],
-    [dist(aLast, bLast), { firstUsesFirst: false, secondUsesFirst: false }],
-    [dist(aFirst, bFirst), { firstUsesFirst: true, secondUsesFirst: true }],
-    [dist(aFirst, bLast), { firstUsesFirst: true, secondUsesFirst: false }],
+    [dist(aLast, bFirst), { firstUsesFirst: false, secondUsesFirst: false }],
+    [dist(aLast, bLast), { firstUsesFirst: false, secondUsesFirst: true }],
+    [dist(aFirst, bFirst), { firstUsesFirst: true, secondUsesFirst: false }],
+    [dist(aFirst, bLast), { firstUsesFirst: true, secondUsesFirst: true }],
   ]
   let best = pairs[0]
   for (const pair of pairs) {

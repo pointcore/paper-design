@@ -8,6 +8,7 @@
  * Persistence lives in ActionsPanel (localStorage, best effort) like the
  * export-preset and data-merge features.
  */
+import { looksLikeProjectFileText } from './project-file'
 
 /** One saved document milestone. */
 export interface NamedVersion {
@@ -47,7 +48,7 @@ export function isValidNamedVersion(v: Partial<NamedVersion>): v is NamedVersion
   }
   // Cheap probe that this is plausibly a project file — the same markers
   // the recovery validator looks for before handing data to the engine.
-  if (!v.fileText.includes('"snapshot"') || !v.fileText.includes('"layers"')) return false
+  if (!looksLikeProjectFileText(v.fileText)) return false
   return true
 }
 
