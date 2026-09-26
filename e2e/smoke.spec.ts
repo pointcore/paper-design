@@ -3,8 +3,9 @@ import { test, expect } from '@playwright/test'
 test.describe('Vue Vector Editor smoke tests', () => {
   test('loads the editor canvas', async ({ page }) => {
     await page.goto('/')
-    // Wait for the Paper.js canvas to appear
-    const canvas = page.locator('canvas')
+    // Wait for the Paper.js canvas to appear (the rulers own two smaller
+    // canvases, so target the main one by id)
+    const canvas = page.locator('#paper-view-0')
     await expect(canvas).toBeVisible({ timeout: 15_000 })
   })
 
