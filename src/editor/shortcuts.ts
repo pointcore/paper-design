@@ -540,7 +540,6 @@ export function handleGlobalKeydown(
     applyNudge(e, store, engine, 1)
     return
   }
-  if (e.repeat) return
 
   // Brush footprint [ ] (AI): shrink/grow blob, brush and eraser.
   // Repeats allowed so holding the bracket keeps resizing.
