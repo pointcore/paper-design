@@ -309,7 +309,20 @@ function onSizeChange() {
   }
 }
 
-watch(() => store.activeArtboardId, syncPositionFromStore, { immediate: true })
+// Re-sync when the board identity changes AND when its geometry moves
+// underneath the panel (undo/redo of Move/Resize Artboard, or any other
+// restore): stale fields would write the old position back on the next
+// edit and teleport the board.
+watch(
+  () => {
+    const b = store.activeArtboard
+    return b
+      ? `${store.activeArtboardId}|${b.x},${b.y},${b.width},${b.height}`
+      : store.activeArtboardId
+  },
+  syncPositionFromStore,
+  { immediate: true }
+)
 </script>
 
 <style scoped>
