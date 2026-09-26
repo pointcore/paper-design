@@ -19,8 +19,13 @@ export const IMAGE_TOKEN_PREFIX = 'vve-img:'
 /** Payloads at or below this length stay inline (icons, tiny thumbs). */
 export const IMAGE_INLINE_LIMIT = 256
 
-/** Property names dropped from snapshots (pre-edit pixel copies). */
-const STRIPPED_KEYS = new Set(['originalSource', 'originalData'])
+/**
+ * Sidecar memory cap: the store holds each distinct image once, but a long
+ * session can still accumulate hundreds of retired payloads. When over the
+ * cap, oldest entries no longer referenced by any history snapshot are
+ * dropped (see pruneHistoryImageStore).
+ */
+export const MAX_SIDECAR_BYTES = 64 * 1024 * 1024
 
 /**
  * 53-bit content hash (cyrb53) prefixed with payload length: distinct
@@ -45,15 +50,26 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return proto === Object.prototype || proto === null
 }
 
+/** Id chars emitted by hashImageSource plus the `~n` collision suffix. */
+const TOKEN_ID_RE = /vve-img:([0-9a-z~\-]+)/g
+
 /**
  * Replace long `data:` payloads with sidecar tokens (mutates and returns
  * the node). Non-image strings and short payloads pass through untouched.
+ * A 53-bit hash collision between different payloads mints a `~n` suffixed
+ * id instead of letting the first payload win — the token keeps pointing
+ * at the right pixels.
  */
 export function slimHistoryImages<T>(node: T, store: Map<string, string>): T {
   const walk = (v: unknown): unknown => {
     if (typeof v === 'string') {
       if (v.length > IMAGE_INLINE_LIMIT && v.startsWith('data:')) {
-        const id = hashImageSource(v)
+        let id = hashImageSource(v)
+        if (store.has(id) && store.get(id) !== v) {
+          let n = 1
+          while (store.has(`${id}~${n}`) && store.get(`${id}~${n}`) !== v) n++
+          id = `${id}~${n}`
+        }
         if (!store.has(id)) store.set(id, v)
         return `${IMAGE_TOKEN_PREFIX}${id}`
       }
@@ -65,10 +81,6 @@ export function slimHistoryImages<T>(node: T, store: Map<string, string>): T {
     }
     if (isPlainObject(v)) {
       for (const key of Object.keys(v)) {
-        if (STRIPPED_KEYS.has(key)) {
-          delete v[key]
-          continue
-        }
         v[key] = walk(v[key])
       }
       return v
@@ -76,6 +88,36 @@ export function slimHistoryImages<T>(node: T, store: Map<string, string>): T {
     return v
   }
   return walk(node) as T
+}
+
+/**
+ * Drop oldest sidecar payloads until the store fits `maxBytes`, never
+ * touching an id still tokenized in any current history snapshot (undo or
+ * jump would otherwise inflate a missing token). Callers pass the live
+ * snapshot strings; over-cap scans are rare, so the linear token sweep is
+ * acceptable.
+ */
+export function pruneHistoryImageStore(
+  store: Map<string, string>,
+  snapshots: readonly string[],
+  maxBytes: number = MAX_SIDECAR_BYTES,
+): void {
+  let total = 0
+  for (const v of store.values()) total += v.length
+  if (total <= maxBytes) return
+  const live = new Set<string>()
+  for (const s of snapshots) {
+    if (typeof s !== 'string' || !s.includes(IMAGE_TOKEN_PREFIX)) continue
+    TOKEN_ID_RE.lastIndex = 0
+    let m: RegExpExecArray | null
+    while ((m = TOKEN_ID_RE.exec(s)) !== null) live.add(m[1])
+  }
+  for (const [id, v] of store) {
+    if (total <= maxBytes) break
+    if (live.has(id)) continue
+    store.delete(id)
+    total -= v.length
+  }
 }
 
 /**

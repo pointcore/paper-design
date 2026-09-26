@@ -12,7 +12,7 @@ import type paper from 'paper'
 import type { EditorEngine } from './engine'
 import type { ArtboardMeta } from './types'
 import { SnapService } from './snap/snap-service'
-import { inflateHistoryImages, slimHistoryImages } from './history-images'
+import { inflateHistoryImages, pruneHistoryImageStore, slimHistoryImages } from './history-images'
 import { MAX_HISTORY_BYTES, MIN_HISTORY_ENTRIES, evictCountForBudget, snapshotByteLength } from './history-budget'
 import { walkUserItems } from './engine-layers'
 
@@ -215,6 +215,9 @@ export function pushHistory(e: EditorEngine, name: string, icon: string = '') {
   e.historyIndex = e.history.length - 1
   e.store.setHistory(e.history, e.historyIndex)
   e.store.bumpRevision()
+  // Sidecar images no longer referenced by any snapshot (evicted or
+  // overwritten entries) are the moment to reclaim their memory.
+  pruneHistoryImageStore(e.historyImageStore, e.historySnapshots)
   invalidateGeometryDependents(e, name)
   invalidatePanelDependents(e, name)
 }
@@ -266,6 +269,7 @@ export function pushCoalescedHistory(e: EditorEngine, name: string, windowMs = 1
     e.store.setHistory(e.history, e.historyIndex)
     e.store.bumpRevision()
     enforceHistoryBudget(e)
+    pruneHistoryImageStore(e.historyImageStore, e.historySnapshots)
     // A merged geometry change still moves artwork: without this, rapid
     // successive Transform edits leave the selection frame and snap cache
     // pinned to the first entry's geometry until the next full push.

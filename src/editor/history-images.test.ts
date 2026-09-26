@@ -4,6 +4,7 @@ import {
   IMAGE_TOKEN_PREFIX,
   hashImageSource,
   inflateHistoryImages,
+  pruneHistoryImageStore,
   slimHistoryImages,
 } from './history-images'
 
@@ -51,12 +52,18 @@ describe('slimHistoryImages', () => {
     expect(store.size).toBe(0)
   })
 
-  it('drops pre-edit pixel copies from snapshots', () => {
+  it('mints a distinct id when two payloads collide on one hash', () => {
     const store = new Map<string, string>()
-    const node = { data: { id: 'r1', originalSource: bigUrl } }
-    const slim = slimHistoryImages(node, store)
-    expect('originalSource' in (slim.data as Record<string, unknown>)).toBe(false)
-    expect(store.size).toBe(0)
+    const token = slimHistoryImages({ source: bigUrl }, store).source as string
+    expect(store.get(token.slice(IMAGE_TOKEN_PREFIX.length))).toBe(bigUrl)
+    // Simulate a 53-bit collision: same hash, different payload.
+    const collidingId = token.slice(IMAGE_TOKEN_PREFIX.length)
+    const otherUrl = `data:image/png;base64,${'C'.repeat(5000)}`
+    const otherToken = slimHistoryImages({ source: otherUrl }, store).source as string
+    expect(store.get(collidingId)).toBe(bigUrl)
+    expect(otherToken).not.toBe(token)
+    expect(store.get(otherToken.slice(IMAGE_TOKEN_PREFIX.length))).toBe(otherUrl)
+    expect(inflateHistoryImages({ a: token, b: otherToken }, store)).toEqual({ a: bigUrl, b: otherUrl })
   })
 
   it('walks nested arrays and objects', () => {
@@ -83,5 +90,40 @@ describe('inflateHistoryImages', () => {
     const store = new Map<string, string>()
     const node = { source: `${IMAGE_TOKEN_PREFIX}missing` }
     expect(inflateHistoryImages(node, store)).toEqual(node)
+  })
+})
+
+describe('pruneHistoryImageStore', () => {
+  it('does nothing while under the cap', () => {
+    const store = new Map<string, string>()
+    const snap = JSON.stringify(slimHistoryImages({ source: bigUrl }, store))
+    pruneHistoryImageStore(store, [snap], 1024 * 1024)
+    expect(store.size).toBe(1)
+  })
+
+  it('drops retired oldest entries until it fits', () => {
+    const store = new Map<string, string>()
+    const a = JSON.stringify(slimHistoryImages({ source: bigUrl }, store))
+    const bUrl = `data:image/png;base64,${'B'.repeat(5000)}`
+    const b = JSON.stringify(slimHistoryImages({ source: bUrl }, store))
+    const cUrl = `data:image/png;base64,${'C'.repeat(5000)}`
+    const c = JSON.stringify(slimHistoryImages({ source: cUrl }, store))
+    // Budget fits one 5KB payload; only snapshot `a` stays live.
+    pruneHistoryImageStore(store, [a], 6 * 1024)
+    expect(store.size).toBe(1)
+    expect(inflateHistoryImages(JSON.parse(a), store)).toEqual({ source: bigUrl })
+    // Evicted payloads were the ones behind retired snapshots b and c.
+    expect(b.length).toBeGreaterThan(0)
+    expect(c.length).toBeGreaterThan(0)
+  })
+
+  it('never drops ids still tokenized in a snapshot', () => {
+    const store = new Map<string, string>()
+    const a = JSON.stringify(slimHistoryImages({ source: bigUrl }, store))
+    const bUrl = `data:image/png;base64,${'B'.repeat(5000)}`
+    const b = JSON.stringify(slimHistoryImages({ source: bUrl }, store))
+    pruneHistoryImageStore(store, [a, b], 6 * 1024)
+    // Both snapshots are live; over-cap but nothing is safe to drop.
+    expect(store.size).toBe(2)
   })
 })
