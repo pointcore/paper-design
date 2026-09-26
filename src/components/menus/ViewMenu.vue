@@ -489,12 +489,14 @@ function onViewCmd(cmd: string) {
     case 'pixelPreview': {
       const next = !store.view.pixelPreview
       store.updateView({ pixelPreview: next })
+      engineRef?.value?.refreshGrid()
       store.setStatusMessage(next ? `Pixel preview on (${store.view.pixelRatio}x)` : 'Pixel preview off')
       break
     }
     case 'pixelRatio': {
       const next = store.view.pixelRatio === 2 ? 1 : 2
       store.updateView({ pixelRatio: next })
+      engineRef?.value?.refreshGrid()
       store.setStatusMessage(`Pixel ratio ${next}x`)
       break
     }

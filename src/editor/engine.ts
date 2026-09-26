@@ -22,7 +22,7 @@ import {
   scaleCdrImportedStrokes,
 } from './cdr/cdr-to-svg'
 import { yieldToUI, type ProgressReport } from './busy'
-import { alignToPixel } from './pixel'
+import { alignToPixel, normalizePixelRatio, pixelGridStep } from './pixel'
 import { MAX_MERGE_ROWS, mergeTemplate } from './data-merge'
 import * as history from './engine-history'
 import * as artboards from './engine-artboards'
@@ -744,7 +744,9 @@ export class EditorEngine {
    * Draw a line grid covering exactly the visible viewport.
    * `view.bounds` is already in project coordinates. The step grows
    * adaptively (always a multiple of gridSize, so lines stay on the
-   * real grid) to cap the total line count when zoomed out.
+   * real grid) to cap the total line count when zoomed out. Lines append
+   * to the (freshly cleared) grid layer; rebuild policy lives in
+   * refreshGrid's combined key.
    */
   private drawGrid(gridSize: number) {
     if (!this.gridLayer) return
@@ -757,20 +759,6 @@ export class EditorEngine {
     let step = base
     // Cap total lines so zoomed-out views stay cheap (<= ~600 Paths).
     while ((b.width / step + b.height / step) > 600) step *= 2
-
-    // Skip the rebuild when the visible grid did not change (e.g. a zoom
-    // tick that lands on the same lines, or a redundant refresh call).
-    const key = [
-      Math.floor(b.x / step),
-      Math.floor(b.y / step),
-      Math.ceil((b.x + b.width) / step),
-      Math.ceil((b.y + b.height) / step),
-      step,
-    ].join(',')
-    if (key === this.lastGridKey) return
-    this.lastGridKey = key
-
-    this.gridLayer.removeChildren()
 
     const minorColor = new this.scope.Color('#555555')
     minorColor.alpha = 0.18
@@ -821,13 +809,91 @@ export class EditorEngine {
   }
 
   /**
+   * Pixel Preview overlay (D2): one line per device pixel (1 doc unit at
+   * 1x, 0.5 at 2x), origin-aligned. Only rendered once a device pixel is
+   * several screen pixels wide — zoomed out it would be both unreadable
+   * and thousands of lines, so the view just stays clean.
+   */
+  private drawPixelGrid() {
+    if (!this.gridLayer) return
+    const v = this.scope.view
+    const b = v.bounds
+    if (!(b.width > 0) || !(b.height > 0)) return
+
+    const step = pixelGridStep(normalizePixelRatio(this.store.view.pixelRatio))
+    if (!(v.zoom * step >= 4)) return
+
+    const color = new this.scope.Color('#4a90d9')
+    color.alpha = 0.25
+    const style = {
+      strokeColor: color,
+      strokeWidth: 1 / (v.zoom || 1),
+      strokeCap: 'round' as 'round' | 'square' | 'butt',
+    }
+
+    const left = Math.floor(b.x / step) * step
+    const right = b.x + b.width
+    const top = Math.floor(b.y / step) * step
+    const bottom = b.y + b.height
+
+    for (let x = left; x <= right; x += step) {
+      const line = new this.scope.Path.Line(
+        new this.scope.Point(x, top),
+        new this.scope.Point(x, bottom)
+      )
+      line.set(style)
+      line.data.isGridItem = true
+      this.gridLayer.addChild(line)
+    }
+    for (let y = top; y <= bottom; y += step) {
+      const line = new this.scope.Path.Line(
+        new this.scope.Point(left, y),
+        new this.scope.Point(right, y)
+      )
+      line.set(style)
+      line.data.isGridItem = true
+      this.gridLayer.addChild(line)
+    }
+
+    this.gridLayer.locked = true
+  }
+
+  /**
+   * Combined rebuild key for everything the grid layer currently renders
+   * (document grid, pixel preview): a change in either view, the step or
+   * the visible window rebuilds the whole layer in one pass.
+   */
+  private viewGridsKey(): string {
+    const b = this.scope.view.bounds
+    const parts: string[] = []
+    if (this.store.view.showGrid) {
+      const base = this.store.snap.gridSize || 10
+      let step = base > 0 ? base : 10
+      while ((b.width / step + b.height / step) > 600) step *= 2
+      parts.push(
+        `g${step},${Math.floor(b.x / step)},${Math.floor(b.y / step)},` +
+        `${Math.ceil((b.x + b.width) / step)},${Math.ceil((b.y + b.height) / step)}`
+      )
+    }
+    if (this.store.view.pixelPreview) {
+      const step = pixelGridStep(normalizePixelRatio(this.store.view.pixelRatio))
+      const on = this.scope.view.zoom * step >= 4
+      parts.push(
+        `p${on ? step : 'off'},${Math.floor(b.x / step)},${Math.floor(b.y / step)},` +
+        `${Math.ceil((b.x + b.width) / step)},${Math.ceil((b.y + b.height) / step)}`
+      )
+    }
+    return parts.join('|')
+  }
+
+  /**
    * Redraw the grid based on current zoom and view settings.
    * Rebuilds are coalesced to one per animation frame so wheel-zoom and
    * pan gestures (dozens of ticks per second) never rebuild the grid
    * more than the screen can display. Hiding applies immediately.
    */
   refreshGrid() {
-    if (!this.store.view.showGrid) {
+    if (!this.store.view.showGrid && !this.store.view.pixelPreview) {
       if (this.gridRaf) {
         cancelAnimationFrame(this.gridRaf)
         this.gridRaf = 0
@@ -843,10 +909,18 @@ export class EditorEngine {
     if (this.gridRaf) return
     this.gridRaf = requestAnimationFrame(() => {
       this.gridRaf = 0
-      if (!this.store.view.showGrid) return
+      if (!this.store.view.showGrid && !this.store.view.pixelPreview) return
       const layer = this.ensureGridLayer()
       layer.visible = true
-      this.drawGrid(this.store.snap.gridSize || 10)
+      // One combined rebuild for the document grid and the pixel preview:
+      // they share the layer, so either change redraws both.
+      const key = this.viewGridsKey()
+      if (key !== this.lastGridKey) {
+        this.lastGridKey = key
+        layer.removeChildren()
+        if (this.store.view.showGrid) this.drawGrid(this.store.snap.gridSize || 10)
+        if (this.store.view.pixelPreview) this.drawPixelGrid()
+      }
       this.scope.view.update()
     })
   }
