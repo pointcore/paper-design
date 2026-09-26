@@ -117,6 +117,13 @@ const allItems = computed<PaletteItem[]>(() => {
 
 const filtered = computed(() => filterPalette(allItems.value, query.value, 12))
 
+// Typing shrinks the list; when the old selection index falls off the end
+// the highlight would vanish and Enter would silently no-op — reset to the
+// top hit instead.
+watch(filtered, (list) => {
+  if (activeIdx.value >= list.length) activeIdx.value = 0
+})
+
 function move(delta: number) {
   if (filtered.value.length === 0) return
   activeIdx.value = (activeIdx.value + delta + filtered.value.length) % filtered.value.length
