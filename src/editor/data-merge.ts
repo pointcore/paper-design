@@ -27,7 +27,9 @@ export function parseCsv(text: string, maxRows = MAX_MERGE_ROWS, maxCols = MAX_M
   let field = ''
   let row: string[] = []
   let inQuotes = false
-  const src = (text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+  // Excel's "CSV UTF-8" always starts with a BOM; left in place it would
+  // poison the first header key and silently blank every merged board.
+  const src = (text || '').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n')
 
   const pushField = () => {
     row.push(field)

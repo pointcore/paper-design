@@ -525,7 +525,16 @@ function runMerge() {
     store.setStatusMessage('Nothing to merge')
     return
   }
-  const { boards, items } = e.dataMerge(mergeRecords.value, {    titleTemplate: mergeTitle.value,
+  // A template that references fields but matches none of the CSV headers
+  // would silently stamp out identical boards — refuse and say why.
+  const wanted = [...templateFields(mergeTitle.value), ...templateFields(mergeBody.value)]
+  const known = new Set(mergeParsed.value.headers)
+  if (wanted.length > 0 && !wanted.some((f) => known.has(f))) {
+    store.setStatusMessage(`No template field matches CSV headers (${wanted.join(', ')})`)
+    return
+  }
+  const { boards, items } = e.dataMerge(mergeRecords.value, {
+    titleTemplate: mergeTitle.value,
     bodyTemplate: mergeBody.value,
   })
   persistMerge()

@@ -26,6 +26,13 @@ describe('parseCsv', () => {
     expect(out.rows).toEqual([['x\ny', '2']])
   })
 
+  it('strips a UTF-8 BOM before the first header', () => {
+    // Excel "CSV UTF-8" exports always start with a BOM.
+    const out = parseCsv('\uFEFFname,age\nAda,30\n')
+    expect(out.headers).toEqual(['name', 'age'])
+    expect(recordsFromCsv(out)).toEqual([{ name: 'Ada', age: '30' }])
+  })
+
   it('skips blank lines and trims headers', () => {
     const out = parseCsv('\n  name , age \n\nAda,30\n\n')
     expect(out.headers).toEqual(['name', 'age'])
