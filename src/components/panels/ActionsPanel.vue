@@ -752,15 +752,17 @@ function runBatchStep() {
     store.setStatusMessage('Invalid step params')
     return
   }
+  // Cap check runs BEFORE execution while recording: a step that mutates
+  // the document but never lands in the batch would desync doc and replay.
+  if (recording.value && recordedSteps.value.length >= MAX_STEPS_PER_ACTION) {
+    store.setStatusMessage(`Step cap reached (${MAX_STEPS_PER_ACTION}) — stop and save`)
+    return
+  }
   if (!runStepOnEngine(step)) {
     store.setStatusMessage(`${describeStep(step)} did nothing (check selection)`)
     return
   }
   if (recording.value) {
-    if (recordedSteps.value.length >= MAX_STEPS_PER_ACTION) {
-      store.setStatusMessage(`Step cap reached (${MAX_STEPS_PER_ACTION}) — stop and save`)
-      return
-    }
     recordedSteps.value = [...recordedSteps.value, step]
     store.setStatusMessage(`Recorded step ${recordedSteps.value.length}: ${describeStep(step)}`)
   } else {
