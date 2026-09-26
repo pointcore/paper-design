@@ -4514,8 +4514,8 @@ export class EditorEngine {
   }
 
   /** See engine-edit.ts. */
-  duplicateSelected() {
-    edit.duplicateSelected(this)
+  duplicateSelected(): boolean {
+    return edit.duplicateSelected(this)
   }
 
   /** See engine-edit.ts. */

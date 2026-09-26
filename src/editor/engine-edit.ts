@@ -19,11 +19,12 @@ export function deleteSelected(e: EditorEngine) {
   e.scope.view.update()
 }
 
-export function duplicateSelected(e: EditorEngine) {
+/** Duplicate the selection into the active layer. True when clones landed. */
+export function duplicateSelected(e: EditorEngine): boolean {
   const items = e.getSelection()
-  if (items.length === 0) return
+  if (items.length === 0) return false
   const activeLayer = e.getActiveLayer()
-  if (!activeLayer) return
+  if (!activeLayer) return false
   // Clone from a snapshot and reselect only the clones: reselecting the
   // sources too used to double the selection on every repeat (1→2→4→8).
   const clones: paper.Item[] = []
@@ -47,6 +48,7 @@ export function duplicateSelected(e: EditorEngine) {
     e.pushHistory('Duplicate')
     e.scope.view.update()
   }
+  return clones.length > 0
 }
 
 /**
