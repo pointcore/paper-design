@@ -235,15 +235,18 @@ function invalidatePanelDependents(e: EditorEngine, name: string): void {
 }
 
 /**
- * Bump the geometry version and snap cache for non-frame-safe history
- * entries (shared by pushHistory and the pushCoalescedHistory merge path,
- * which both replace document state without going through undo/redo).
+ * Bump the geometry version for non-frame-safe history entries (shared by
+ * pushHistory and the pushCoalescedHistory merge path, which both replace
+ * document state without going through undo/redo). The snap cache is
+ * invalidated unconditionally: frame-safe names keep the selection
+ * geometry, but they can still move snap sources the selection does not
+ * belong to (artboard edges/corners are anchors and alignment targets),
+ * so no history name is safe to keep the cache for.
  */
 function invalidateGeometryDependents(e: EditorEngine, name: string): void {
+  snapService.invalidateCache()
   if (!FRAME_SAFE_HISTORY.has(name)) {
     e.geometryVersion++
-    // Invalidate snap cache when document geometry changes.
-    snapService.invalidateCache()
   }
 }
 
@@ -341,6 +344,9 @@ export function jumpToHistory(e: EditorEngine, index: number): void {
   )
   e.store.setHistoryIndex(e.historyIndex)
   e.store.bumpRevision()
+  // Same contract as undo/redo: the restored document's geometry differs
+  // from the abandoned state, so cached snap anchors/targets are stale.
+  snapService.invalidateCache()
 }
 
 /** Drop the whole history stack (history panel clear action). */
