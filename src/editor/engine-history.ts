@@ -10,7 +10,7 @@
  */
 import type paper from 'paper'
 import type { EditorEngine } from './engine'
-import type { ArtboardMeta } from './types'
+import type { ArtboardMeta, GlobalColor } from './types'
 import { SnapService } from './snap/snap-service'
 import { inflateHistoryImages, pruneHistoryImageStore, slimHistoryImages } from './history-images'
 import { MAX_HISTORY_BYTES, MIN_HISTORY_ENTRIES, evictCountForBudget, snapshotByteLength } from './history-budget'
@@ -22,7 +22,11 @@ export interface HistoryDocMeta {
   activeArtboardId: string
   bleed: number
   pageSize: { width: number; height: number }
+  globalColors?: GlobalColor[]
 }
+
+/** History names whose palette state must travel with the artwork. */
+const PALETTE_LINKED_HISTORY = new Set(['Edit Global Color'])
 
 /** History entries that provably preserve selection geometry (no reset). */
 const FRAME_SAFE_HISTORY = new Set([
@@ -129,13 +133,17 @@ export function restoreSnapshot(e: EditorEngine, snapshot: string | Record<strin
 
 /**
  * Restore paper state plus, when provided, the document metadata riding
- * alongside history entries (artboards, bleed, page size) so board ops
- * participate in undo/redo like artwork ops do.
+ * alongside history entries (artboards, bleed, page size, palette) so
+ * board and global-color ops participate in undo/redo like artwork ops do.
+ * `restorePalette` is only set for palette-linked entries: the global-color
+ * list also carries out-of-history additions the user made since, and
+ * reverting those on an unrelated undo would eat them.
  */
 function restoreSnapshotWithMeta(
   e: EditorEngine,
   snapshot: string | Record<string, unknown> | unknown[],
-  meta: HistoryDocMeta | null
+  meta: HistoryDocMeta | null,
+  restorePalette = false
 ) {
   // Project#importJSON appends a fresh layer stack whenever it runs (its
   // layer-merge path only triggers for an empty active layer of matching
@@ -159,6 +167,13 @@ function restoreSnapshotWithMeta(
       if (typeof meta.activeArtboardId === 'string') {
         e.store.setActiveArtboard(meta.activeArtboardId)
       }
+    }
+    if (restorePalette && Array.isArray(meta.globalColors)) {
+      e.store.setGlobalColors(meta.globalColors.map((g) => ({ ...g })))
+      // Keep the cross-session mirror in step with the restored palette.
+      try {
+        localStorage.setItem('vve.globals', JSON.stringify(e.store.globalColors))
+      } catch { /* private mode: session palette only */ }
     }
   }
   // Paste offsets step from the source: restart the stepping after any
@@ -191,6 +206,7 @@ export function captureDocMeta(e: EditorEngine): HistoryDocMeta {
     activeArtboardId: e.store.activeArtboardId,
     bleed: Number(e.store.bleed) || 0,
     pageSize: { ...e.store.pageSize },
+    globalColors: e.store.globalColors.map((g) => ({ ...g })),
   }
 }
 
@@ -303,7 +319,8 @@ export function undo(e: EditorEngine) {
     restoreSnapshotWithMeta(
       e,
       e.historySnapshots[e.historyIndex],
-      e.historyMeta[e.historyIndex] ?? null
+      e.historyMeta[e.historyIndex] ?? null,
+      PALETTE_LINKED_HISTORY.has(e.history[e.historyIndex]?.name ?? '')
     )
     e.store.setHistoryIndex(e.historyIndex)
     e.store.bumpRevision()
@@ -318,7 +335,8 @@ export function redo(e: EditorEngine) {
     restoreSnapshotWithMeta(
       e,
       e.historySnapshots[e.historyIndex],
-      e.historyMeta[e.historyIndex] ?? null
+      e.historyMeta[e.historyIndex] ?? null,
+      PALETTE_LINKED_HISTORY.has(e.history[e.historyIndex]?.name ?? '')
     )
     e.store.setHistoryIndex(e.historyIndex)
     e.store.bumpRevision()
@@ -340,7 +358,8 @@ export function jumpToHistory(e: EditorEngine, index: number): void {
   restoreSnapshotWithMeta(
     e,
     e.historySnapshots[e.historyIndex],
-    e.historyMeta[e.historyIndex] ?? null
+    e.historyMeta[e.historyIndex] ?? null,
+    PALETTE_LINKED_HISTORY.has(e.history[e.historyIndex]?.name ?? '')
   )
   e.store.setHistoryIndex(e.historyIndex)
   e.store.bumpRevision()
