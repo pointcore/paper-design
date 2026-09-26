@@ -43,9 +43,12 @@ export function moveArtboard(
   if (!board || (board.x === x && board.y === y)) return false
   const dx = x - board.x
   const dy = y - board.y
+  // Overlap is tested against the board's SOURCE rect: updateArtboard
+  // mutates the store object in place, so reading board.x/y after it would
+  // hand back the destination rect and strand the artwork under the board.
+  const before = new e.scope.Rectangle(board.x, board.y, board.width, board.height)
   e.store.updateArtboard(boardId, { x, y })
   if (opts?.withArtwork && (dx !== 0 || dy !== 0)) {
-    const before = new e.scope.Rectangle(board.x, board.y, board.width, board.height)
     const shift = new e.scope.Point(dx, dy)
     const moved: paper.Item[] = []
     for (const layer of e.project.layers) {
