@@ -741,7 +741,7 @@ function onLayerDrop(e: DragEvent, layer: any, _displayIndex: number) {
     }
     return
   }
-  onDrop(e, _displayIndex)
+  onDrop(e, _displayIndex, layer.id)
 }
 
 function onDragOver(e: DragEvent, displayIndex: number) {
@@ -751,7 +751,7 @@ function onDragOver(e: DragEvent, displayIndex: number) {
   dropIndex.value = displayIndex
 }
 
-function onDrop(e: DragEvent, displayIndex: number) {
+function onDrop(e: DragEvent, displayIndex: number, targetLayerId?: string) {
   e.preventDefault()
   const id = draggedId.value
   onDragEnd()
@@ -761,7 +761,22 @@ function onDrop(e: DragEvent, displayIndex: number) {
   const from = order.findIndex((l) => l.id === id)
   if (from < 0) return
   order.splice(from, 1)
-  const to = Math.min(order.length, Math.max(0, order.length - displayIndex))
+  // The numeric displayIndex only counts the (possibly search-filtered)
+  // visible rows, so resolve the drop row back to its slot in the FULL
+  // top-first list before converting to a bottom-first store index.
+  const fullDisplay = [...store.layers].reverse()
+  let fullIndex: number
+  if (targetLayerId) {
+    fullIndex = fullDisplay.findIndex((l) => l.id === targetLayerId)
+    if (fullIndex < 0) return
+  } else if (displayIndex >= 0 && displayIndex < displayedLayers.value.length) {
+    const rowId = displayedLayers.value[displayIndex].id
+    fullIndex = fullDisplay.findIndex((l) => l.id === rowId)
+    if (fullIndex < 0) return
+  } else {
+    fullIndex = fullDisplay.length
+  }
+  const to = Math.min(order.length, Math.max(0, order.length - fullIndex))
   if (to === from) return
   store.reorderLayer(from, to)
   getEngine()?.moveUserLayer(id, to)
