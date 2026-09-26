@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   MIN_HISTORY_ENTRIES,
   evictCountForBudget,
+  snapshotByteLength,
 } from './history-budget'
 
 describe('evictCountForBudget', () => {
@@ -30,5 +31,25 @@ describe('evictCountForBudget', () => {
 
   it('handles empty stacks', () => {
     expect(evictCountForBudget([], 1, 100)).toBe(0)
+  })
+})
+
+describe('snapshotByteLength', () => {
+  it('counts pure-ASCII JSON as one byte per char', () => {
+    const ascii = '[["Path",{"data":1}]]'
+    expect(snapshotByteLength(ascii)).toBe(ascii.length)
+    expect(snapshotByteLength('')).toBe(0)
+    expect(snapshotByteLength(null)).toBe(0)
+  })
+
+  it('counts CJK content at its UTF-8 size, not UTF-16 units', () => {
+    // '图层' is 2 UTF-16 units but 6 UTF-8 bytes — length undercounted 3x.
+    expect(snapshotByteLength('图层')).toBe(6)
+    expect(snapshotByteLength('ab图层cd')).toBe(10)
+  })
+
+  it('counts astral surrogate pairs as 4 bytes', () => {
+    // U+1D11E is one code point (2 UTF-16 units, 4 UTF-8 bytes).
+    expect(snapshotByteLength('𝄞')).toBe(4)
   })
 })

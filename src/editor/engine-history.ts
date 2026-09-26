@@ -13,7 +13,7 @@ import type { EditorEngine } from './engine'
 import type { ArtboardMeta } from './types'
 import { SnapService } from './snap/snap-service'
 import { inflateHistoryImages, slimHistoryImages } from './history-images'
-import { MAX_HISTORY_BYTES, MIN_HISTORY_ENTRIES, evictCountForBudget } from './history-budget'
+import { MAX_HISTORY_BYTES, MIN_HISTORY_ENTRIES, evictCountForBudget, snapshotByteLength } from './history-budget'
 import { walkUserItems } from './engine-layers'
 
 /** Document metadata snapshotted alongside each history entry. */
@@ -202,7 +202,7 @@ export function pushHistory(e: EditorEngine, name: string, icon: string = '') {
   e.historyMeta = e.historyMeta.slice(0, e.historyIndex + 1)
   e.history.push({ name, icon, timestamp: Date.now() })
   e.historySnapshots.push(snapshot)
-  e.historySizes.push(snapshot?.length ?? 0)
+  e.historySizes.push(snapshotByteLength(snapshot))
   e.historyMeta.push(captureDocMeta(e))
   const limit = e.store.historyLimit || 100
   const evict = evictCountForBudget(e.historySizes, MAX_HISTORY_BYTES, limit, MIN_HISTORY_ENTRIES)
@@ -260,7 +260,7 @@ export function pushCoalescedHistory(e: EditorEngine, name: string, windowMs = 1
   if (atTop && last && last.name === name && now - last.timestamp < windowMs) {
     const snapshot = snapshotProject(e)
     e.historySnapshots[e.historyIndex] = snapshot
-    e.historySizes[e.historyIndex] = snapshot?.length ?? 0
+    e.historySizes[e.historyIndex] = snapshotByteLength(snapshot)
     e.historyMeta[e.historyIndex] = captureDocMeta(e)
     last.timestamp = now
     e.store.setHistory(e.history, e.historyIndex)

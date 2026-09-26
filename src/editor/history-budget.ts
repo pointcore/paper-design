@@ -14,6 +14,28 @@ export const MAX_HISTORY_BYTES = 30 * 1024 * 1024
 /** Never shrink the stack below this many entries for budget reasons. */
 export const MIN_HISTORY_ENTRIES = 20
 
+const NON_ASCII_RE = /[^\u0000-\u007f]/
+
+/**
+ * UTF-8 byte length of a snapshot string. `String.length` counts UTF-16
+ * code units, so non-ASCII content (CJK layer names, etc.) undercounts
+ * memory up to 3x and the byte budget evicts later than it should. Pure
+ * ASCII JSON — the common case — short-circuits to `s.length`.
+ */
+export function snapshotByteLength(s: string | null | undefined): number {
+  if (!s) return 0
+  if (!NON_ASCII_RE.test(s)) return s.length
+  let bytes = 0
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i)
+    if (c < 0x80) bytes += 1
+    else if (c < 0x800) bytes += 2
+    else if (c >= 0xd800 && c <= 0xdbff) { bytes += 4; i++ } // surrogate pair
+    else bytes += 3
+  }
+  return bytes
+}
+
 /**
  * How many oldest entries to evict so `sizes` fits both the entry-count
  * cap and the byte budget. The count cap always applies; the byte budget
