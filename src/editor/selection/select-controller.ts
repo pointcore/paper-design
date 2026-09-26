@@ -19,7 +19,6 @@ import {
   HANDLE_HEADINGS,
   isCornerHandle,
   isNearDiagonal,
-  localHandlePoint,
   nearestCorner,
   normAngle180,
   oppositeHandle,
