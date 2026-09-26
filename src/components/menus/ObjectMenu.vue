@@ -927,6 +927,12 @@ function onObjectCmd(cmd: string) {
       store.setStatusMessage(count > 0 ? `Selected ${count} text object${count === 1 ? '' : 's'}` : 'No text objects found')
       break
     }
+    case 'sameFontFamily':
+    case 'sameFontSize': {
+      const count = e.selectSameTextFont(cmd === 'sameFontFamily' ? 'family' : 'size')
+      store.setStatusMessage(count === 0 ? 'Select a text object first' : `Selected ${count} matching text item${count === 1 ? '' : 's'}`)
+      break
+    }
     case 'makeCompound':
       if (!e.makeCompoundPath()) {
         store.setStatusMessage('Compound needs at least two unlocked paths')
