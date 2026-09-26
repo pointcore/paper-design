@@ -178,6 +178,7 @@ import { useEditorStore } from '../../editor/store'
 import { withBusy, yieldToUI } from '../../editor/busy'
 import {
   defaultBoardsExport,
+  boardFilenames,
   EXPORT_FORMATS,
   EXPORT_QUALITIES,
   EXPORT_SCALES,
@@ -260,6 +261,9 @@ async function onBoardsExportConfirm() {
   const previousActive = store.activeArtboardId
   const useZip = boards.length > 1
   const zip = useZip ? new (await import('jszip')).default() : null
+  // Unique names per board: ZIP entries collide on name and jszip would
+  // silently drop the duplicate boards' files.
+  const filenames = boardFilenames(boards, boardsForm.format)
   try {
     if (boardsForm.format === 'pdf') {
       const { jsPDF } = await import('jspdf')
@@ -275,7 +279,7 @@ async function onBoardsExportConfirm() {
           compress: true,
         })
         doc.addImage(dataUrl, 'PNG', 0, 0, board.width, board.height)
-        const filename = `${board.name || 'artboard'}.pdf`
+        const filename = filenames.get(board.id) ?? `${board.name || 'artboard'}.pdf`
         if (zip) {
           zip.file(filename, doc.output('blob'))
         } else {
@@ -294,7 +298,7 @@ async function onBoardsExportConfirm() {
         const svg = e.exportBoardVectorSVG(board, { bleed: 0, marks: false })
         if (!svg) continue
         const str = new XMLSerializer().serializeToString(svg)
-        const filename = `${board.name || 'artboard'}.svg`
+        const filename = filenames.get(board.id) ?? `${board.name || 'artboard'}.svg`
         if (zip) {
           zip.file(filename, str)
         } else {
@@ -322,7 +326,7 @@ async function onBoardsExportConfirm() {
           skipped++
           continue
         }
-        const filename = `${board.name || 'artboard'}.${boardsForm.format}`
+        const filename = filenames.get(board.id) ?? `${board.name || 'artboard'}.${boardsForm.format}`
         if (zip) {
           // Convert data URL to blob for ZIP storage.
           const res = await fetch(dataUrl)
@@ -797,6 +801,7 @@ async function onExportBoardsPng() {
   }
   const previousActive = store.activeArtboardId
   const zip = boards.length > 1 ? new (await import('jszip')).default() : null
+  const filenames = boardFilenames(boards, 'png')
   try {
     let painted = 0
     let skipped = 0
@@ -807,7 +812,7 @@ async function onExportBoardsPng() {
         skipped++
         continue
       }
-      const filename = `${board.name || 'artboard'}.png`
+      const filename = filenames.get(board.id) ?? `${board.name || 'artboard'}.png`
       if (zip) {
         // A data URL cannot go into a ZIP entry directly; fetch it as a blob first.
         const res = await fetch(dataUrl)

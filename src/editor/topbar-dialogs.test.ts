@@ -6,6 +6,7 @@ import {
   EXPORT_SCALES,
   MAX_RASTER_DIM,
   PAGE_PRESETS,
+  boardFilenames,
   defaultBoardsExport,
   defaultExportForm,
   matchPagePreset,
@@ -129,5 +130,29 @@ describe('board export filtering', () => {
     expect(resolveBoardsToExport(boards, ['c', 'a', 'b'])).toEqual([boards[0], boards[2]])
     expect(resolveBoardsToExport(boards, ['b'])).toEqual([])
     expect(resolveBoardsToExport(boards, [])).toEqual([])
+  })
+})
+
+describe('boardFilenames', () => {
+  it('suffixes duplicate board names instead of colliding', () => {
+    const boards = [
+      { id: 'a', name: 'Cover', width: 10, height: 10 },
+      { id: 'b', name: 'Cover', width: 10, height: 10 },
+      { id: 'c', name: 'Back', width: 10, height: 10 },
+    ]
+    const names = boardFilenames(boards, 'svg')
+    expect(names.get('a')).toBe('Cover.svg')
+    expect(names.get('b')).toBe('Cover-2.svg')
+    expect(names.get('c')).toBe('Back.svg')
+  })
+
+  it('defaults unnamed boards and sanitizes unsafe characters', () => {
+    const boards = [
+      { id: 'a', width: 10, height: 10 },
+      { id: 'b', name: 'a/b:c', width: 10, height: 10 },
+    ]
+    const names = boardFilenames(boards, 'png')
+    expect(names.get('a')).toBe('artboard.png')
+    expect(names.get('b')).toBe('a-b-c.png')
   })
 })

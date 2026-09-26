@@ -179,3 +179,26 @@ export function selectableBoardIds<T extends ExportableBoard>(boards: T[]): stri
 export function resolveBoardsToExport<T extends ExportableBoard>(boards: T[], checked: string[]): T[] {
   return boards.filter((b) => checked.includes(b.id) && b.width > 0 && b.height > 0)
 }
+
+/**
+ * Unique per-board export filenames keyed by board id. ZIP entries collide
+ * on name and jszip overwrites silently, so the second "Cover" becomes
+ * "Cover-2" instead of dropping that board's file. Names are sanitized
+ * like the raster asset exports.
+ */
+export function boardFilenames<T extends ExportableBoard & { name?: string }>(
+  boards: T[],
+  extension: string,
+): Map<string, string> {
+  const clean = (name: string) => name.replace(/[\/:*?"<>|]+/g, '-').slice(0, 40)
+  const used = new Set<string>()
+  const out = new Map<string, string>()
+  for (const b of boards) {
+    const base = clean(b.name || 'artboard') || 'artboard'
+    let candidate = `${base}.${extension}`
+    for (let n = 2; used.has(candidate); n++) candidate = `${base}-${n}.${extension}`
+    used.add(candidate)
+    out.set(b.id, candidate)
+  }
+  return out
+}
