@@ -49,7 +49,7 @@
         <el-button size="small" class="grid-btn" @click="runPreset">Run</el-button>
       </div>
       <div class="row">
-        <el-input v-model="presetName" size="small" placeholder="Save current area + format as preset" @keyup.enter="savePreset" />
+        <el-input v-model="presetName" size="small" placeholder="Save current area, format + scales as preset" @keyup.enter="savePreset" />
         <el-button size="small" class="grid-btn" @click="savePreset">Save</el-button>
       </div>
       <div v-for="p in customPresets" :key="p.id" class="sc-row">
@@ -342,6 +342,10 @@ function downloadHref(href: string, filename: string) {
   a.remove()
 }
 
+// Scales the user actually exported with most recently (1x/2x/3x buttons
+// or the full-set ZIP) — presets snapshot this instead of a hardcoded [1].
+const lastExportScales = ref<number[]>([1])
+
 function exportOne(scale: number) {
   const e = engineRef?.value
   if (!e) return
@@ -352,6 +356,7 @@ function exportOne(scale: number) {
   try {
     const url = e.exportRaster({ format: format.value, scale, area: area.value })
     if (!url) { store.setStatusMessage('Raster export failed'); return }
+    lastExportScales.value = [scale]
     // Page-area exports carry the board name so multi-board files sort apart.
     const label = area.value === 'page'
       ? (store.activeArtboard?.name || 'page').replace(/[\/:*?"<>|]+/g, '-').slice(0, 40)
@@ -383,6 +388,7 @@ async function exportAll(scales: number[] = [1, 2, 3]) {
     exported++
   }
   if (exported > 0) {
+    lastExportScales.value = [...scales]
     const blob = await zip.generateAsync({ type: 'blob' })
     downloadHref(URL.createObjectURL(blob), 'assets-export.zip')
     store.setStatusMessage(`Exported ${exported} assets as ZIP`)
@@ -410,7 +416,7 @@ function savePreset() {
   const clean = presetName.value.trim().slice(0, 40) || `Preset ${customPresets.value.length + 1}`
   const id = `preset-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`
   customPresets.value = [
-    { id, name: clean, area: area.value, format: format.value, scales: [1] },
+    { id, name: clean, area: area.value, format: format.value, scales: [...lastExportScales.value] },
     ...customPresets.value,
   ].slice(0, 24)
   presetId.value = id
