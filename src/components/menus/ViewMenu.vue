@@ -683,4 +683,37 @@ function onNudgeStepChange(val: number | undefined) {
   background: #3a3a3a;
   color: #fff;
 }
+
+/* Canvas Settings page-size row: keep W/Swap/H on one line with equal
+   input widths (rules lost when the dialog moved out of TopBar). */
+.page-size-inputs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.page-size-inputs .el-input-number {
+  width: 90px;
+}
+
+/* Preflight rows: tag + message side by side, clickable rows give
+   hover feedback and the message fills the remaining width. */
+.preflight-row {
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.preflight-row.clickable {
+  cursor: pointer;
+}
+
+.preflight-row.clickable:hover .setting-desc {
+  color: #d5d5d5;
+}
+
+.preflight-row .setting-desc {
+  flex: 1;
+  margin-top: 0;
+  line-height: 1.5;
+}
 </style>
