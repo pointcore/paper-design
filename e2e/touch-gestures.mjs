@@ -115,6 +115,41 @@ check('pinch-in zooms out', z2 < z1 / 1.2, `${z1} → ${z2}`)
   check('Escape closes the menu', await menu.isHidden())
 }
 
+/* ---------- second finger commits the in-flight tool gesture ---------- */
+// A mouse-driven drag starts a shape preview; when the second finger lands
+// the pinch's preventDefault suppresses the rest of the compat mouse
+// stream, so a synthesized mouseup must commit the shape. (CDP touches
+// carry no compat mouse events, so the in-flight gesture starts via the
+// real mouse path — the same state a finger's mousedown leaves behind.)
+{
+  await page.evaluate(() => {
+    const s = window.__store__
+    const e = window.__engine__
+    s.setTool('rect')
+    e.setTool('rect')
+  })
+  const c = await canvasCenter()
+  const b = [c.x + 120, c.y + 80]
+  await page.mouse.move(c.x - 120, c.y - 80)
+  await page.mouse.down()
+  await page.mouse.move(c.x - 20, c.y - 10, { steps: 2 }) // drag the preview out
+  await touch('touchStart', [[c.x - 20, c.y - 10], b]) // second finger lands
+  await page.waitForTimeout(80)
+  const committed = await page.evaluate(() => {
+    const h = window.__store__.history
+    return h.length > 0 ? h[h.length - 1].name : ''
+  })
+  check('second finger commits the in-flight rectangle', committed === 'Draw Shape', committed)
+  // Pinch keeps working after the commit.
+  const z3 = await storeZoom()
+  await touch('touchMove', [[c.x - 150, c.y - 100], b])
+  await page.waitForTimeout(50)
+  await touch('touchEnd', [])
+  const z4 = await storeZoom()
+  check('pinch still zooms after the commit', z4 > z3 * 1.05, `${z3} → ${z4}`)
+  await page.mouse.up()
+}
+
 await browser.close()
 
 const failed = results.filter((r) => !r.ok)

@@ -439,6 +439,29 @@ function cancelLongPress() {
   longPressMoved = 0
 }
 
+/**
+ * Finish whatever gesture the first finger started. Paper's tools act on
+ * the compatibility mouse stream, which is suppressed the moment a pinch
+ * preventDefaults its touchmove — without a synthesized mouseup the active
+ * drag (marquee, pen segment, shape preview…) hangs until the next real
+ * mouse event. Stray mouseups (no gesture in flight) are ignored by the
+ * controllers' own guards.
+ */
+function endInFlightToolGesture(x: number, y: number) {
+  const canvas = canvasRef.value
+  if (!canvas) return
+  canvas.dispatchEvent(
+    new MouseEvent('mouseup', {
+      bubbles: true,
+      cancelable: true,
+      clientX: x,
+      clientY: y,
+      button: 0,
+      buttons: 0,
+    }),
+  )
+}
+
 function findTouch(e: TouchEvent, id: number): Touch | null {
   for (let i = 0; i < e.touches.length; i++) {
     if (e.touches[i].identifier === id) return e.touches[i]
@@ -449,9 +472,11 @@ function findTouch(e: TouchEvent, id: number): Touch | null {
 function onTouchStart(e: TouchEvent) {
   if (!engine || !canvasRef.value) return
   if (e.touches.length === 2) {
-    // A second finger takes over: pinch replaces any hold tracking.
+    // A second finger takes over: end whatever the first finger started,
+    // then pinch replaces any hold tracking.
     const a = e.touches[0]
     const b = e.touches[1]
+    endInFlightToolGesture(a.clientX, a.clientY)
     pinchIds = [a.identifier, b.identifier]
     pinchLast = [touchClient(a), touchClient(b)]
     cancelLongPress()
@@ -467,6 +492,9 @@ function onTouchStart(e: TouchEvent) {
       // re-check against the policy instead of trusting the delay.
       if (anchor && isLongPress(performance.now() - anchor.at, longPressMoved)) {
         suppressMenuDismiss = true
+        // The tool already saw mousedown; end the gesture so the menu
+        // opens over an idle tool instead of a held-down one.
+        endInFlightToolGesture(anchor.x, anchor.y)
         showMenuAt(anchor.x, anchor.y)
       }
       longPressAnchor = null
