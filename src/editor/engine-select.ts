@@ -573,3 +573,65 @@ export function reselect(e: EditorEngine): number {
   if (ids.length === 0) return 0
   return selectByIds(e, ids)
 }
+
+/**
+ * Select stray points (paths with at most one anchor) across all
+ * unlocked visible artwork. Returns how many were selected.
+ */
+export function selectStrays(e: EditorEngine): number {
+  const scope = e.scope
+  const strays: paper.Item[] = []
+  const walk = (node: paper.Item) => {
+    const data = (node as any).data ?? {}
+    if (data.isChrome || data.isPreview || data.isGuide || data.isArtboard || data.annotation) return
+    if (data.isPatternTile || (node as any).clipMask) return
+    if ((node as any).visible === false || (node as any).locked) return
+    if (node instanceof scope.Path && !(node instanceof scope.CompoundPath)) {
+      if (node.segments.length <= 1) strays.push(node)
+      return
+    }
+    const children = (node as any).children as paper.Item[] | undefined
+    if (children) for (const child of children) walk(child)
+  }
+  for (const layer of e.project.layers) {
+    if (!(layer.data as any)?.isUserLayer || !layer.visible) continue
+    for (const child of layer.children) walk(child as paper.Item)
+  }
+  e.clearSelection()
+  strays.forEach((item) => {
+    item.selected = true
+  })
+  e.syncSelectionToStore()
+  e.scope.view.update()
+  return strays.length
+}
+
+/**
+ * Select every text object (annotation labels excluded). Returns count.
+ */
+export function selectTextObjects(e: EditorEngine): number {
+  const scope = e.scope
+  const texts: paper.Item[] = []
+  const walk = (node: paper.Item) => {
+    const data = (node as any).data ?? {}
+    if (data.isChrome || data.isPreview || data.isGuide || data.isArtboard || data.annotation) return
+    if ((node as any).visible === false || (node as any).locked) return
+    if (node instanceof scope.PointText) {
+      texts.push(node)
+      return
+    }
+    const children = (node as any).children as paper.Item[] | undefined
+    if (children) for (const child of children) walk(child)
+  }
+  for (const layer of e.project.layers) {
+    if (!(layer.data as any)?.isUserLayer || !layer.visible) continue
+    for (const child of layer.children) walk(child as paper.Item)
+  }
+  e.clearSelection()
+  texts.forEach((item) => {
+    item.selected = true
+  })
+  e.syncSelectionToStore()
+  e.scope.view.update()
+  return texts.length
+}

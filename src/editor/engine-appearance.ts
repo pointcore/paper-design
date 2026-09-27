@@ -461,3 +461,24 @@ export function invertPaints(e: EditorEngine): number {
   }
   return changed
 }
+
+/**
+ * Swap fill and stroke paints on the defaults and every unlocked selected
+ * item (AI Shift+X parity, same per-item semantics the color bar always
+ * had). One history entry when art changes.
+ */
+export function swapFillStroke(e: EditorEngine): void {
+  const f = e.store.style.fillColor
+  const s = e.store.style.strokeColor
+  e.store.updateStyle({ fillColor: s, strokeColor: f })
+  const items = e.getSelection().filter((item) => !item.locked && item.parent)
+  for (const item of items) {
+    const anyItem = item as any
+    const pf = anyItem.fillColor
+    anyItem.fillColor = anyItem.strokeColor ?? null
+    if (anyItem.strokeColor !== undefined) anyItem.strokeColor = pf ?? null
+  }
+  e.scope.view.update()
+  if (items.length > 0) e.pushHistory('Swap Fill Stroke')
+  else e.showStatus('Fill and stroke swapped')
+}

@@ -3081,25 +3081,9 @@ export class EditorEngine {
     return appearance.invertPaints(this)
   }
 
-  /**
-   * Swap fill and stroke everywhere: store defaults plus every unlocked
-   * selected item (AI Shift+X parity, same per-item semantics the color
-   * bar always had). One history entry when art changes.
-   */
+  /** See engine-appearance.ts. */
   swapFillStroke(): void {
-    const f = this.store.style.fillColor
-    const s = this.store.style.strokeColor
-    this.store.updateStyle({ fillColor: s, strokeColor: f })
-    const items = this.getSelection().filter((item) => !item.locked && item.parent)
-    for (const item of items) {
-      const anyItem = item as any
-      const pf = anyItem.fillColor
-      anyItem.fillColor = anyItem.strokeColor ?? null
-      if (anyItem.strokeColor !== undefined) anyItem.strokeColor = pf ?? null
-    }
-    this.scope.view.update()
-    if (items.length > 0) this.pushHistory('Swap Fill Stroke')
-    else this.showStatus('Fill and stroke swapped')
+    appearance.swapFillStroke(this)
   }
 
   /** See engine-pathops.ts. */
@@ -3107,66 +3091,14 @@ export class EditorEngine {
     return pathops.addArrowheads(this, start, end, length)
   }
 
-  /**
-   * Select stray points (paths with at most one anchor) across all
-   * unlocked visible artwork. Returns how many were selected.
-   */
+  /** See engine-select.ts. */
   selectStrays(): number {
-    const scope = this.scope
-    const strays: paper.Item[] = []
-    const walk = (node: paper.Item) => {
-      const data = (node as any).data ?? {}
-      if (data.isChrome || data.isPreview || data.isGuide || data.isArtboard || data.annotation) return
-      if (data.isPatternTile || (node as any).clipMask) return
-      if ((node as any).visible === false || (node as any).locked) return
-      if (node instanceof scope.Path && !(node instanceof scope.CompoundPath)) {
-        if (node.segments.length <= 1) strays.push(node)
-        return
-      }
-      const children = (node as any).children as paper.Item[] | undefined
-      if (children) for (const child of children) walk(child)
-    }
-    for (const layer of this.project.layers) {
-      if (!(layer.data as any)?.isUserLayer || !layer.visible) continue
-      for (const child of layer.children) walk(child as paper.Item)
-    }
-    this.clearSelection()
-    strays.forEach((item) => {
-      item.selected = true
-    })
-    this.syncSelectionToStore()
-    this.scope.view.update()
-    return strays.length
+    return select.selectStrays(this)
   }
 
-  /**
-   * Select every text object (annotation labels excluded). Returns count.
-   */
+  /** See engine-select.ts. */
   selectTextObjects(): number {
-    const scope = this.scope
-    const texts: paper.Item[] = []
-    const walk = (node: paper.Item) => {
-      const data = (node as any).data ?? {}
-      if (data.isChrome || data.isPreview || data.isGuide || data.isArtboard || data.annotation) return
-      if ((node as any).visible === false || (node as any).locked) return
-      if (node instanceof scope.PointText) {
-        texts.push(node)
-        return
-      }
-      const children = (node as any).children as paper.Item[] | undefined
-      if (children) for (const child of children) walk(child)
-    }
-    for (const layer of this.project.layers) {
-      if (!(layer.data as any)?.isUserLayer || !layer.visible) continue
-      for (const child of layer.children) walk(child as paper.Item)
-    }
-    this.clearSelection()
-    texts.forEach((item) => {
-      item.selected = true
-    })
-    this.syncSelectionToStore()
-    this.scope.view.update()
-    return texts.length
+    return select.selectTextObjects(this)
   }
 
   /**
