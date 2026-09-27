@@ -1045,7 +1045,10 @@ export class SelectController {
         const anchor = seg.point
         const hi = seg.handleIn as paper.Point | null
         const ho = seg.handleOut as paper.Point | null
-        if (hi) {
+        // Paper reports zero-length handles on straight segments; they sit
+        // exactly on the anchor and must not win the handle > anchor
+        // priority (they made anchors on straight paths ungrabbable).
+        if (hi && hi.length > 1e-9) {
           const hp = anchor.add(hi)
           if (hp.getDistance(event.point) <= tol) {
             this.ensureEditedPath(path)
@@ -1057,7 +1060,7 @@ export class SelectController {
             return true
           }
         }
-        if (ho) {
+        if (ho && ho.length > 1e-9) {
           const hp = anchor.add(ho)
           if (hp.getDistance(event.point) <= tol) {
             this.ensureEditedPath(path)
