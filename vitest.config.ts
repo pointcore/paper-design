@@ -14,6 +14,9 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
+    // jsdom has no 2D canvas: Paper.js would throw at import time. The
+    // setup file hands out a no-op context when no real backend exists.
+    setupFiles: ['./src/test-setup.ts'],
     include: ['src/**/*.test.ts'],
     exclude: ['node_modules', 'dist', 'tests/e2e/**'],
     reporters: ['default'],

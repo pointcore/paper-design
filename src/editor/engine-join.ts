@@ -64,16 +64,37 @@ export function mergePathsEndToEnd(
   const rawAt = parent.children.indexOf(first)
   const at = rawAt < 0 ? parent.children.length : rawAt
   const merged = new scope.Path({ insert: false }) as paper.Path
+  const walk: paper.Segment[] = []
   const pushOriented = (path: paper.Path, useFirst: boolean) => {
     const segs = path.segments
     if (!useFirst) {
-      for (const seg of segs) merged.add(cloneSegment(e, seg))
+      for (const seg of segs) walk.push(cloneSegment(e, seg))
     } else {
-      for (let i = segs.length - 1; i >= 0; i--) merged.add(reversedSegment(e, segs[i]))
+      for (let i = segs.length - 1; i >= 0; i--) walk.push(reversedSegment(e, segs[i]))
     }
   }
   pushOriented(first, firstUsesFirst)
+  const junctionAt = walk.length
   pushOriented(second, secondUsesFirst)
+  // Coincident ends merge into one anchor: the junction keeps the incoming
+  // handle of the first walk and the outgoing handle of the second, so both
+  // adjoining curves keep their shape and no degenerate zero-length span
+  // is left behind (docstring: "coincident ends merge cleanly").
+  if (
+    junctionAt > 0 && junctionAt < walk.length &&
+    walk[junctionAt - 1].point.getDistance(walk[junctionAt].point) < 1e-6
+  ) {
+    walk.splice(
+      junctionAt - 1,
+      2,
+      new scope.Segment(
+        walk[junctionAt - 1].point.clone(),
+        walk[junctionAt - 1].handleIn ? walk[junctionAt - 1].handleIn.clone() : undefined,
+        walk[junctionAt].handleOut ? walk[junctionAt].handleOut.clone() : undefined
+      )
+    )
+  }
+  for (const seg of walk) merged.add(seg)
   merged.closed = false
   first.remove()
   second.remove()
