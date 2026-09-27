@@ -18,6 +18,8 @@ const noop: unknown = new Proxy(function () {}, {
   set: () => true,
 })
 
+// Node-environment test files have no DOM globals at all; leave them alone.
+if (typeof HTMLCanvasElement !== 'undefined') {
 const originalGetContext = HTMLCanvasElement.prototype.getContext
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -26,3 +28,4 @@ HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, ...a
   return ctx ?? noop
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
 } as any
+}
