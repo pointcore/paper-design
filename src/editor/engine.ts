@@ -41,6 +41,7 @@ import * as exporter from './engine-export'
 import * as images from './engine-images'
 import * as transforms from './engine-transforms'
 import * as pathops from './engine-pathops'
+import * as clipboard from './engine-clipboard'
 import * as arrange from './engine-arrange'
 import * as envelope from './engine-envelope'
 import * as masks from './engine-masks'
@@ -2742,144 +2743,46 @@ export class EditorEngine {
   // ===== Clipboard =====
 
   /** Detached clones of the most recent copy / cut selection. */
-  private clipboardItems: paper.Item[] = []
+  /** Internal-public (engine-clipboard reaches it); see F4 slice pattern. */
+  clipboardItems: paper.Item[] = []
   /** Owning user-layer id per clipboard entry (AI paste-remembers-layer). */
-  private clipboardLayerIds: string[] = []
+  /** Internal-public (engine-clipboard reaches it); see F4 slice pattern. */
+  clipboardLayerIds: string[] = []
   /** Active-board origin at copy time (paste-on-all-boards anchor). */
-  private clipboardBoard: { x: number; y: number } = { x: 0, y: 0 }
+  /** Internal-public (engine-clipboard reaches it); see F4 slice pattern. */
+  clipboardBoard: { x: number; y: number } = { x: 0, y: 0 }
   /** How many pastes have been made from the current clipboard content. */
-  private pasteCount = 0
+  /** Internal-public (engine-clipboard reaches it); see F4 slice pattern. */
+  pasteCount = 0
 
-  /** Restart paste-offset stepping (history restores land back at the source). */
+  /** See engine-clipboard.ts. */
   resetPasteOffset(): void {
-    this.pasteCount = 0
+    clipboard.resetPasteOffset(this)
   }
 
-  /**
-   * Copy the current selection onto the internal clipboard as detached
-   * clones. Returns how many items were copied. This stays synchronous for
-   * instant in-app use; system clipboard exchange lives in
-   * copyToSystemClipboard / pasteWithSystemFallback.
-   */
+  /** See engine-clipboard.ts. */
   copySelectedToClipboard(): number {
-    const items = this.getSelection().filter((item) => (item.data as any)?.isUserItem)
-    this.clipboardItems = items.map((item) => item.clone({ insert: false }))
-    this.clipboardLayerIds = items.map((item) => this.getItemLayerId((item.data as any)?.id ?? ''))
-    const board = this.store.activeArtboard
-    this.clipboardBoard = board ? { x: board.x, y: board.y } : { x: 0, y: 0 }
-    this.pasteCount = 0
-    return this.clipboardItems.length
+    return clipboard.copySelectedToClipboard(this)
   }
 
-  /** Cut = copy onto the clipboard, then delete the selection. */
+  /** See engine-clipboard.ts. */
   cutSelectedToClipboard(): void {
-    if (this.copySelectedToClipboard() === 0) return
-    this.deleteSelected()
+    clipboard.cutSelectedToClipboard(this)
   }
 
-  /**
-   * Resolve the paste target for a clipboard entry: its source layer when
-   * that layer still exists, is visible and unlocked (AI remembers layers),
-   * else the active layer.
-   */
-  private pasteTargetLayer(layerId: string): paper.Layer {
-    // AI Layers-panel option: off means every paste lands on the active
-    // layer regardless of where the copy was taken from.
-    if (!this.store.pasteRemembersLayers) return this.getActiveLayer()
-    const found = this.project.layers.find(
-      (l) => (l.data as any)?.isUserLayer && (l.data as any)?.layerId === layerId
-    ) as paper.Layer | undefined
-    if (found && found.visible && !found.locked) return found
-    return this.getActiveLayer()
-  }
-
-  /**
-   * Paste the internal clipboard in place (no offset), stacked at the very
-   * front or back of each entry's layer. Returns false when it is empty.
-   */
+  /** See engine-clipboard.ts. */
   pasteInPlace(where: 'front' | 'back'): boolean {
-    if (this.clipboardItems.length === 0) return false
-    const pasted: paper.Item[] = []
-    for (let i = 0; i < this.clipboardItems.length; i++) {
-      const source = this.clipboardItems[i]
-      const layer = this.pasteTargetLayer(this.clipboardLayerIds[i] ?? '')
-      const clone = source.clone({ insert: false })
-      layer.addChild(clone)
-      this.restampCloneTree(clone)
-      clone.data.id = this.genId()
-      clone.data.isUserItem = true
-      if (where === 'front') clone.bringToFront()
-      else clone.sendToBack()
-      pasted.push(clone)
-    }
-    this.clearSelection()
-    pasted.forEach((item) => (item.selected = true))
-    this.syncSelectionToStore()
-    this.pushHistory(where === 'front' ? 'Paste in Front' : 'Paste in Back')
-    this.scope.view.update()
-    return true
+    return clipboard.pasteInPlace(this, where)
   }
 
-  /**
-   * Paste the clipboard clones into their source layers. Each paste is
-   * offset by a small step so repeated pastes do not stack exactly on top
-   * of the source, and the pasted items become the new selection.
-   */
+  /** See engine-clipboard.ts. */
   pasteClipboard(): void {
-    if (this.clipboardItems.length === 0) return
-    // Each paste steps one increment further from the source position.
-    this.pasteCount++
-    const offset = new this.scope.Point(10 * this.pasteCount, 10 * this.pasteCount)
-    const pasted: paper.Item[] = []
-    for (let i = 0; i < this.clipboardItems.length; i++) {
-      const source = this.clipboardItems[i]
-      const layer = this.pasteTargetLayer(this.clipboardLayerIds[i] ?? '')
-      const clone = source.clone({ insert: false })
-      layer.addChild(clone)
-      this.restampCloneTree(clone)
-      clone.data.id = this.genId()
-      clone.data.isUserItem = true
-      clone.position = (clone.position as paper.Point).add(offset)
-      pasted.push(clone)
-    }
-    this.clearSelection()
-    pasted.forEach((item) => (item.selected = true))
-    this.syncSelectionToStore()
-    this.pushHistory('Paste')
-    this.scope.view.update()
+    clipboard.pasteClipboard(this)
   }
 
-  /**
-   * Paste the clipboard onto every artboard (AI Paste on All Artboards
-   * parity): each board gets the copies shifted by its origin delta from
-   * the copy-time board. All pastes become the selection; one history.
-   * Returns pastes made.
-   */
+  /** See engine-clipboard.ts. */
   pasteOnAllBoards(): number {
-    if (this.clipboardItems.length === 0) return 0
-    const boards = this.store.artboards.filter((b) => b.width > 0 && b.height > 0)
-    if (boards.length === 0) return 0
-    const pasted: paper.Item[] = []
-    for (const board of boards) {
-      const delta = new this.scope.Point(board.x - this.clipboardBoard.x, board.y - this.clipboardBoard.y)
-      for (let i = 0; i < this.clipboardItems.length; i++) {
-        const layer = this.pasteTargetLayer(this.clipboardLayerIds[i] ?? '')
-        const clone = this.clipboardItems[i].clone({ insert: false })
-        layer.addChild(clone)
-        this.restampCloneTree(clone)
-        clone.data.id = this.genId()
-        clone.data.isUserItem = true
-        clone.position = (clone.position as paper.Point).add(delta)
-        pasted.push(clone)
-      }
-    }
-    if (pasted.length === 0) return 0
-    this.clearSelection()
-    pasted.forEach((item) => (item.selected = true))
-    this.syncSelectionToStore()
-    this.pushHistory('Paste on All Artboards')
-    this.scope.view.update()
-    return pasted.length
+    return clipboard.pasteOnAllBoards(this)
   }
 
   // ===== System clipboard (SVG exchange) =====
@@ -3237,100 +3140,29 @@ export class EditorEngine {
     return placed
   }
 
+  /** Payload of our last OS clipboard write (external-copy detection). */
+  /** Internal-public (engine-clipboard reaches it); see F4 slice pattern. */
+  lastSystemWrite = ''
+
   /** OS clipboard handle, or null outside secure contexts. */
   private systemClipboard(): Clipboard | null {
     if (typeof navigator === 'undefined') return null
     return navigator.clipboard ?? null
   }
 
-  /** Payload of our last OS clipboard write (external-copy detection). */
-  private lastSystemWrite = ''
-
-  /**
-   * Best-effort copy of the current selection to the OS clipboard as SVG so
-   * artwork can move to other applications. Falls back from the SVG MIME
-   * type to plain text. Resolves false when nothing is selected, the API is
-   * unavailable or the write is denied.
-   */
+  /** See engine-clipboard.ts. */
   async copyToSystemClipboard(): Promise<boolean> {
-    const svg = this.exportSelectionSVG()
-    if (!svg) return false
-    // Remember our own payload so pastes can tell external SVG copies
-    // apart from the echo of our last in-app copy.
-    this.lastSystemWrite = svg
-    const clipboard = this.systemClipboard()
-    if (!clipboard) return false
-    try {
-      if (typeof ClipboardItem !== 'undefined' && clipboard.write) {
-        const clipboardItem = new ClipboardItem({
-          'image/svg+xml': new Blob([svg], { type: 'image/svg+xml' }),
-          'text/plain': new Blob([svg], { type: 'text/plain' }),
-        })
-        await clipboard.write([clipboardItem])
-        return true
-      }
-    } catch {
-      // Fall through to the plain-text write below.
-    }
-    try {
-      await clipboard.writeText(svg)
-      return true
-    } catch {
-      return false
-    }
+    return clipboard.copyToSystemClipboard(this)
   }
 
-  /**
-   * Paste SVG artwork from the OS clipboard. Returns false when the
-   * clipboard is unavailable, holds no SVG or the payload is unusable, in
-   * which case callers fall back to the internal clipboard.
-   */
+  /** See engine-clipboard.ts. */
   async pasteFromSystemClipboard(): Promise<boolean> {
-    const clipboard = this.systemClipboard()
-    if (!clipboard || !clipboard.readText) return false
-    const text = await clipboard.readText()
-    if (!text || !/<svg[\s>]/i.test(text.trim().slice(0, 4096))) return false
-    try {
-      return this.importSVGText(text, 'Paste')
-    } catch {
-      return false
-    }
+    return clipboard.pasteFromSystemClipboard(this)
   }
 
-  /**
-   * Paste entry point: the lossless internal clipboard first (OS
-   * round-tripping through SVG drops Paper-only state like pattern fills
-   * and thread links), OS clipboard SVG for cross-app pastes, nothing when
-   * both are empty. An OS SVG payload we never wrote shadows stale
-   * internal content (copied in-app, then copied elsewhere). Denied OS
-   * access silently falls through.
-   */
+  /** See engine-clipboard.ts. */
   async pasteWithSystemFallback(): Promise<void> {
-    if (this.clipboardItems.length > 0) {
-      try {
-        const clipboard = this.systemClipboard()
-        if (clipboard?.readText) {
-          const text = await clipboard.readText()
-          if (
-            text &&
-            /<svg[\s>]/i.test(text.trim().slice(0, 4096)) &&
-            text !== this.lastSystemWrite &&
-            (await this.pasteFromSystemClipboard())
-          ) {
-            return
-          }
-        }
-      } catch {
-        // Denied or unavailable OS access -> internal paste below.
-      }
-      this.pasteClipboard()
-      return
-    }
-    try {
-      if (await this.pasteFromSystemClipboard()) return
-    } catch {
-      // Denied or unavailable OS access -> nothing to paste below.
-    }
+    return clipboard.pasteWithSystemFallback(this)
   }
 
   /** See engine-edit.ts. */
