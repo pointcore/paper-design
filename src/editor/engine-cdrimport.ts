@@ -10,6 +10,7 @@
 import type paper from 'paper'
 import type { CdrImportResult, EditorEngine } from './engine'
 import type { ArtboardMeta } from './types'
+import type { CdrPage } from './cdr/cdr-to-svg'
 import { yieldToUI, type ProgressReport } from './busy'
 import {
   parseCdrBytes,
@@ -66,6 +67,8 @@ export async function openCdrBytes(
   const allItems: paper.Item[] = []
   let skippedPages = 0
   let patternApprox = 0
+  const layeredImport = doc.pages.some((p) => p.layers?.length)
+  const seededLayer = layeredImport ? e.getActiveLayer() : null
   for (let k = 0; k < doc.pages.length; k++) {
     const page = doc.pages[k]
     const wPx = Math.min(16384, Math.max(1, Math.round(cdrMmToPx(page.width))))
@@ -82,7 +85,7 @@ export async function openCdrBytes(
       // Canvas import takes 60-90% (Paper.js importSVG is synchronous).
       report(0.6 + (0.3 * k) / Math.max(1, doc.pages.length), `Importing page ${k + 1}…`)
       await yieldToUI()
-      const items = importCdrPageSvg(e, page.svg, page.width, page.height, board.x, board.y)
+      const items = importPageItems(e, page, k, board, doc.pages.length > 1)
       // Only successful pages take a board and advance the row: failed
       // pages leave neither a blank sheet nor a gap behind.
       boards.push(board)
@@ -115,6 +118,15 @@ export async function openCdrBytes(
     e.scope.view.update()
     e.emitViewChange()
     throw new Error('No convertible pages found')
+  }
+  if (layeredImport && (seededLayer?.children?.length ?? 0) === 0) {
+    // Layered files bring their own layer names; drop the seeded empty
+    // default layer instead of leaving an unused "Layer 1" behind.
+    seededLayer?.remove()
+    const users = e.project.layers.filter((l) => (l.data as any)?.isUserLayer)
+    const top = users[users.length - 1]
+    top?.activate()
+    if (top) e.store.setActiveLayer(top.data.layerId as string)
   }
   report(0.92, 'Arranging artboards…')
   await yieldToUI()
@@ -196,7 +208,7 @@ export async function importCdrBytes(
     try {
       report(0.6 + (0.3 * k) / Math.max(1, doc.pages.length), `Importing page ${k + 1}…`)
       await yieldToUI()
-      const items = importCdrPageSvg(e, page.svg, page.width, page.height, board.x, board.y)
+      const items = importPageItems(e, page, k, board, doc.pages.length > 1)
       boards.push(board)
       cursorX += wPx + GAP
       allItems.push(...items)
@@ -225,6 +237,62 @@ export async function importCdrBytes(
 }
 
 /**
+ * Import one parsed page. Layered pages put each CDR layer on its own new
+ * editor layer (bottom-first paint order; layers that render to nothing are
+ * dropped); layerless pages land on the active layer as before. Returns the
+ * placed top-level items, or throws when nothing was convertible.
+ */
+function importPageItems(
+  e: EditorEngine,
+  page: CdrPage,
+  pageIndex: number,
+  board: ArtboardMeta,
+  multiPage: boolean
+): paper.Item[] {
+  if (!page.layers?.length) {
+    return importCdrPageSvg(e, page.svg, page.width, page.height, board.x, board.y)
+  }
+  const items: paper.Item[] = []
+  for (let li = 0; li < page.layers.length; li++) {
+    const pl = page.layers[li]
+    const name = pageLayerName(pl.name, pl.kind, li)
+    const target = createCdrLayer(e, multiPage ? `p${pageIndex + 1} ${name}` : name)
+    const placed = importCdrPageSvg(e, pl.svg, page.width, page.height, board.x, board.y, target)
+    if (placed.length === 0) target.remove()
+    else items.push(...placed)
+  }
+  if (items.length === 0) throw new Error('Empty CDR page')
+  return items
+}
+
+/** Fallback layer name when the file omits arg1000 for a layer. */
+function pageLayerName(name: string, kind: number, layerIndex: number): string {
+  if (name) return name
+  if (kind === 17) return 'Desktop'
+  if (kind === 11) return 'Grid'
+  return `Layer ${layerIndex + 1}`
+}
+
+/**
+ * Create a user layer for an imported CDR layer. No history entry and no
+ * store sync (the caller batches both); placed on top of the user band per
+ * createLayer's rule, so importing bottom-first yields the original stack.
+ */
+function createCdrLayer(e: EditorEngine, name: string): paper.Layer {
+  const layer = new e.scope.Layer()
+  layer.name = name
+  layer.data.isUserLayer = true
+  layer.data.layerId = e.genId()
+  const users = e.project.layers.filter((l) => (l.data as any)?.isUserLayer && l !== layer)
+  if (users.length > 0) layer.insertAbove(users[users.length - 1])
+  else {
+    const chrome = e.project.layers.find((l) => !(l.data as any)?.isUserLayer && l !== layer)
+    if (chrome) layer.insertBelow(chrome)
+  }
+  return layer
+}
+
+/**
  * Convert one CDR page SVG (CDR units viewBox, 300dpi header) to 96dpi and
  * import onto the given board origin. Returns the placed top-level items.
  */
@@ -234,7 +302,8 @@ function importCdrPageSvg(
   widthMm: number,
   heightMm: number,
   boardX: number,
-  boardY: number
+  boardY: number,
+  targetLayer?: paper.Layer
 ): paper.Item[] {
   const svgText = cdrSvgToImportSvg(pageSvg, widthMm, heightMm)
   // Paper.js bakes the viewBox scale into coordinates but keeps raw
@@ -242,7 +311,7 @@ function importCdrPageSvg(
   // CDR units) do not render thousands of px wide and bury every fill.
   const strokeScale = cdrViewBoxScale(svgText)
   const imported = e.project.importSVG(svgText)
-  const layer = e.getActiveLayer()
+  const layer = targetLayer ?? e.getActiveLayer()
   const items = (Array.isArray(imported) ? imported : [imported]).filter(
     Boolean
   ) as paper.Item[]

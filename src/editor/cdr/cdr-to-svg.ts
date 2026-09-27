@@ -3,6 +3,8 @@
  * Supports ZIP CDR (content/root.dat + dataFileList.dat, incl. legacy riffData.cdr)
  * and 16-bit CDRX/CMX (RIFF CDRX containers).
  * Coordinates in CDR units (10000 per mm); output SVG per page with warnings.
+ * Fountain (gradient) fills resolve through the `fild` type-2 table into SVG
+ * linear/radial gradients.
  * Format research: https://github.com/LibreOffice/libcdr
  */
 // @ts-nocheck
@@ -15,11 +17,24 @@ export interface CdrPageStats {
   skipped?: number;
   outside?: number;
 }
+/** One page layer (CorelDRAW `gobj` > `layr` list) split out of a page. */
+export interface CdrLayerPage {
+  /** Layer name (UTF-16 `arg1000`), empty when the file omits it. */
+  name: string;
+  /** Layer object loda type: 0 = user layer, 11 = grid, 17 = desktop. */
+  kind: number;
+  /** Raw layr `flgs` word (visibility bits not decoded yet). */
+  flags: number;
+  /** Standalone page SVG containing only this layer's objects. */
+  svg: string;
+}
 export interface CdrPage {
   svg: string;
   width: number;
   height: number;
   stats: CdrPageStats;
+  /** Layer split in paint order (bottom first); absent for layerless files. */
+  layers?: CdrLayerPage[];
 }
 export interface CdrDocument {
   pages: CdrPage[];
@@ -66,10 +81,14 @@ export function cdrSvgToImportSvg(svg: string, widthMm: number, heightMm: number
   return approximateCdrPatternsForPaper(stripCdrCanvasClip(out)).svg;
 }
 
-/** Count pattern paint-server fills (`fill="url(#...)"`) in a CDR-made SVG. */
+/**
+ * Count pattern paint-server fills (`fill="url(#pattern-...)"`) in a CDR-made
+ * SVG. Fountain fills emit `url(#grad-...)` and import as real gradients, so
+ * they must not be counted as pattern approximations.
+ */
 export function countCdrUrlFills(svg: string): number {
   if (typeof svg !== 'string') return 0;
-  const m = svg.match(/fill="url\(#/g);
+  const m = svg.match(/fill="url\(#pattern-/g);
   return m ? m.length : 0;
 }
 
@@ -465,6 +484,15 @@ const CDR = (() => {
               args[u(b, ot + 4 * (count - 1 - k))] = b.subarray(start, end);
             }
             return { type: u(b, 16), args };
+          }
+          /** UTF-16LE string with a trailing NUL terminator (layer names, arg1000). */
+          function layerName(b) {
+            if (!b || b.length < 2) return "";
+            const count = b.length >> 1;
+            const end = b[b.length - 2] === 0 && b[b.length - 1] === 0 ? count - 1 : count;
+            let s = "";
+            for (let k = 0; k < end; k++) s += String.fromCharCode(b[k * 2] | (b[k * 2 + 1] << 8));
+            return s;
           }
           function jsons(b) {
             const out = [];
@@ -993,6 +1021,77 @@ const CDR = (() => {
             }
           }
           await loadBitmaps(tree);
+          // CorelDRAW version for the versioned fild layouts. The vrsn
+          // payload is the product version (X4=1400, X5=1500, ...); files
+          // without the record predate the versioned layouts, so default to
+          // the X4-era one.
+          let cdrVersion = 1400;
+          {
+            const stack = [...tree];
+            while (stack.length > 0) {
+              const node = stack.pop();
+              if (!node) continue;
+              if (node.id === "vrsn" && node.bytes && node.bytes.length >= 4) {
+                cdrVersion = u(node.bytes, 0);
+                break;
+              }
+              if (node.children) stack.push(...node.children);
+            }
+          }
+          const gradientFills = new Map();
+          /**
+           * Parse a `fild` type-2 fountain-fill record (byte layout per
+           * libcdr's readFild for 32-bit files): u32 fill id, 8-byte pad,
+           * u16 fill type at offset 12, 8-byte pad, u8 gradient type,
+           * 17-byte pad, s16 edge offset (percent), s32 angle
+           * (degrees*1e6, counterclockwise), s32 center X/Y offsets
+           * (percent*2), 2-byte pad, u32 blend mode, midpoint byte + pad,
+           * u32 stop count + 3-byte pad, then per stop a 12-byte color
+           * record (same layout legacyColor reads), a version-dependent
+           * pad (26 bytes on v1500+, else 5) and a u32 percent offset with
+           * its own 3-byte pad. Angle and center offsets are stored in
+           * parser-ready units; colors stay as legacyColor strings until
+           * emission.
+           */
+          function parseGradientFild(b) {
+            if (b.length < 69) return;
+            let p = 22;
+            const gradType = b[p];
+            p += 18;
+            const edgeOffset = view(b).getInt16(p, true);
+            p += 2;
+            const angle = (i(b, p) * Math.PI) / 180000000;
+            p += 4;
+            const centerX = i(b, p);
+            p += 4;
+            const centerY = i(b, p);
+            p += 4;
+            p += 2;
+            const mode = u(b, p) & 0xff;
+            p += 4;
+            p += 2;
+            const numStops = Math.min(u(b, p) & 0xffff, 256);
+            p += 7;
+            const stopPad = cdrVersion >= 1500 ? 26 : 5;
+            const stops = [];
+            for (let k = 0; k < numStops; k++) {
+              if (p + 12 > b.length) {
+                warn("Gradient stop data truncated");
+                break;
+              }
+              const c = legacyColor(b, p);
+              p += 12 + stopPad;
+              if (p + 4 > b.length) {
+                warn("Gradient stop data truncated");
+                break;
+              }
+              const offset = Math.max(0, Math.min(1, (u(b, p) & 0xffff) / 100));
+              p += 7;
+              stops.push({ offset, color: c });
+            }
+            if (mode !== 0) warn("Rainbow/custom gradient blend approximated as direct");
+            gradientFills.set(u(b, 0), { gradType, edgeOffset, angle, centerX, centerY, stops });
+          }
           const patterns = new Map(),
             patternFills = new Map();
           function collectPatterns(nodes) {
@@ -1034,6 +1133,8 @@ const CDR = (() => {
                 const b = ref(n.bytes);
                 if (b.length >= 34 && view(b).getUint16(12, true) === 7)
                   patternFills.set(u(b, 0), u(b, 22));
+                else if (b.length >= 14 && view(b).getUint16(12, true) === 2)
+                  parseGradientFild(b);
               }
               if (n.children) collectPatterns(n.children);
             }
@@ -1075,6 +1176,81 @@ const CDR = (() => {
             )
               warn("Pattern rotation/mirror attributes not fully parsed");
             return `url(#pattern-${id})`;
+          }
+
+          /**
+           * Fountain fill for one object: resolve the loda fill id through
+           * the parsed `fild` type-2 records and emit an SVG linear/radial
+           * gradient definition. Returns the fill override (a url() or, for
+           * single-stop ramps, a solid color), or null when the fill cannot
+           * be resolved so the caller keeps its solid-approximation
+           * fallback.
+           */
+          function gradientFill(n, l, s, id, bbox) {
+            if (String(s.fill?.type) !== "2" || !l.args[20]) return null;
+            const g = gradientFills.get(u(l.args[20], 0));
+            if (!g || !g.stops.length) return null;
+            if (g.stops.length === 1) return color(g.stops[0].color);
+            const stops = g.stops
+              .map((st) => ({ offset: st.offset, css: color(st.color) }))
+              .sort((a, b) => a.offset - b.offset);
+            const first = stops[0].css,
+              last = stops[stops.length - 1].css;
+            // Edge pad is CDR's solid first/last color percentage at the
+            // gradient ends: shift the stop offsets inward and cap the ramp
+            // with solid stops. Radial pads only the center end.
+            const radial = g.gradType === 2 || g.gradType === 4;
+            const pad = Math.max(0, Math.min(0.49, (Number(g.edgeOffset) || 0) / 100));
+            const shift = (o) => (radial ? pad + o * (1 - pad) : pad + o * (1 - 2 * pad));
+            const tags = [];
+            if (shift(stops[0].offset) > 0) tags.push(`<stop offset="0" stop-color="${first}"/>`);
+            for (const st of stops)
+              tags.push(`<stop offset="${num(shift(st.offset))}" stop-color="${st.css}"/>`);
+            if (!radial && shift(stops[stops.length - 1].offset) < 1)
+              tags.push(`<stop offset="1" stop-color="${last}"/>`);
+            if (g.gradType === 3) warn("Conical gradient approximated as linear");
+            else if (g.gradType === 4) warn("Square gradient approximated as radial");
+            else if (!radial && g.gradType !== 1)
+              warn("Unsupported gradient type approximated as linear");
+            if (radial) {
+              // Center offsets arrive as percent*2 (libcdr divides by 200) in
+              // the y-up object space; the radius reaches the farthest
+              // bounding-box corner so the ramp always covers the object.
+              const cx = 0.5 + (Number(g.centerX) || 0) / 200,
+                cy = 0.5 + (Number(g.centerY) || 0) / 200,
+                r = Math.max(
+                  Math.hypot(cx, cy),
+                  Math.hypot(1 - cx, cy),
+                  Math.hypot(cx, 1 - cy),
+                  Math.hypot(1 - cx, 1 - cy),
+                );
+              definitions.push(
+                `<radialGradient id="grad-${id}" gradientUnits="objectBoundingBox" cx="${num(cx)}" cy="${num(cy)}" r="${num(r)}">${tags.join("")}</radialGradient>`,
+              );
+              return `url(#grad-${id})`;
+            }
+            // The CDR angle runs counterclockwise in the y-up object space
+            // (0 = left to right). Convert to objectBoundingBox coordinates
+            // with aspect correction from the object bbox so the visual
+            // angle survives non-square shapes.
+            let w = 0,
+              h = 0;
+            if (bbox && bbox.length >= 16) {
+              w = Math.abs(i(bbox, 8) - i(bbox, 0));
+              h = Math.abs(i(bbox, 4) - i(bbox, 12));
+            }
+            const dx = Math.cos(g.angle),
+              dy = Math.sin(g.angle);
+            let ux = w > 0 ? dx / w : dx,
+              uy = h > 0 ? dy / h : dy;
+            const ulen = Math.hypot(ux, uy) || 1;
+            ux /= ulen;
+            uy /= ulen;
+            const half = (Math.abs(ux) + Math.abs(uy)) / 2;
+            definitions.push(
+              `<linearGradient id="grad-${id}" gradientUnits="objectBoundingBox" x1="${num(0.5 - ux * half)}" y1="${num(0.5 - uy * half)}" x2="${num(0.5 + ux * half)}" y2="${num(0.5 + uy * half)}">${tags.join("")}</linearGradient>`,
+            );
+            return `url(#grad-${id})`;
           }
 
           let objectId = 0;
@@ -1267,8 +1443,10 @@ const CDR = (() => {
                 }
                 stats.shapes++;
                 // Corel leaves open curves unfilled; SVG otherwise closes them implicitly for fill.
+                // Applies to uniform and fountain fills alike; pattern fills keep their legacy behavior.
+                const fillKind = String(s.fill?.type);
                 const fillStyle =
-                  /(?:^|\s)Z(?:\s|$)/i.test(path) || String(s.fill?.type) !== "1"
+                  /(?:^|\s)Z(?:\s|$)/i.test(path) || (fillKind !== "1" && fillKind !== "2")
                     ? s
                     : { ...s, fill: { ...s.fill, type: "0" } };
                 // Old outlines can explicitly keep their width while geometry is stretched.
@@ -1283,7 +1461,7 @@ const CDR = (() => {
                   );
                   pathAttributes = `data-cdr-object="${id}" transform="matrix(1 0 0 1 0 0)"`;
                 }
-                return `<path ${pathAttributes} d="${path}" ${style(fillStyle, patternFill(n, l, fillStyle, id))}/>`;
+                return `<path ${pathAttributes} d="${path}" ${style(fillStyle, gradientFill(n, l, fillStyle, id, bbox) || patternFill(n, l, fillStyle, id))}/>`;
               }
               // Sequential awaits preserve the exact pre-async paint order
               // (object ids, pattern definitions and warnings stay stable).
@@ -1297,7 +1475,46 @@ const CDR = (() => {
               }
               return body;
             }
-            const body = await render(n);
+            let body;
+            const bodies = [];
+            const pageLayers = [];
+            const gobjNode = child(n, "gobj");
+            const layrNodes = (gobjNode?.children ?? []).filter((c) => c.id === "layr");
+            if (layrNodes.length) {
+              // Layered page: the `gobj` list holds one `layr` per layer, each
+              // carrying flgs, a lgob>loda layer object (type: 0 = user layer,
+              // 11 = grid, 12 = guides, 17 = desktop; arg1000 = UTF-16 name)
+              // and the obj lists painted on it. Render layer by layer in the
+              // same reversed (bottom-first paint) order the flat walk would,
+              // so the combined SVG stays byte-for-byte equivalent in order.
+              for (const layr of layrNodes.slice().reverse()) {
+                const lg = child(layr, "lgob");
+                const ll = loda(lg && data(lg, "loda"));
+                const kind = ll ? ll.type : 0;
+                const name = layerName(ll?.args[1000]);
+                const fl = child(layr, "flgs");
+                const flags = fl?.bytes && fl.bytes.length >= 4 ? u(fl.bytes, 0) : 0;
+                if (kind === 12) {
+                  // Guides layer: guide geometry is not decoded, so keep it
+                  // out of the artwork entirely.
+                  const guideCount = (layr.children ?? []).filter((c) => c.id === "obj").length;
+                  if (guideCount) warn("Guide lines not imported");
+                  continue;
+                }
+                const layerBody = await render(layr);
+                bodies.push(layerBody);
+                pageLayers.push({
+                  name,
+                  kind,
+                  flags,
+                  body: layerBody,
+                  defs: definitions.join("\n"),
+                });
+              }
+              body = bodies.join("\n");
+            } else {
+              body = await render(n);
+            }
             if (bounds[0] === bounds[2] || bounds[1] === bounds[3]) {
               if (!fallback.length) throw Error("Page has no valid size");
               bounds = [
@@ -1313,8 +1530,18 @@ const CDR = (() => {
               w = Math.abs(bounds[2] - bounds[0]),
               h = Math.abs(bounds[3] - bounds[1]);
             if (!w || !h) throw Error("Invalid page size");
-            const svg = `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="${num((w * 300) / 254000)}px" height="${num((h * 300) / 254000)}px" viewBox="0 0 ${num(w)} ${num(h)}" fill-rule="evenodd" xml:space="preserve" text-rendering="geometricPrecision" shape-rendering="geometricPrecision">\n<defs>${definitions.join("\n")}<clipPath id="canvas-clip" clipPathUnits="userSpaceOnUse"><rect x="0" y="0" width="${num(w)}" height="${num(h)}"/></clipPath></defs>\n<g clip-path="url(#canvas-clip)"><g transform="matrix(1 0 0 -1 ${num(-x)} ${num(y)})">${body}</g></g>\n</svg>`;
-            return { svg, width: w / 10000, height: h / 10000, stats };
+            const wrap = (defs, bodyText) =>
+              `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="${num((w * 300) / 254000)}px" height="${num((h * 300) / 254000)}px" viewBox="0 0 ${num(w)} ${num(h)}" fill-rule="evenodd" xml:space="preserve" text-rendering="geometricPrecision" shape-rendering="geometricPrecision">\n<defs>${defs}<clipPath id="canvas-clip" clipPathUnits="userSpaceOnUse"><rect x="0" y="0" width="${num(w)}" height="${num(h)}"/></clipPath></defs>\n<g clip-path="url(#canvas-clip)"><g transform="matrix(1 0 0 -1 ${num(-x)} ${num(y)})">${bodyText}</g></g>\n</svg>`;
+            const svg = wrap(definitions.join("\n"), body);
+            const layers = pageLayers.length
+              ? pageLayers.map((l) => ({
+                  name: l.name,
+                  kind: l.kind,
+                  flags: l.flags,
+                  svg: wrap(l.defs, l.body),
+                }))
+              : undefined;
+            return { svg, width: w / 10000, height: h / 10000, stats, layers };
           }
           for (const n of tree.filter((n) => n.id === "page")) {
             const flags = data(n, "flgs");
