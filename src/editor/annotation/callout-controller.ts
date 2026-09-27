@@ -5,6 +5,7 @@ import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
 import { applyToolCursor } from '../cursors'
 import { SnapService } from '../snap/snap-service'
+import { isPrimaryButton } from '../gestures'
 
 export class CalloutController {
   engine: EditorEngine | null = null
@@ -78,7 +79,7 @@ export class CalloutController {
 
     scope.tool.onMouseDown = (event: paper.ToolEvent) => {
       const native = this.getNativeEvent(event)
-      if (native.button !== 0) return
+      if (!isPrimaryButton(native)) return
 
       const point = this.snapService.snapPoint(event.point)
 

@@ -12,6 +12,7 @@ import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
 import { applyToolCursor } from '../cursors'
 import { gradientAngleFromVector, normalizeAngleDeg } from '../geometry'
+import { isPrimaryButton } from '../gestures'
 
 export class GradientController {
   engine: EditorEngine | null = null
@@ -43,7 +44,7 @@ export class GradientController {
 
     scope.tool.onMouseDown = (event: paper.ToolEvent) => {
       const native = (event as any).event as MouseEvent
-      if (native && native.button !== 0) return
+      if (!isPrimaryButton(native)) return
       if (engine.getSelection().length === 0) {
         engine.store.setStatusMessage('Select objects to edit their gradient')
         return

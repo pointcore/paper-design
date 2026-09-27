@@ -13,6 +13,7 @@ import { isEditableTarget } from '../shortcuts'
 import { SnapService } from '../snap/snap-service'
 import { applyToolCursor } from '../cursors'
 import type { LiveShapeParams } from '../types'
+import { isPrimaryButton } from '../gestures'
 
 export class ShapeController {
   engine: EditorEngine | null = null
@@ -70,7 +71,7 @@ export class ShapeController {
 
     scope.tool.onMouseDown = (event: paper.ToolEvent) => {
       const native = this.getNativeEvent(event)
-      if (native.button !== 0) return
+      if (!isPrimaryButton(native)) return
       const snapped = this.snapService.snapPoint(event.point)
       this.startPoint = { x: snapped.x, y: snapped.y }
       this.isDrawing = true

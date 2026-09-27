@@ -10,6 +10,7 @@
 import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
 import { applyToolCursor } from '../cursors'
+import { isPrimaryButton } from '../gestures'
 
 /** Dab spacing in document units. */
 const SPRAY_SPACING = 24
@@ -62,7 +63,7 @@ export class SprayController {
 
     scope.tool.onMouseDown = (event: paper.ToolEvent) => {
       const native = (event as any).event as MouseEvent
-      if (native && native.button !== 0) return
+      if (!isPrimaryButton(native)) return
       const id = this.sprayId()
       if (!id) {
         engine.store.setStatusMessage('Create a symbol first (Symbols panel > New Symbol)')

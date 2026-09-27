@@ -18,6 +18,7 @@ interface WidthStop {
 import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
 import { applyToolCursor } from '../cursors'
+import { isPrimaryButton } from '../gestures'
 
 /** Drag sensitivity: scale units per screen pixel. */
 const DRAG_RATE = 0.01
@@ -58,7 +59,7 @@ export class WidthController {
 
     scope.tool.onMouseDown = (event: paper.ToolEvent) => {
       const native = (event as any).event as MouseEvent
-      if (native && native.button !== 0) return
+      if (!isPrimaryButton(native)) return
       if (this.isActive) return
       const hit = this.widthTargetAt(event.point)
       if (!hit) return

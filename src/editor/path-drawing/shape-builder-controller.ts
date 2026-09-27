@@ -11,6 +11,7 @@ import { PaperOffset } from 'paperjs-offset'
 import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
 import { applyToolCursor } from '../cursors'
+import { isPrimaryButton } from '../gestures'
 
 /** Stroke diameter in screen pixels (forgiving touch area, constant zoom). */
 const STROKE_SCREEN_SIZE = 12
@@ -48,7 +49,7 @@ export class ShapeBuilderController {
 
     scope.tool.onMouseDown = (event: paper.ToolEvent) => {
       const native = (event as any).event as MouseEvent
-      if (native && native.button !== 0) return
+      if (!isPrimaryButton(native)) return
       if (this.isDrawing) return
       this.subtractMode = !!native?.altKey
       const stroke = new scope.Path() as paper.Path

@@ -150,6 +150,49 @@ check('pinch-in zooms out', z2 < z1 / 1.2, `${z1} → ${z2}`)
   await page.mouse.up()
 }
 
+/* ---------- mobile-UA single-finger drawing (P1 regression) ---------- */
+// Touch-driven ToolEvents carry a TouchEvent without `button`; the old
+// exact `native.button !== 0` guard rejected every touch, leaving all
+// tools dead on touch devices. Emulate a phone UA (Paper binds only touch
+// listeners there) and draw a rectangle with one finger.
+{
+  const mpage = await browser.newPage({
+    viewport: { width: 900, height: 700 },
+    hasTouch: true,
+    isMobile: true,
+    userAgent:
+      'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Mobile Safari/537.36',
+  })
+  await mpage.goto(BASE)
+  await mpage.waitForFunction(() => window.__engine__ && window.__store__)
+  await mpage.waitForTimeout(400)
+  const msession = await mpage.context().newCDPSession(mpage)
+  const mtouch = (type, points) =>
+    msession.send('Input.dispatchTouchEvent', {
+      type,
+      touchPoints: points.map(([x, y], i) => ({ x, y, id: i + 1 })),
+    })
+  await mpage.evaluate(() => {
+    const s = window.__store__
+    const e = window.__engine__
+    s.setTool('rect')
+    e.setTool('rect')
+  })
+  const mc = await mpage.evaluate(() => {
+    const r = window.__engine__.canvas.getBoundingClientRect()
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 }
+  })
+  await mtouch('touchStart', [[mc.x - 80, mc.y - 50]])
+  await mtouch('touchMove', [[mc.x + 20, mc.y + 30]])
+  await mtouch('touchEnd', [[mc.x + 20, mc.y + 30]])
+  await mpage.waitForTimeout(150)
+  const mHist = await mpage.evaluate(
+    () => window.__store__.history.at(-1)?.name ?? '',
+  )
+  check('mobile single-finger finger-draws a rectangle', mHist === 'Draw Shape', mHist)
+  await mpage.close()
+}
+
 await browser.close()
 
 const failed = results.filter((r) => !r.ok)

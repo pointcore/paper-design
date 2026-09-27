@@ -83,3 +83,18 @@ export function isLongPress(
   if (!Number.isFinite(timeMs) || !Number.isFinite(slopPx)) return false
   return durationMs >= timeMs && movedPx <= slopPx
 }
+
+/**
+ * True when a native pointer event may start a primary-button gesture.
+ * Paper's ToolEvents wrap the native DOM event: mouse events carry
+ * `button`, but touch-driven events are TouchEvents without one, so an
+ * exact `button !== 0` check silently rejected every touch gesture and
+ * left all tools dead on touch devices. A missing `button` (touch) or a
+ * missing event counts as NOT primary; only an explicit non-zero button
+ * (right/middle click) is rejected.
+ */
+export function isPrimaryButton(event: MouseEvent | TouchEvent | null | undefined): boolean {
+  if (!event) return false
+  const button = (event as MouseEvent).button
+  return button === undefined || button === 0
+}

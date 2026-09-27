@@ -11,6 +11,7 @@ import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
 import { applyToolCursor } from '../cursors'
 import { reshapeFalloff } from '../geometry'
+import { isPrimaryButton } from '../gestures'
 
 /** Brush radius in document units. */
 const RESHAPE_RADIUS = 120
@@ -53,7 +54,7 @@ export class ReshapeController {
 
     scope.tool.onMouseDown = (event: paper.ToolEvent) => {
       const native = (event as any).event as MouseEvent
-      if (native && native.button !== 0) return
+      if (!isPrimaryButton(native)) return
       this.dragging = true
       this.moved = false
       this.last = { x: event.point.x, y: event.point.y }

@@ -11,6 +11,7 @@
 import { EditorEngine } from '../engine'
 import { applyToolCursor } from '../cursors'
 import { normalizeAlign } from '../text/text-align'
+import { isPrimaryButton } from '../gestures'
 
 export class EyedropperController {
   engine: EditorEngine | null = null
@@ -39,7 +40,7 @@ export class EyedropperController {
 
     scope.tool.onMouseDown = (event: paper.ToolEvent) => {
       const native = (event as any).event as MouseEvent | undefined
-      if (!native || native.button !== 0) return
+      if (!native || !isPrimaryButton(native)) return
       const picked = this.pickTarget(event.point)
       if (!picked) return
       this.applyEyedropper(picked, !!native.altKey)

@@ -11,6 +11,7 @@ import { isEditableTarget } from '../shortcuts'
 import { applyToolCursor } from '../cursors'
 import { SnapService } from '../snap/snap-service'
 import { rulerUnitFactor, snap45 } from '../geometry'
+import { isPrimaryButton } from '../gestures'
 
 export class MeasureController {
   engine: EditorEngine | null = null
@@ -54,7 +55,7 @@ export class MeasureController {
 
     scope.tool.onMouseDown = (event: paper.ToolEvent) => {
       const native = (event as any).event as MouseEvent | undefined
-      if (!native || native.button !== 0 || this.isMeasuring) return
+      if (!isPrimaryButton(native) || this.isMeasuring) return
       // Both ends snap like the pen tool so measurements land on geometry.
       const snapped = this.snapService.snapPoint(event.point)
       this.startPoint = { x: snapped.x, y: snapped.y }

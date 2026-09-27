@@ -11,6 +11,7 @@
 import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
 import { applyToolCursor } from '../cursors'
+import { isPrimaryButton } from '../gestures'
 
 export class PencilController {
   engine: EditorEngine | null = null
@@ -46,7 +47,7 @@ export class PencilController {
 
     scope.tool.onMouseDown = (event: paper.ToolEvent) => {
       const native = this.getNativeEvent(event)
-      if (native && native.button !== 0) return
+      if (!isPrimaryButton(native)) return
       if (this.isDrawing) return
       const stroke = new scope.Path() as paper.Path
       stroke.add(new scope.Segment(event.point.clone()))

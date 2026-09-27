@@ -8,6 +8,7 @@
  */
 import { EditorEngine } from '../engine'
 import { applyToolCursor } from '../cursors'
+import { isPrimaryButton } from '../gestures'
 
 export class ScissorsController {
   engine: EditorEngine | null = null
@@ -36,7 +37,7 @@ export class ScissorsController {
 
     scope.tool.onMouseDown = (event: paper.ToolEvent) => {
       const native = (event as any).event as MouseEvent
-      if (native.button !== 0) return
+      if (!isPrimaryButton(native)) return
       const target = this.cutTarget(event.point)
       if (!target) {
         engine.store.setStatusMessage('Click an unlocked path to cut')

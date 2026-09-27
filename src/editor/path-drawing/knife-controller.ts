@@ -12,6 +12,7 @@
 import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
 import { applyToolCursor } from '../cursors'
+import { isPrimaryButton } from '../gestures'
 
 export class KnifeController {
   engine: EditorEngine | null = null
@@ -52,7 +53,7 @@ export class KnifeController {
 
     scope.tool.onMouseDown = (event: paper.ToolEvent) => {
       const native = ((event as any).event as MouseEvent) ?? null
-      if (native && native.button !== 0) return
+      if (!isPrimaryButton(native)) return
       if (this.isCutting) return
       const line = new scope.Path() as paper.Path
       line.add(new scope.Segment(event.point.clone()))

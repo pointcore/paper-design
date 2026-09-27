@@ -19,6 +19,7 @@ import { isEditableTarget } from '../shortcuts'
 import { AnchorChrome } from './anchor-chrome'
 import { applyToolCursor } from '../cursors'
 import { snap45 } from '../geometry'
+import { isPrimaryButton } from '../gestures'
 
 export type AnchorToolMode = 'add-anchor' | 'delete-anchor' | 'convert-anchor'
 
@@ -106,7 +107,7 @@ export class AnchorController {
 
     scope.tool.onMouseDown = (event: paper.ToolEvent) => {
       const native = this.getNativeEvent(event)
-      if (native && native.button !== 0) return
+      if (!isPrimaryButton(native)) return
       this.isDragging = true
       this.keepHandleVisible = false
       this.pressPoint = event.point

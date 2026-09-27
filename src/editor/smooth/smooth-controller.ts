@@ -12,6 +12,7 @@
 import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
 import { applyToolCursor } from '../cursors'
+import { isPrimaryButton } from '../gestures'
 
 /** Number of segments smoothed on either side of the nearest one. */
 const SMOOTH_WINDOW = 3
@@ -52,7 +53,7 @@ export class SmoothController {
 
     scope.tool.onMouseDown = (event: paper.ToolEvent) => {
       const native = (event as any).event as MouseEvent
-      if (native && native.button !== 0) return
+      if (!isPrimaryButton(native)) return
       this.dragging = true
       this.moved = false
       engine.store.setDragging(true)

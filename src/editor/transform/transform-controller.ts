@@ -13,6 +13,7 @@
 import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
 import { applyToolCursor } from '../cursors'
+import { isPrimaryButton } from '../gestures'
 
 export class TransformController {
   engine: EditorEngine | null = null
@@ -61,7 +62,7 @@ export class TransformController {
 
     scope.tool.onMouseDown = (event: paper.ToolEvent) => {
       const native = (event as any).event as MouseEvent
-      if (native.button !== 0) return
+      if (!isPrimaryButton(native)) return
       if (engine.getSelection().length === 0) {
         engine.store.setStatusMessage('Select objects to transform')
         return

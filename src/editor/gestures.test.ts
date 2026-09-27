@@ -3,6 +3,7 @@ import {
   LONG_PRESS_MS,
   LONG_PRESS_SLOP_PX,
   isLongPress,
+  isPrimaryButton,
   normalizeTwist,
   pinchTransform,
 } from './gestures'
@@ -95,5 +96,21 @@ describe('isLongPress', () => {
     expect(isLongPress(300, 0, 300, 4)).toBe(true)
     expect(isLongPress(-5, 0)).toBe(false)
     expect(isLongPress(600, Number.NaN)).toBe(false)
+  })
+})
+
+describe('isPrimaryButton', () => {
+  it('accepts mouse primary and any touch event without a button', () => {
+    expect(isPrimaryButton({ button: 0 } as MouseEvent)).toBe(true)
+    // TouchEvents carry no `button` — exactly the case the old exact check
+    // rejected, killing every tool on touch devices.
+    expect(isPrimaryButton({} as unknown as TouchEvent)).toBe(true)
+  })
+
+  it('rejects non-primary buttons and missing events', () => {
+    expect(isPrimaryButton({ button: 2 } as MouseEvent)).toBe(false)
+    expect(isPrimaryButton({ button: 1 } as MouseEvent)).toBe(false)
+    expect(isPrimaryButton(null)).toBe(false)
+    expect(isPrimaryButton(undefined)).toBe(false)
   })
 })

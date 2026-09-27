@@ -19,6 +19,7 @@ import { EditorEngine } from '../engine'
 import { SnapService } from '../snap/snap-service'
 import { applyToolCursor } from '../cursors'
 import { cssTextAlignFor, normalizeAlign, paperJustificationFor } from './text-align'
+import { isPrimaryButton } from '../gestures'
 
 /** Text creation / editing mode, resolved from the active text tool. */
 type TextKind = 'point' | 'area' | 'path' | 'vertical'
@@ -133,7 +134,7 @@ export class TextController {
 
     scope.tool.onMouseDown = (event: paper.ToolEvent) => {
       const native = (event as any).event as MouseEvent
-      if (native.button !== 0) return
+      if (!isPrimaryButton(native)) return
 
       // A click outside the overlay ends the current session; the same
       // click does not start a new one.
