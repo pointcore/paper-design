@@ -1,54 +1,11 @@
 /**
  * Unit tests for N-up imposition layout — run with `vitest run`.
+ *
+ * Exercises the REAL engine.computeNUpLayout implementation
+ * (engine-export.ts) so the tests cannot drift from production.
  */
 import { describe, expect, it } from 'vitest'
-
-/** Minimal EditorEngine stand-in for testing computeNUpLayout. */
-function computeNUpLayout(
-  boards: Array<{ width: number; height: number }>,
-  upCount: number = 4,
-  spacing: number = 12,
-  margin: number = 36,
-  landscape?: boolean,
-): Array<{ pageIndex: number; x: number; y: number; scale: number }> {
-  if (boards.length === 0 || upCount < 1) return []
-
-  const maxW = Math.max(...boards.map((b) => b.width))
-  const maxH = Math.max(...boards.map((b) => b.height))
-
-  const cols = Math.ceil(Math.sqrt(upCount))
-  const rows = Math.ceil(upCount / cols)
-
-  const useLandscape = landscape ?? (maxW >= maxH)
-  const sheetW = useLandscape ? Math.max(maxW, maxH) : Math.min(maxW, maxH)
-  const sheetH = useLandscape ? Math.min(maxW, maxH) : Math.max(maxW, maxH)
-
-  const cellW = (sheetW * 2 - margin * 2 - spacing * (cols - 1)) / cols
-  const cellH = (sheetH * 2 - margin * 2 - spacing * (rows - 1)) / rows
-
-  const result: Array<{ pageIndex: number; x: number; y: number; scale: number }> = []
-
-  for (let i = 0; i < Math.min(boards.length, upCount); i++) {
-    const row = Math.floor(i / cols)
-    const col = i % cols
-    const board = boards[i]
-
-    const scaleX = cellW / board.width
-    const scaleY = cellH / board.height
-    const scale = Math.min(scaleX, scaleY, 1)
-
-    const drawW = board.width * scale
-    const drawH = board.height * scale
-    const cellX = margin + col * (cellW + spacing)
-    const cellY = margin + row * (cellH + spacing)
-    const x = cellX + (cellW - drawW) / 2
-    const y = cellY + (cellH - drawH) / 2
-
-    result.push({ pageIndex: i, x, y, scale })
-  }
-
-  return result
-}
+import { computeNUpLayout } from './engine-export'
 
 describe('computeNUpLayout', () => {
   it('returns empty for empty boards', () => {
