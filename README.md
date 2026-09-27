@@ -40,6 +40,8 @@ A vector graphics editor built with **Vue 3 + TypeScript + Paper.js**, offering 
 - **Annotation tools**: Callout annotations (leader line plus multi-line label, style edited live in the control bar when the Callout tool is active; double-click a label with a select tool to re-edit it).
 - **Measure tool**: Drag for a dashed preview with length (ruler units) and angle in the status bar (Shift constrains to 45°); both ends snap to geometry; transient, nothing is committed.
 
+- **Plugin API**: a small in-page command registry (`src/editor/plugin-api.ts`; `plugin-sample.ts` ships three examples) whose commands surface in the command palette. Scope caveat: it is **convenience isolation, not a security boundary** — commands run with the full engine and store inside the same realm, errors are contained per invocation only, and there is no realm sandbox or install manifest. Only register plugins you trust.
+
 Not yet implemented: mesh gradients, opacity masks, and multi-fill/stroke appearance stacks.
 
 ---
