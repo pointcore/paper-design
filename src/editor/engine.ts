@@ -39,6 +39,7 @@ import * as select from './engine-select'
 import * as text from './engine-text'
 import * as exporter from './engine-export'
 import * as images from './engine-images'
+import * as transforms from './engine-transforms'
 import * as arrange from './engine-arrange'
 import * as envelope from './engine-envelope'
 import * as masks from './engine-masks'
@@ -1375,7 +1376,8 @@ export class EditorEngine {
    * (AI Transform Again parity). Pivots are recorded as explicit points so
    * replaying against a changed selection keeps the original origin.
    */
-  private lastTransform:
+  /** Internal-public (engine-transforms reaches it); see F4 slice pattern. */
+  lastTransform:
     | { kind: 'move'; dx: number; dy: number }
     | { kind: 'rotate'; angle: number; pivot: paper.Point }
     | { kind: 'scale'; sx: number; sy: number; pivot: paper.Point }
@@ -1952,13 +1954,9 @@ export class EditorEngine {
     return clone
   }
 
-  /**
-   * Transform Each (beloved batch dialog): move/rotate/scale every
-   * unlocked selected item about its own bounds center. With copies > 0
-   * the originals stay and each copy accumulates the transform (copy c
-   * gets c steps); random jitters per-item rotation/scale. One history.
-   * Returns items transformed (copies included).
-   */
+  // ===== Object transforms / repeats (see engine-transforms.ts) =====
+
+  /** See engine-transforms.ts. */
   transformEach(opts: {
     dx?: number
     dy?: number
@@ -1967,342 +1965,67 @@ export class EditorEngine {
     copies?: number
     random?: boolean
   }): number {
-    const dx = Number.isFinite(opts.dx) ? Number(opts.dx) : 0
-    const dy = Number.isFinite(opts.dy) ? Number(opts.dy) : 0
-    const rotate = Number.isFinite(opts.rotate) ? Number(opts.rotate) : 0
-    const scalePct = Number.isFinite(opts.scale) ? Number(opts.scale) : 100
-    const copies = Math.min(50, Math.max(0, Math.round(Number(opts.copies) || 0)))
-    const random = !!opts.random
-    if (dx === 0 && dy === 0 && rotate === 0 && scalePct === 100 && copies === 0) return 0
-    const sources = this.getSelection().filter((item) => !item.locked && item.parent)
-    if (sources.length === 0) return 0
-    const jitter = () => (random ? 0.5 + Math.random() : 1)
-    const applyStep = (item: paper.Item, step: number) => {
-      const b = (item as any).bounds as paper.Rectangle | undefined
-      if (!b || !(b.width > 0) || !(b.height > 0)) return false
-      const center = b.center.clone()
-      if (dx !== 0 || dy !== 0) {
-        item.position = (item.position as paper.Point).add(
-          new this.scope.Point(dx * step, dy * step)
-        )
-      }
-      const r = rotate * step * jitter()
-      if (Math.abs(r) > 1e-9) item.rotate(r, center)
-      const f = Math.pow(scalePct / 100, step)
-      const fj = random ? 1 + (f - 1) * jitter() : f
-      if (Math.abs(fj - 1) > 1e-9) item.scale(fj, fj, center)
-      this.refreshItemGradient(item)
-      return true
-    }
-    let done = 0
-    if (copies > 0) {
-      const made: paper.Item[] = []
-      for (const item of sources) {
-        const parent = item.parent ?? this.getActiveLayer()
-        const at = parent.children.indexOf(item as any)
-        for (let c = 1; c <= copies; c++) {
-          const clone = this.freshClone(item)
-          parent.insertChild(Math.min(at + c, parent.children.length), clone as any)
-          if (applyStep(clone, c)) made.push(clone)
-          else clone.remove()
-        }
-      }
-      if (made.length === 0) return 0
-      this.clearSelection()
-      made.forEach((item) => {
-        item.selected = true
-      })
-      this.syncSelectionToStore()
-      this.reflowTextsForItems(made)
-      done = made.length
-    } else {
-      for (const item of sources) {
-        if (applyStep(item, 1)) done++
-      }
-      if (done === 0) return 0
-      this.reflowTextsForItems(sources)
-    }
-    this.pushHistory('Transform Each')
-    this.scope.view.update()
-    return done
+    return transforms.transformEach(this, opts)
   }
 
-  /**
-   * Duplicate the unlocked selection in place, then rotate the copies
-   * (AI Rotate-dialog Copy parity). Clones get fresh ids, thread links
-   * are stripped so copies stand alone, and the copies become the new
-   * selection. Returns false when there is nothing to copy.
-   */
+  /** See engine-transforms.ts. */
   rotateCopy(angleDeg: number, pivot?: paper.Point): boolean {
-    if (!Number.isFinite(angleDeg) || Math.abs(angleDeg) < 1e-9) return false
-    const sources = this.getSelection().filter((item) => !item.locked && item.parent)
-    if (sources.length === 0) return false
-    const center = pivot ?? this.getSelectionBounds()?.center
-    if (!center) return false
-    const clones: paper.Item[] = []
-    for (const item of sources) {
-      const clone = this.freshClone(item)
-      const parent = item.parent ?? this.getActiveLayer()
-      parent.insertChild(parent.children.indexOf(item as any) + 1, clone as any)
-      clones.push(clone)
-    }
-    for (const clone of clones) {
-      clone.rotate(angleDeg, center)
-      this.refreshItemGradient(clone)
-    }
-    this.clearSelection()
-    clones.forEach((item) => {
-      item.selected = true
-    })
-    this.syncSelectionToStore()
-    this.reflowTextsForItems(clones)
-    this.pushHistory('Rotate Copy')
-    this.scope.view.update()
-    return true
+    return transforms.rotateCopy(this, angleDeg, pivot)
   }
 
-  /**
-   * Duplicate the unlocked selection in place (CDR duplicate parity):
-   * copies land exactly over their sources and become the selection.
-   */
+  /** See engine-transforms.ts. */
   duplicateInPlace(): boolean {
-    const sources = this.getSelection().filter((item) => !item.locked && item.parent)
-    if (sources.length === 0) return false
-    const clones: paper.Item[] = []
-    for (const item of sources) {
-      const clone = this.freshClone(item)
-      const parent = item.parent ?? this.getActiveLayer()
-      parent.insertChild(parent.children.indexOf(item as any) + 1, clone as any)
-      this.refreshItemGradient(clone)
-      clones.push(clone)
-    }
-    this.clearSelection()
-    clones.forEach((item) => {
-      item.selected = true
-    })
-    this.syncSelectionToStore()
-    this.reflowTextsForItems(clones)
-    this.pushHistory('Duplicate in Place')
-    this.scope.view.update()
-    return true
+    return transforms.duplicateInPlace(this)
   }
 
-  /**
-   * Step-and-repeat the unlocked selection (layout staple): `count`
-   * translated copies at (dx, dy) increments. Copies become the new
-   * selection; one history entry. Returns copies made.
-   */
+  /** See engine-transforms.ts. */
   stepRepeat(count: number, dx: number, dy: number): number {
-    const n = Math.min(100, Math.max(1, Math.round(Number(count) || 0)))
-    if (!Number.isFinite(dx) || !Number.isFinite(dy) || (dx === 0 && dy === 0)) return 0
-    const step = new this.scope.Point(
-      Math.min(5000, Math.max(-5000, dx)),
-      Math.min(5000, Math.max(-5000, dy))
-    )
-    const sources = this.getSelection().filter((item) => !item.locked && item.parent)
-    if (sources.length === 0 || n < 1) return 0
-    const made: paper.Item[] = []
-    for (const item of sources) {
-      const parent = item.parent ?? this.getActiveLayer()
-      const at = parent.children.indexOf(item as any)
-      for (let i = 1; i <= n; i++) {
-        const clone = this.freshClone(item)
-        clone.position = (clone.position as paper.Point).add(step.multiply(i))
-        parent.insertChild(Math.min(at + i, parent.children.length), clone as any)
-        this.refreshItemGradient(clone)
-        made.push(clone)
-      }
-    }
-    if (made.length === 0) return 0
-    this.clearSelection()
-    made.forEach((item) => {
-      item.selected = true
-    })
-    this.syncSelectionToStore()
-    this.reflowTextsForItems(made)
-    this.pushHistory('Step and Repeat')
-    this.scope.view.update()
-    return made.length
+    return transforms.stepRepeat(this, count, dx, dy)
   }
 
-  /**
-   * AI Path > Split Into Grid: replace the single unlocked selected item
-   * with rows x cols rectangular cells tiling its axis-aligned bounds
-   * (optional gutters), styled like the source. Cells become the new
-   * selection; one history entry. Returns the cell count, 0 when nothing
-   * usable is selected or the bounds do not fit the gutters.
-   */
+  /** See engine-transforms.ts. */
   splitSelectionGrid(rows: number, cols: number, gutterX: number, gutterY: number): number {
-    const r = Math.round(Number(rows))
-    const c = Math.round(Number(cols))
-    const gx = Number(gutterX)
-    const gy = Number(gutterY)
-    if (!Number.isFinite(r) || !Number.isFinite(c) || r < 1 || c < 1) return 0
-    if (!Number.isFinite(gx) || !Number.isFinite(gy) || gx < 0 || gy < 0) return 0
-    if (r * c > 1000) return 0
-    const selected = this.getSelection().filter((item) => !item.locked && item.parent)
-    if (selected.length !== 1) return 0
-    const source = selected[0]
-    const b = source.bounds
-    const cellW = (b.width - (c - 1) * gx) / c
-    const cellH = (b.height - (r - 1) * gy) / r
-    if (!(cellW > 0) || !(cellH > 0)) return 0
-
-    const parent = source.parent ?? this.getActiveLayer()
-    const at = parent.children.indexOf(source as any)
-    const src = source as any
-    const cells: paper.Item[] = []
-    for (let row = 0; row < r; row++) {
-      for (let col = 0; col < c; col++) {
-        const x = b.x + col * (cellW + gx)
-        const y = b.y + row * (cellH + gy)
-        const cell = new this.scope.Path.Rectangle({
-          from: [x, y, x + cellW, y + cellH],
-          insert: false,
-        }) as paper.Path
-        cell.data.id = this.genId()
-        cell.data.isUserItem = true
-        // Cells inherit the source appearance (paint, dash, blend, opacity).
-        ;(cell as any).fillColor = src.fillColor ?? null
-        ;(cell as any).strokeColor = src.strokeColor ?? null
-        if (src.strokeColor !== null && src.strokeColor !== undefined) {
-          cell.strokeWidth = src.strokeWidth ?? 1
-          cell.strokeCap = src.strokeCap
-          cell.strokeJoin = src.strokeJoin
-          cell.miterLimit = src.miterLimit
-          cell.dashArray = src.dashArray
-          cell.dashOffset = src.dashOffset
-        }
-        ;(cell as any).fillRule = src.fillRule
-        ;(cell as any).blendMode = src.blendMode
-        ;(cell as any).opacity = src.opacity
-        this.refreshItemGradient(cell)
-        parent.insertChild(Math.min(at + 1 + cells.length, parent.children.length), cell)
-        cells.push(cell)
-      }
-    }
-    source.remove()
-    this.clearSelection()
-    cells.forEach((cell) => {
-      cell.selected = true
-    })
-    this.syncSelectionToStore()
-    this.reflowTextsForItems(cells)
-    this.pushHistory('Split Into Grid')
-    this.scope.view.update()
-    return cells.length
+    return transforms.splitSelectionGrid(this, rows, cols, gutterX, gutterY)
   }
 
-  /**
-   * Radial repeat (clock faces, badges, rosettes): `count` rotated copies
-   * at `angleDeg` steps about the reference pivot. Copies become the new
-   * selection; one history entry. Returns copies made.
-   */
+  /** See engine-transforms.ts. */
   radialRepeat(count: number, angleDeg: number): number {
-    const n = Math.min(120, Math.max(1, Math.round(Number(count) || 0)))
-    if (!Number.isFinite(angleDeg) || Math.abs(angleDeg) < 1e-9 || n < 1) return 0
-    const angle = ((angleDeg % 360) + 360) % 360
-    if (angle < 1e-9) return 0
-    const sources = this.getSelection().filter((item) => !item.locked && item.parent)
-    if (sources.length === 0) return 0
-    const pivot = this.selectionReferencePivot() ?? this.getSelectionBounds()?.center
-    if (!pivot) return 0
-    const made: paper.Item[] = []
-    for (const item of sources) {
-      const parent = item.parent ?? this.getActiveLayer()
-      const at = parent.children.indexOf(item as any)
-      for (let i = 1; i <= n; i++) {
-        const clone = this.freshClone(item)
-        clone.rotate(angle * i, pivot)
-        parent.insertChild(Math.min(at + i, parent.children.length), clone as any)
-        this.refreshItemGradient(clone)
-        made.push(clone)
-      }
-    }
-    if (made.length === 0) return 0
-    this.clearSelection()
-    made.forEach((item) => {
-      item.selected = true
-    })
-    this.syncSelectionToStore()
-    this.reflowTextsForItems(made)
-    this.pushHistory('Radial Repeat')
-    this.scope.view.update()
-    return made.length
+    return transforms.radialRepeat(this, count, angleDeg)
   }
 
-  /**
-   * Skew every unlocked selected item by degrees around a pivot (default:
-   * united selection bounds center). Callers record history.
-   */
+  /** See engine-transforms.ts. */
   skewSelection(skewXDeg: number, skewYDeg: number, pivot?: paper.Point): void {
-    if (!Number.isFinite(skewXDeg) || !Number.isFinite(skewYDeg)) return
-    if (Math.abs(skewXDeg) < 1e-9 && Math.abs(skewYDeg) < 1e-9) return
-    const items = this.getSelection().filter((item) => !item.locked)
-    if (items.length === 0) return
-    const center = pivot ?? this.getSelectionBounds()?.center
-    if (!center) return
-    const skew = new this.scope.Point(skewXDeg, skewYDeg)
-    for (const item of items) {
-      item.skew(skew, center)
-      this.refreshItemGradient(item)
-    }
-    this.reflowTextsForItems(items)
-    this.scope.view.update()
-    // Skew is non-rigid: the oriented selection frame cannot track it, so
-    // invalidate the frame like any other untracked geometry change.
-    this.bumpGeometryVersion()
+    transforms.skewSelection(this, skewXDeg, skewYDeg, pivot)
+  }
+
+  /** See engine-transforms.ts. */
+  reflectSelection(axisAngleDeg: number, copy = false, pivot?: paper.Point): boolean {
+    return transforms.reflectSelection(this, axisAngleDeg, copy, pivot)
   }
 
   /**
-   * Reflect every unlocked selected item across an axis line through the
-   * pivot (AI Object > Transform > Reflect). The axis angle is in degrees:
-   * 0 mirrors top/bottom (horizontal axis), 90 mirrors left/right. With
-   * `copy`, reflected duplicates are created and selected instead. Callers
-   * record history. Returns false when nothing can be reflected.
+   * Revalidate the select tool's oriented frame against the current
+   * geometry version (call after a tracked drag records history: the frame
+   * already matches the final artwork, so only the version stamp updates
+   * instead of rebuilding the frame axis-aligned).
    */
-  reflectSelection(axisAngleDeg: number, copy = false, pivot?: paper.Point): boolean {
-    if (!Number.isFinite(axisAngleDeg)) return false
-    const full = this.getSelection()
-    const items = full.filter((item) => !item.locked)
-    if (items.length === 0) return false
-    const center = pivot ?? this.selectionReferencePivot() ?? this.getSelectionBounds()?.center
-    if (!center) return false
-    // Reflection about the angle-th axis = rotate(-angle) -> mirror Y ->
-    // rotate(angle), the same proven rotate/scale primitives the flip and
-    // mirror paths use.
-    const reflect = (item: paper.Item) => {
-      item.rotate(-axisAngleDeg, center)
-      item.scale(1, -1, center)
-      item.rotate(axisAngleDeg, center)
+  stampSelectionFrame() {
+    const selectCtrl = this.controllers.get('select') as { frameStamped?: () => void } | undefined
+    try {
+      selectCtrl?.frameStamped?.()
+    } catch {
+      // Frame bookkeeping must never break document ops.
     }
-    const targets: paper.Item[] = []
-    if (copy) {
-      for (const item of items) {
-        const clone = this.freshClone(item)
-        reflect(clone)
-        const parent = item.parent ?? this.getActiveLayer()
-        parent.insertChild(parent.children.indexOf(item as any) + 1, clone)
-        this.refreshItemGradient(clone)
-        targets.push(clone)
-      }
-    } else {
-      for (const item of items) {
-        reflect(item)
-        this.refreshItemGradient(item)
-        targets.push(item)
-      }
+  }
+
+  /** Drop the select tool's oriented frame (it rebuilds on next paint). */
+  dropSelectionFrame() {
+    const selectCtrl = this.controllers.get('select') as { dropFrame?: () => void } | undefined
+    try {
+      selectCtrl?.dropFrame?.()
+    } catch {
+      // Frame bookkeeping must never break document ops.
     }
-    this.clearSelection()
-    targets.forEach((item) => {
-      item.selected = true
-    })
-    this.syncSelectionToStore()
-    this.reflowTextsForItems(targets)
-    // Reflection is non-rigid: the oriented frame cannot track it.
-    this.bumpGeometryVersion()
-    this.scope.view.update()
-    return true
   }
 
   /**
@@ -2338,31 +2061,6 @@ export class EditorEngine {
     }
     this.reflowTextsForItems(items)
     this.scope.view.update()
-  }
-
-  /**
-   * Revalidate the select tool's oriented frame against the current
-   * geometry version (call after a tracked drag records history: the frame
-   * already matches the final artwork, so only the version stamp updates
-   * instead of rebuilding the frame axis-aligned).
-   */
-  stampSelectionFrame() {
-    const selectCtrl = this.controllers.get('select') as { frameStamped?: () => void } | undefined
-    try {
-      selectCtrl?.frameStamped?.()
-    } catch {
-      // Frame bookkeeping must never break document ops.
-    }
-  }
-
-  /** Drop the select tool's oriented frame (it rebuilds on next paint). */
-  dropSelectionFrame() {
-    const selectCtrl = this.controllers.get('select') as { dropFrame?: () => void } | undefined
-    try {
-      selectCtrl?.dropFrame?.()
-    } catch {
-      // Frame bookkeeping must never break document ops.
-    }
   }
 
   /**
@@ -2457,71 +2155,14 @@ export class EditorEngine {
     return blend.blendSelection(this, steps)
   }
 
-  /**
-   * Scale every unlocked selected item about a pivot (default: united
-   * selection bounds center). Factors must be finite and non-zero.
-   * Callers record history.
-   */
+  /** See engine-transforms.ts. */
   scaleSelection(sx: number, sy: number, pivot?: paper.Point): void {
-    if (!Number.isFinite(sx) || !Number.isFinite(sy)) return
-    if (Math.abs(sx) < 1e-9 || Math.abs(sy) < 1e-9) return
-    const items = this.getSelection().filter((item) => !item.locked)
-    if (items.length === 0) return
-    const center = pivot ?? this.getSelectionBounds()?.center
-    if (!center) return
-    for (const item of items) {
-      item.scale(sx, sy, center)
-      this.refreshItemGradient(item)
-    }
-    this.reflowTextsForItems(items)
-    this.scope.view.update()
-    this.lastTransform = { kind: 'scale', sx, sy, pivot: center.clone() }
+    transforms.scaleSelection(this, sx, sy, pivot)
   }
 
-  /**
-   * AI Object > Repeat > Grid: duplicate every unlocked selected item into
-   * a rows x cols grid offset by dx/dy document units per cell (the
-   * original occupies the 0,0 cell). Copies become the new selection; one
-   * history entry. Returns the copies made, 0 when nothing can repeat.
-   */
+  /** See engine-transforms.ts. */
   gridRepeat(rows: number, cols: number, dx: number, dy: number): number {
-    const r = Math.round(Number(rows))
-    const c = Math.round(Number(cols))
-    const stepX = Number(dx)
-    const stepY = Number(dy)
-    if (!Number.isFinite(r) || !Number.isFinite(c) || r < 1 || c < 1 || r * c < 2) return 0
-    if (!Number.isFinite(stepX) || !Number.isFinite(stepY) || stepX <= 0 || stepY <= 0) return 0
-    const sources = this.getSelection().filter((item) => !item.locked && item.parent)
-    if (sources.length === 0) return 0
-    const made: paper.Item[] = []
-    for (const item of sources) {
-      const parent = item.parent ?? this.getActiveLayer()
-      const at = parent.children.indexOf(item as any)
-      let k = 0
-      for (let row = 0; row < r; row++) {
-        for (let col = 0; col < c; col++) {
-          if (row === 0 && col === 0) continue
-          const clone = this.freshClone(item)
-          clone.position = (clone.position as paper.Point).add(
-            new this.scope.Point(col * stepX, row * stepY)
-          )
-          parent.insertChild(Math.min(at + 1 + k, parent.children.length), clone)
-          this.refreshItemGradient(clone)
-          made.push(clone)
-          k++
-        }
-      }
-    }
-    if (made.length === 0) return 0
-    this.clearSelection()
-    made.forEach((item) => {
-      item.selected = true
-    })
-    this.syncSelectionToStore()
-    this.reflowTextsForItems(made)
-    this.pushHistory('Grid Repeat')
-    this.scope.view.update()
-    return made.length
+    return transforms.gridRepeat(this, rows, cols, dx, dy)
   }
 
   /** See engine-arrange.ts. */
