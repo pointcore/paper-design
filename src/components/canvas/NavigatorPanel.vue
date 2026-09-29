@@ -23,6 +23,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, inject, type Ref } from 'vue'
 import { useEditorStore } from '../../editor/store'
+import { shouldRunViewportLoop } from './navigator-loop'
 import type { EditorEngine } from '../../editor/engine'
 
 const store = useEditorStore()
@@ -106,11 +107,15 @@ function updateViewport() {
  * Frame loop syncing the viewport rectangle. A loop (instead of chaining
  * engine.onViewChange) avoids clobbering CanvasHost's own view handler,
  * which is assigned after children mount; rounding keeps idle frames
- * free of reactive churn. Paused while collapsed (nothing to paint).
+ * free of reactive churn. Paused while collapsed (nothing to paint) and
+ * while the tab is hidden.
  */
 function startViewportLoop() {
   const tick = () => {
-    if (!collapsed.value) updateViewport()
+    // The panel can be collapsed between the rAF being queued and it running.
+    if (shouldRunViewportLoop({ collapsed: collapsed.value, hidden: document.hidden })) {
+      updateViewport()
+    }
     rafId = requestAnimationFrame(tick)
   }
   rafId = requestAnimationFrame(tick)
@@ -123,6 +128,18 @@ function stopViewportLoop() {
   }
 }
 
+/**
+ * Suspend the loop while the tab is hidden.
+ *
+ * Browsers already throttle rAF in background tabs, but not uniformly — a
+ * throttled-but-running loop still wakes the main thread and re-reads the
+ * view bounds on every tick, which is pure waste on a document nobody is
+ * looking at.
+ */
+function onVisibilityChange() {
+  if (document.hidden) stopViewportLoop()
+  else if (!collapsed.value) startViewportLoop()
+}
 function docPointAt(e: PointerEvent): paper.Point | null {
   const engine = getEngine()
   const body = bodyRef.value
@@ -203,16 +220,18 @@ watch(collapsed, (isCollapsed) => {
   if (isCollapsed) stopViewportLoop()
   else {
     updateViewport()
-    startViewportLoop()
+    if (!document.hidden) startViewportLoop()
   }
 })
 
 onMounted(() => {
-  startViewportLoop()
+  if (!document.hidden) startViewportLoop()
+  document.addEventListener('visibilitychange', onVisibilityChange)
 })
 
 onBeforeUnmount(() => {
   stopViewportLoop()
+  document.removeEventListener('visibilitychange', onVisibilityChange)
   attachedEngine = null
 })
 </script>
