@@ -8,6 +8,12 @@ const channel = process.env.E2E_CHANNEL || 'chrome'
 
 export default defineConfig({
   testDir: './e2e',
+  // Under node_modules rather than the default `test-results/`, which nothing
+  // in .gitignore covers: failure traces and screenshots would otherwise
+  // show up as untracked noise in the repo root. node_modules is already
+  // ignored, so this needs no .gitignore change — and per project convention
+  // .gitignore edits stay local anyway.
+  outputDir: 'node_modules/.playwright',
   timeout: 30_000,
   retries: 1,
   use: {

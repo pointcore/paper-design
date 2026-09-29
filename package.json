@@ -5,9 +5,13 @@
   "type": "module",
   "description": "A vector graphics editor built with Vue 3 + TypeScript + Paper.js + element-plus",
   "scripts": {
+    "clean": "node scripts/clean-artifacts.mjs",
+    "predev": "npm run clean",
     "dev": "vite",
+    "prebuild": "npm run clean",
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview",
+    "pretest": "npm run clean",
     "test": "node scripts/check-engine-size.js && vitest run",
     "test:unit": "vitest run",
     "test:coverage": "vitest run --coverage",
