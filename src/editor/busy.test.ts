@@ -6,13 +6,29 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useEditorStore } from './store'
-import { withBusy, yieldToUI } from './busy'
+import { withBusy, yieldToUI, isCancelled, throwIfCancelled, CancelledError } from './busy'
 
 function fakeStore() {
   return {
     calls: [] as Array<{ active: boolean; message?: string; progress?: number | null }>,
     setBusy(active: boolean, message?: string, progress?: number | null) {
       this.calls.push({ active, message, progress })
+    },
+  }
+}
+
+/** fakeStore plus the cancel affordance withBusy attaches for cancellable work. */
+function cancellableStore() {
+  return {
+    calls: [] as Array<{ active: boolean; message?: string; progress?: number | null }>,
+    cancellable: false,
+    cancel: null as (() => void) | null,
+    setBusy(active: boolean, message?: string, progress?: number | null) {
+      this.calls.push({ active, message, progress })
+    },
+    setBusyCancellable(cancellable: boolean, onCancel: (() => void) | null = null) {
+      this.cancellable = cancellable
+      this.cancel = onCancel
     },
   }
 }
@@ -91,6 +107,136 @@ describe('withBusy', () => {
     })
     const mid = store.calls.find((c) => c.message === 'Overflow')
     expect(mid?.progress).toBe(99)
+  })
+})
+
+describe('cancellation', () => {
+  it('recognises cancellations and not ordinary errors', () => {
+    expect(isCancelled(new CancelledError())).toBe(true)
+    // The parsers cannot import CancelledError, so they raise the DOM name.
+    const foreign = new Error('Operation cancelled')
+    foreign.name = 'AbortError'
+    expect(isCancelled(foreign)).toBe(true)
+    expect(isCancelled(new Error('boom'))).toBe(false)
+    expect(isCancelled(undefined)).toBe(false)
+    expect(isCancelled('nope')).toBe(false)
+  })
+
+  it('throws only once the signal has aborted', () => {
+    const c = new AbortController()
+    expect(() => throwIfCancelled(c.signal)).not.toThrow()
+    expect(() => throwIfCancelled(undefined)).not.toThrow()
+    c.abort()
+    expect(() => throwIfCancelled(c.signal)).toThrow(CancelledError)
+  })
+
+  it('rejects a yield that is already aborted', async () => {
+    const c = new AbortController()
+    c.abort()
+    await expect(yieldToUI(c.signal)).rejects.toThrow(CancelledError)
+  }, 5000)
+
+  it('rejects a yield aborted while it is pending', async () => {
+    const c = new AbortController()
+    const pending = yieldToUI(c.signal)
+    setTimeout(() => c.abort(), 5)
+    await expect(pending).rejects.toThrow(CancelledError)
+  }, 5000)
+
+  it('offers a cancel callback only while the operation is cancellable', async () => {
+    const store = cancellableStore()
+    const seen: Array<{ cancellable: boolean; hasCancel: boolean }> = []
+
+    await withBusy(store, 'Loading…', async () => {
+      seen.push({ cancellable: store.cancellable, hasCancel: store.cancel !== null })
+    })
+    await withBusy(
+      store,
+      'Loading…',
+      async () => {
+        seen.push({ cancellable: store.cancellable, hasCancel: store.cancel !== null })
+      },
+      { cancellable: true },
+    )
+    // Asserted from inside: by the time withBusy resolves, the affordance is
+    // already torn down, and checking only afterwards would prove nothing.
+    // Serialized so a mismatch shows the actual booleans rather than
+    // truncating both sides into identical-looking objects.
+    expect(JSON.stringify(seen)).toBe(
+      JSON.stringify([
+        { cancellable: false, hasCancel: false },
+        { cancellable: true, hasCancel: true },
+      ]),
+    )
+    // Cleared afterwards, or the button would outlive the overlay.
+    expect(store.cancellable).toBe(false)
+    expect(store.cancel).toBeNull()
+  })
+
+  it('aborts the signal the callback aborts, and unwinds the operation', async () => {
+    const store = cancellableStore()
+    await expect(
+      withBusy(
+        store,
+        'Loading…',
+        async (_report, signal) => {
+          expect(signal.aborted).toBe(false)
+          // Simulate the overlay's button: grab the cancel hook and fire it.
+          store.cancel?.()
+          expect(signal.aborted).toBe(true)
+          await yieldToUI(signal)
+          return 'unreachable'
+        },
+        { cancellable: true },
+      ),
+    ).rejects.toThrow(CancelledError)
+  })
+
+  it('hides the overlay after a cancellation', async () => {
+    const store = cancellableStore()
+    await expect(
+      withBusy(
+        store,
+        'Loading…',
+        async (_r, signal) => {
+          store.cancel?.()
+          throwIfCancelled(signal)
+        },
+        { cancellable: true },
+      ),
+    ).rejects.toThrow(CancelledError)
+    expect(store.calls[store.calls.length - 1]).toMatchObject({ active: false })
+    expect(store.cancel).toBeNull()
+  })
+
+  it('shares one controller across nested operations', async () => {
+    const store = cancellableStore()
+    const innerShared = { value: false as boolean }
+    await withBusy(
+      store,
+      'Outer…',
+      async (_r, outer) => {
+        await withBusy(store, 'Inner…', async (_r2, inner) => {
+          innerShared.value = inner === outer
+        })
+        // The inner call must not steal or tear down the outer's Cancel button.
+        expect(store.cancellable).toBe(true)
+        expect(store.cancel).not.toBeNull()
+      },
+      { cancellable: true },
+    )
+    expect(innerShared.value).toBe(true)
+    expect(store.cancellable).toBe(false)
+  })
+
+  it('does not mark a plain operation cancellable', async () => {
+    const store = cancellableStore()
+    let sawSignal = false
+    await withBusy(store, 'Quick…', async (_r, signal) => {
+      sawSignal = signal instanceof AbortSignal
+    })
+    expect(sawSignal).toBe(true)
+    expect(store.cancellable).toBe(false)
   })
 })
 

@@ -235,7 +235,15 @@ export const useEditorStore = defineStore('editor', {
      * Global busy indicator for long file operations (open/import).
      * progress is 0-100 when determinate, null for an indeterminate spinner.
      */
-    busy: { active: false, message: '', progress: null as number | null },
+    busy: {
+      active: false,
+      message: '',
+      progress: null as number | null,
+      /** Whether the running operation can be aborted (see busy.ts). */
+      cancellable: false,
+      /** Kept out of state: an AbortSignal's abort() is not a plain value. */
+      cancel: null as (() => void) | null,
+    },
     /** Document display name (Save As / recent open; shown in the title bar) */
     documentName: '',
     /** AI "Paste Remembers Layers": paste back onto the copied-from layer */
@@ -444,6 +452,10 @@ export const useEditorStore = defineStore('editor', {
      */
     setBusy(active: boolean, message = '', progress: number | null = null) {
       this.busy = {
+        // Preserve the cancel affordance: withBusy sets it before this and
+        // resets it after, but progress updates land in between.
+        cancellable: this.busy.cancellable,
+        cancel: this.busy.cancel,
         active,
         message,
         progress:
@@ -451,6 +463,16 @@ export const useEditorStore = defineStore('editor', {
             ? null
             : Math.min(100, Math.max(0, Math.round(progress))),
       }
+    },
+
+    /**
+     * Attach or clear the overlay's Cancel button. `onCancel` is stored
+     * outside reactive state on purpose — it is a closure over an
+     * AbortController, not data the UI renders.
+     */
+    setBusyCancellable(cancellable: boolean, onCancel: (() => void) | null = null) {
+      this.busy.cancellable = cancellable
+      this.busy.cancel = onCancel
     },
 
     /** Update view settings */

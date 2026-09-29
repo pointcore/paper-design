@@ -7,15 +7,40 @@
         <div class="busy-fill" :style="{ width: store.busy.progress + '%' }" />
       </div>
       <div v-if="store.busy.progress !== null" class="busy-pct">{{ store.busy.progress }}%</div>
-      <div v-else class="busy-hint">One moment…</div>
+      <div v-else-if="!store.busy.cancellable" class="busy-hint">One moment…</div>
+      <!-- Only rendered for work that actually polls the signal, so the
+           button never promises a cancellation it cannot deliver. -->
+      <button
+        v-if="store.busy.cancellable"
+        class="busy-cancel"
+        type="button"
+        :disabled="cancelling"
+        @click="onCancel"
+      >
+        {{ cancelling ? 'Cancelling…' : 'Cancel' }}
+      </button>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
 import { useEditorStore } from '../editor/store'
 
 const store = useEditorStore()
+
+/**
+ * The abort only takes effect at the operation's next yield point, which can
+ * be tens of milliseconds away. Lock the button on for that gap so the user
+ * does not read the unchanged spinner as a dead control and click repeatedly.
+ */
+const cancelling = ref(false)
+
+function onCancel() {
+  if (cancelling.value) return
+  cancelling.value = true
+  store.busy.cancel?.()
+}
 </script>
 
 <style scoped>
@@ -78,5 +103,23 @@ const store = useEditorStore()
 .busy-hint {
   color: #888;
   font-size: 12px;
+}
+.busy-cancel {
+  margin-top: 4px;
+  padding: 5px 14px;
+  border-radius: 4px;
+  border: 1px solid #4a4a4a;
+  background: #333;
+  color: #ddd;
+  font-size: 12px;
+  cursor: pointer;
+}
+.busy-cancel:hover:not(:disabled) {
+  background: #3d3d3d;
+  color: #fff;
+}
+.busy-cancel:disabled {
+  color: #777;
+  cursor: default;
 }
 </style>

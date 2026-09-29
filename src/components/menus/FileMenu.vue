@@ -175,7 +175,7 @@ import AppDialog from '../ui/AppDialog.vue'
 import { clearRecentProjects, listRecentProjects, loadRecentProjectText } from '../../editor/recent-files'
 import { downloadHref, readFileAsDataURL } from './download'
 import { useEditorStore } from '../../editor/store'
-import { withBusy, yieldToUI } from '../../editor/busy'
+import { withBusy, yieldToUI, isCancelled } from '../../editor/busy'
 import {
   defaultBoardsExport,
   boardFilenames,
@@ -625,10 +625,15 @@ async function onFileCmd(cmd: string) {
         const file = input.files?.[0]
         if (!file || !e) return
         try {
-          const result = await withBusy(store, `Importing ${file.name}…`, async (report) => {
-            const bytes = new Uint8Array(await file.arrayBuffer())
-            return e.importCdrBytes(bytes, file.name, report)
-          })
+          const result = await withBusy(
+            store,
+            `Importing ${file.name}…`,
+            async (report, signal) => {
+              const bytes = new Uint8Array(await file.arrayBuffer())
+              return e.importCdrBytes(bytes, file.name, report, signal)
+            },
+            { cancellable: true }
+          )
           const warn = result.warnings.length ? ` (${result.warnings.length} warnings)` : ''
           const skipped = result.skippedPages > 0 ? `, ${result.skippedPages} skipped` : ''
           store.setStatusMessage(
@@ -638,7 +643,10 @@ async function onFileCmd(cmd: string) {
           )
           if (result.warnings.length) console.warn('[CDR import warnings]', result.warnings)
         } catch (err) {
-          store.setStatusMessage(err instanceof Error ? err.message : 'CDR import failed')
+          // Cancelling is a user choice, not a failure: open* restores the
+          // previous document on the way out, so nothing is reported as lost.
+          if (isCancelled(err)) store.setStatusMessage('CDR import cancelled')
+          else store.setStatusMessage(err instanceof Error ? err.message : 'CDR import failed')
         }
       }
       input.click()
@@ -654,10 +662,15 @@ async function onFileCmd(cmd: string) {
         const file = input.files?.[0]
         if (!file || !e) return
         try {
-          const result = await withBusy(store, `Opening ${file.name}…`, async (report) => {
-            const bytes = new Uint8Array(await file.arrayBuffer())
-            return e.openCdrBytes(bytes, file.name, report)
-          })
+          const result = await withBusy(
+            store,
+            `Opening ${file.name}…`,
+            async (report, signal) => {
+              const bytes = new Uint8Array(await file.arrayBuffer())
+              return e.openCdrBytes(bytes, file.name, report, signal)
+            },
+            { cancellable: true }
+          )
           const warn = result.warnings.length ? ` (${result.warnings.length} warnings)` : ''
           const skipped = result.skippedPages > 0 ? `, ${result.skippedPages} skipped` : ''
           store.setStatusMessage(
@@ -665,7 +678,10 @@ async function onFileCmd(cmd: string) {
           )
           if (result.warnings.length) console.warn('[CDR open warnings]', result.warnings)
         } catch (err) {
-          store.setStatusMessage(err instanceof Error ? err.message : 'CDR open failed')
+          // Cancelling is a user choice, not a failure: open* restores the
+          // previous document on the way out, so nothing is reported as lost.
+          if (isCancelled(err)) store.setStatusMessage('CDR open cancelled')
+          else store.setStatusMessage(err instanceof Error ? err.message : 'CDR open failed')
         }
       }
       input.click()

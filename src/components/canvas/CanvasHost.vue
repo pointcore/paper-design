@@ -65,7 +65,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, onBeforeUnmount, watch, inject, type Ref } from 'vue'
 import { useEditorStore } from '../../editor/store'
-import { withBusy, yieldToUI } from '../../editor/busy'
+import { withBusy, yieldToUI, isCancelled } from '../../editor/busy'
 import { EditorEngine } from '../../editor/engine'
 import { registerAllControllers } from '../../editor/register-controllers'
 import { handleGlobalKeydown, handleGlobalKeyUp } from '../../editor/shortcuts'
@@ -914,60 +914,78 @@ async function onDropFiles(e: DragEvent) {
   const at = dropPoint(e)
   let imported = 0
   let skippedPages = 0
-  await withBusy(store, `Importing ${files.length > 1 ? files.length + ' files' : files[0].name}…`, async (report) => {
-    for (let fi = 0; fi < files.length; fi++) {
-      const file = files[fi]
-      // Overall progress spans all dropped files; CDR reports its own
-      // fraction inside its slice.
-      const slice = (f: number, msg?: string) => report((fi + f) / files.length, msg ?? `Importing ${file.name}…`)
-      try {
-        if (/\.vec\.json$/i.test(file.name) || (/\.json$/i.test(file.name) && file.type === 'application/json')) {
-          // A saved project dropped back in replaces the document — guard it
-          // like File > Open (which confirms on unsaved changes).
-          if (store.hasUnsavedChanges && !window.confirm('Replace the current document with the dropped project? Unsaved changes will be lost.')) {
-            continue
+  try {
+    await withBusy(
+      store,
+      `Importing ${files.length > 1 ? files.length + ' files' : files[0].name}…`,
+      async (report, signal) => {
+        for (let fi = 0; fi < files.length; fi++) {
+          const file = files[fi]
+          // Overall progress spans all dropped files; CDR reports its own
+          // fraction inside its slice.
+          const slice = (f: number, msg?: string) =>
+            report((fi + f) / files.length, msg ?? `Importing ${file.name}…`)
+          try {
+            if (/\.vec\.json$/i.test(file.name) || (/\.json$/i.test(file.name) && file.type === 'application/json')) {
+              // A saved project dropped back in replaces the document — guard it
+              // like File > Open (which confirms on unsaved changes).
+              if (store.hasUnsavedChanges && !window.confirm('Replace the current document with the dropped project? Unsaved changes will be lost.')) {
+                continue
+              }
+              const text = await file.text()
+              slice(0.3)
+              await yieldToUI(signal)
+              eng.importProjectFile(text)
+              imported++
+              store.setDocumentName(file.name.replace(/\.vec\.json$/i, '').replace(/\.json$/i, ''))
+            } else if (/\.cdr$/i.test(file.name)) {
+              // CDR import keeps the current document and appends one artboard
+              // per page (File > Import CDR parity for drag-drop).
+              if (file.size > 150 * 1024 * 1024) {
+                store.setStatusMessage(`"${file.name}" too large (150 MB max)`)
+                continue
+              }
+              const bytes = new Uint8Array(await file.arrayBuffer())
+              const result = await eng.importCdrBytes(bytes, file.name, slice, signal)
+              imported++
+              skippedPages += result.skippedPages
+              if (result.warnings.length) console.warn('[CDR drop warnings]', result.warnings)
+            } else if (/\.svg$/i.test(file.name) || file.type === 'image/svg+xml') {
+              const text = await file.text()
+              slice(0.4)
+              await yieldToUI(signal)
+              if (eng.importSVGText(text, 'Import SVG')) imported++
+            } else if (/^image\/(png|jpeg|webp|gif)$/.test(file.type)) {
+              if (file.size > 15 * 1024 * 1024) {
+                store.setStatusMessage(`"${file.name}" too large (15 MB max)`)
+                continue
+              }
+              eng.placeImage(await readFileAsDataURL(file), at)
+              imported++
+            }
+          } catch (err) {
+            // Cancelling must stop the whole drop, not be reported as a bad
+            // file and then continue into the next one (which would abort at
+            // its first yield and bury the real outcome).
+            if (isCancelled(err)) throw err
+            store.setStatusMessage(
+              `Could not import "${file.name}" (${err instanceof Error ? err.message : 'unknown error'})`
+            )
+          } finally {
+            // finally runs on continue too, so skipped files still advance.
+            slice(1)
           }
-          const text = await file.text()
-          slice(0.3)
-          await yieldToUI()
-          eng.importProjectFile(text)
-          imported++
-          store.setDocumentName(file.name.replace(/\.vec\.json$/i, '').replace(/\.json$/i, ''))
-        } else if (/\.cdr$/i.test(file.name)) {
-          // CDR import keeps the current document and appends one artboard
-          // per page (File > Import CDR parity for drag-drop).
-          if (file.size > 150 * 1024 * 1024) {
-            store.setStatusMessage(`"${file.name}" too large (150 MB max)`)
-            continue
-          }
-          const bytes = new Uint8Array(await file.arrayBuffer())
-          const result = await eng.importCdrBytes(bytes, file.name, slice)
-          imported++
-          skippedPages += result.skippedPages
-          if (result.warnings.length) console.warn('[CDR drop warnings]', result.warnings)
-        } else if (/\.svg$/i.test(file.name) || file.type === 'image/svg+xml') {
-          const text = await file.text()
-          slice(0.4)
-          await yieldToUI()
-          if (eng.importSVGText(text, 'Import SVG')) imported++
-        } else if (/^image\/(png|jpeg|webp|gif)$/.test(file.type)) {
-          if (file.size > 15 * 1024 * 1024) {
-            store.setStatusMessage(`"${file.name}" too large (15 MB max)`)
-            continue
-          }
-          eng.placeImage(await readFileAsDataURL(file), at)
-          imported++
         }
-      } catch (err) {
-        store.setStatusMessage(
-          `Could not import "${file.name}" (${err instanceof Error ? err.message : 'unknown error'})`
-        )
-      } finally {
-        // finally runs on continue too, so skipped files still advance.
-        slice(1)
-      }
-    }
-  })
+      },
+      { cancellable: true }
+    )
+  } catch (err) {
+    if (!isCancelled(err)) throw err
+    store.setStatusMessage(
+      imported > 0 ? `Import cancelled — ${imported} file${imported > 1 ? 's' : ''} already imported` : 'Import cancelled'
+    )
+    return
+  }
   if (imported > 0) {
     const skipped = skippedPages > 0 ? `, ${skippedPages} page${skippedPages > 1 ? 's' : ''} skipped` : ''
     store.setStatusMessage(

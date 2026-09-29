@@ -2885,18 +2885,20 @@ export class EditorEngine {
   async openCdrBytes(
     input: Uint8Array | ArrayBuffer,
     baseName = 'CDR',
-    onProgress?: ProgressReport
+    onProgress?: ProgressReport,
+    signal?: AbortSignal
   ): Promise<CdrImportResult> {
-    return cdrimport.openCdrBytes(this, input, baseName, onProgress)
+    return cdrimport.openCdrBytes(this, input, baseName, onProgress, signal)
   }
 
   /** See engine-cdrimport.ts. */
   async importCdrBytes(
     input: Uint8Array | ArrayBuffer,
     baseName = 'CDR',
-    onProgress?: ProgressReport
+    onProgress?: ProgressReport,
+    signal?: AbortSignal
   ): Promise<CdrImportResult> {
-    return cdrimport.importCdrBytes(this, input, baseName, onProgress)
+    return cdrimport.importCdrBytes(this, input, baseName, onProgress, signal)
   }
 
   /** Payload of our last OS clipboard write (external-copy detection). */

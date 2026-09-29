@@ -11,7 +11,7 @@ import type paper from 'paper'
 import type { CdrImportResult, EditorEngine } from './engine'
 import type { ArtboardMeta } from './types'
 import type { CdrPage } from './cdr/cdr-to-svg'
-import { yieldToUI, type ProgressReport } from './busy'
+import { yieldToUI, isCancelled, type ProgressReport } from './busy'
 import {
   parseCdrBytes,
   cdrMmToPx,
@@ -32,7 +32,9 @@ export async function openCdrBytes(
   e: EditorEngine,
   input: Uint8Array | ArrayBuffer,
   baseName = 'CDR',
-  onProgress?: ProgressReport
+  onProgress?: ProgressReport,
+  /** Aborting unwinds at the parser's next yield point (see cdr-to-svg.ts). */
+  signal?: AbortSignal
 ): Promise<CdrImportResult> {
   const bytes = input instanceof Uint8Array ? input : new Uint8Array(input)
   if (bytes.length > 150 * 1024 * 1024) throw new Error('CDR file too large (150 MB max)')
@@ -40,10 +42,13 @@ export async function openCdrBytes(
   let doc
   try {
     report(0.05, 'Extracting CDR…')
-    await yieldToUI()
+    await yieldToUI(signal)
     // Parser takes 0-60%: unzip + object tree + per-page SVG conversion.
-    doc = await parseCdrBytes(bytes, (f) => report(0.05 + 0.55 * f, 'Parsing CDR objects…'))
+    doc = await parseCdrBytes(bytes, (f) => report(0.05 + 0.55 * f, 'Parsing CDR objects…'), signal)
   } catch (err) {
+    // Cancellation must keep its identity: the caller shows "Cancelled"
+    // instead of a parse failure, and a rolled-back document is expected.
+    if (isCancelled(err)) throw err
     throw new Error(err instanceof Error ? err.message : 'CDR parse failed')
   }
   if (!doc.pages.length) throw new Error('No convertible pages found')
@@ -60,6 +65,30 @@ export async function openCdrBytes(
   e.setupProject()
   e.initLayers()
   e.pointActiveLayerAtRestoredStack()
+
+  /**
+   * Put the pre-import document back. The project was cleared above, so any
+   * exit before the artboards are committed — no convertible pages, or a
+   * cancellation partway through the page loop — has to undo that here.
+   */
+  const restorePreviousDocument = () => {
+    try {
+      restoreSnapshot(e, backup)
+    } catch {
+      // The backup came from our own exporter; keep the original error.
+    }
+    e.store.setArtboards(prevBoards)
+    e.store.setActiveArtboard(prevActiveBoard)
+    e.store.setPageSize(prevPageSize.width, prevPageSize.height)
+    e.pointActiveLayerAtRestoredStack()
+    e.syncLayersToStore()
+    e.clearSelection()
+    e.refreshArtboards()
+    e.refreshGrid()
+    e.refreshGuides()
+    e.scope.view.update()
+    e.emitViewChange()
+  }
 
   const GAP = 100
   let cursorX = 0
@@ -84,7 +113,7 @@ export async function openCdrBytes(
     try {
       // Canvas import takes 60-90% (Paper.js importSVG is synchronous).
       report(0.6 + (0.3 * k) / Math.max(1, doc.pages.length), `Importing page ${k + 1}…`)
-      await yieldToUI()
+      await yieldToUI(signal)
       const items = importPageItems(e, page, k, board, doc.pages.length > 1)
       // Only successful pages take a board and advance the row: failed
       // pages leave neither a blank sheet nor a gap behind.
@@ -94,29 +123,20 @@ export async function openCdrBytes(
       // Pattern fills import as solid approximations (Paper.js has no
       // <pattern> support and would render them opaque black instead).
       patternApprox += countCdrUrlFills(page.svg)
-    } catch {
+    } catch (err) {
+      // A cancelled yield is not a page that failed to convert; counting it
+      // as skipped would quietly finish the whole file and report success.
+      if (isCancelled(err)) {
+        restorePreviousDocument()
+        throw err
+      }
       skippedPages++
     }
   }
   if (allItems.length === 0) {
     // Nothing convertible: restore the previous document instead of
     // leaving an empty one behind (and never mark it as saved).
-    try {
-      restoreSnapshot(e, backup)
-    } catch {
-      // The backup came from our own exporter; keep the original error.
-    }
-    e.store.setArtboards(prevBoards)
-    e.store.setActiveArtboard(prevActiveBoard)
-    e.store.setPageSize(prevPageSize.width, prevPageSize.height)
-    e.pointActiveLayerAtRestoredStack()
-    e.syncLayersToStore()
-    e.clearSelection()
-    e.refreshArtboards()
-    e.refreshGrid()
-    e.refreshGuides()
-    e.scope.view.update()
-    e.emitViewChange()
+    restorePreviousDocument()
     throw new Error('No convertible pages found')
   }
   if (layeredImport && (seededLayer?.children?.length ?? 0) === 0) {
@@ -129,7 +149,7 @@ export async function openCdrBytes(
     if (top) e.store.setActiveLayer(top.data.layerId as string)
   }
   report(0.92, 'Arranging artboards…')
-  await yieldToUI()
+  await yieldToUI(signal)
   const first = boards[0]
   e.store.setPageSize(first.width, first.height)
   e.store.setBleed(0)
@@ -167,7 +187,9 @@ export async function importCdrBytes(
   e: EditorEngine,
   input: Uint8Array | ArrayBuffer,
   baseName = 'CDR',
-  onProgress?: ProgressReport
+  onProgress?: ProgressReport,
+  /** Aborting unwinds at the parser's next yield point. */
+  signal?: AbortSignal
 ): Promise<CdrImportResult> {
   const bytes = input instanceof Uint8Array ? input : new Uint8Array(input)
   if (bytes.length > 150 * 1024 * 1024) throw new Error('CDR file too large (150 MB max)')
@@ -175,9 +197,10 @@ export async function importCdrBytes(
   let doc
   try {
     report(0.05, 'Extracting CDR…')
-    await yieldToUI()
-    doc = await parseCdrBytes(bytes, (f) => report(0.05 + 0.55 * f, 'Parsing CDR objects…'))
+    await yieldToUI(signal)
+    doc = await parseCdrBytes(bytes, (f) => report(0.05 + 0.55 * f, 'Parsing CDR objects…'), signal)
   } catch (err) {
+    if (isCancelled(err)) throw err
     throw new Error(err instanceof Error ? err.message : 'CDR parse failed')
   }
   if (!doc.pages.length) throw new Error('No convertible pages found')
@@ -207,13 +230,14 @@ export async function importCdrBytes(
     }
     try {
       report(0.6 + (0.3 * k) / Math.max(1, doc.pages.length), `Importing page ${k + 1}…`)
-      await yieldToUI()
+      await yieldToUI(signal)
       const items = importPageItems(e, page, k, board, doc.pages.length > 1)
       boards.push(board)
       cursorX += wPx + GAP
       allItems.push(...items)
       patternApprox += countCdrUrlFills(page.svg)
-    } catch {
+    } catch (err) {
+      if (isCancelled(err)) throw err
       skippedPages++
     }
   }
@@ -226,7 +250,7 @@ export async function importCdrBytes(
   })
   e.syncSelectionToStore()
   report(0.92, 'Arranging artboards…')
-  await yieldToUI()
+  await yieldToUI(signal)
   e.pushHistory('Import CDR')
   e.refreshArtboards()
   e.scope.view.update()

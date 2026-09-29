@@ -219,16 +219,45 @@ const CDR = (() => {
         // Local copy of the UI yield (kept in sync with src/editor/busy.ts):
         // this module stays import-free so it also runs under plain Node.
         // The timeout guarantees progress even when rAF stalls (hidden tab).
-        const yieldToUI = () =>
-          new Promise((resolve) => {
+        // Yield points double as cancellation checkpoints: the parse loops
+        // already stop here every few hundred operations, so an aborted signal
+        // unwinds within a few ms of work instead of at the end of the file.
+        // Cancellation is signalled with the DOM's AbortError name because
+        // this module cannot import CancelledError from busy.ts.
+        const abortError = () => {
+          const e = Error("Operation cancelled");
+          e.name = "AbortError";
+          return e;
+        };
+        const yieldToUI = (signal) =>
+          new Promise((resolve, reject) => {
             let settled = false;
+            // An `abort` listener, not a polling watchdog: the frame callback
+            // wins the race in practice, so a poll would miss cancellations
+            // that arrive mid-yield.
+            const detach = () => {
+              if (signal) signal.removeEventListener("abort", abort);
+            };
             const finish = () => {
               if (settled) return;
               settled = true;
               clearTimeout(timer);
+              detach();
               resolve();
             };
+            const abort = () => {
+              if (settled) return;
+              settled = true;
+              clearTimeout(timer);
+              detach();
+              reject(abortError());
+            };
+            if (signal && signal.aborted) {
+              reject(abortError());
+              return;
+            }
             const timer = setTimeout(finish, 32);
+            if (signal) signal.addEventListener("abort", abort, { once: true });
             if (typeof requestAnimationFrame === "function")
               requestAnimationFrame(() => requestAnimationFrame(finish));
           });
@@ -398,8 +427,8 @@ const CDR = (() => {
           return walk(bytes, 12, u(bytes, 4) + 8);
         }
 
-        async function parse(files, onProgress) {
-          if (files.cmx) return parseCmx(files.cmx, onProgress);
+        async function parse(files, onProgress, signal) {
+          if (files.cmx) return parseCmx(files.cmx, onProgress, signal);
           const legacy = Boolean(files["content/riffData.cdr"]);
           const root = files["content/root.dat"] || files["content/riffData.cdr"],
             list = files["content/dataFileList.dat"];
@@ -463,7 +492,7 @@ const CDR = (() => {
           }
           let doneObjects = 0;
           if (onProgress) onProgress(0.1);
-          await yieldToUI();
+          await yieldToUI(signal);
           const child = (n, id) => n.children?.find((c) => c.id === id);
           const data = (n, id) => {
             const c = child(n, id);
@@ -1141,7 +1170,7 @@ const CDR = (() => {
           }
           collectPatterns(tree);
           if (onProgress) onProgress(0.25);
-          await yieldToUI();
+          await yieldToUI(signal);
           let definitions = [],
             pixelDefs = new Set();
           function patternFill(n, l, s, id) {
@@ -1290,7 +1319,7 @@ const CDR = (() => {
                         (0.7 * Math.min(doneObjects, totalObjects)) /
                           Math.max(1, totalObjects),
                     );
-                  await yieldToUI();
+                  await yieldToUI(signal);
                 }
                 const id = ++objectId,
                   lg = child(n, "lgob"),
@@ -1549,12 +1578,12 @@ const CDR = (() => {
             pages.push(await page(n));
           }
           if (onProgress) onProgress(1);
-          await yieldToUI();
+          await yieldToUI(signal);
           if (!pages.length) throw Error("No convertible pages found");
           return { pages, warnings: [...warnings].map(([s, n]) => `${s} (${n})`) };
         }
         // Packed CDRX stores CMX v1 commands, not a ZIP/root.dat object tree.
-        async function parseCmx(container, onProgress) {
+        async function parseCmx(container, onProgress, signal) {
           const { header, blocks } = container;
           const word = (b, p) => view(b).getUint16(p, true),
             short = (b, p) => view(b).getInt16(p, true);
@@ -1650,7 +1679,7 @@ const CDR = (() => {
             let bounds = null,
               ops = 0;
             for (let p = 0; p + 4 <= b.length;) {
-              if (++ops % 500 === 0) await yieldToUI();
+              if (++ops % 500 === 0) await yieldToUI(signal);
               let size = short(b, p),
                 head = 4;
               if (size < 0) {
@@ -1764,7 +1793,7 @@ const CDR = (() => {
             pages.push({ svg, width, height, stats });
             pageIndex++;
             if (onProgress) onProgress(pageIndex / Math.max(1, pageBlocks.length));
-            await yieldToUI();
+            await yieldToUI(signal);
           }
           if (!pages.length) throw Error("CDRX found no pages");
           return { pages, warnings: [...warnings].map(([s, n]) => `${s} (${n})`) };
@@ -1990,12 +2019,14 @@ const CDR = (() => {
 export async function parseCdrBytes(
   input: Uint8Array | ArrayBuffer,
   onProgress?: (fraction: number) => void,
+  /** Aborting unwinds at the next yield point; see yieldToUI above. */
+  signal?: AbortSignal,
 ): Promise<CdrDocument> {
   const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
   if (bytes.length > 150 * 1024 * 1024) throw new Error('CDR file too large (150 MB max)');
   if (!isLikelyCdrBytes(bytes)) throw new Error('Not a CDR file (missing PK/RIFF magic)');
   const files = await CDR.unzip(bytes);
-  const doc = await CDR.parse(files, onProgress);
+  const doc = await CDR.parse(files, onProgress, signal);
   if (!doc || !Array.isArray((doc as any).pages) || (doc as any).pages.length === 0) {
     throw new Error('No convertible pages found');
   }
