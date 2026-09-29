@@ -23,7 +23,10 @@ export default defineConfig({
   webServer: {
     command: 'npm run dev',
     port: 5173,
-    timeout: 30_000,
+    // A cold CI runner has to install nothing but still pay Vite's first-run
+    // dependency optimization, which regularly overruns the 30s default and
+    // fails the whole job before a single spec executes.
+    timeout: 120_000,
     reuseExistingServer: !process.env.CI,
   },
 } satisfies PlaywrightTestConfig)

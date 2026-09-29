@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A new push to the same branch makes any in-flight run irrelevant.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Build, size gate, unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # package-lock.json is gitignored by project convention, so `npm ci`
+      # cannot run here; install resolves from package.json instead.
+      - name: Install dependencies
+        run: npm install
+
+      # vue-tsc -b runs as part of the build, so this step is both the
+      # type check and the production bundle.
+      - name: Build
+        run: npm run build
+
+      # Reads dist/ and fails if the main chunk or the total gzip budget is
+      # exceeded. Runs against the build above, so it must not be reordered.
+      - name: Engine size gate
+        run: node scripts/check-engine-size.js
+
+      - name: Unit tests
+        run: npm run test:unit
+
+      - name: Type-check e2e specs
+        run: npm run typecheck:e2e
+
+  e2e:
+    name: End-to-end acceptance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      # The default channel is a locally installed Chrome, which CI runners do
+      # not have; bundled uses Playwright's own Chromium build.
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run acceptance specs
+        run: npm run test:e2e
+        env:
+          E2E_CHANNEL: bundled
+
+      - name: Upload failure traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: test-results/
+          retention-days: 7

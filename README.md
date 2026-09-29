@@ -102,6 +102,13 @@ use Playwright's downloaded Chromium instead (what CI does).
 Available scripts: `dev`, `build`, `preview`, `test`, `test:unit`,
 `test:coverage`, `test:e2e`, `typecheck:e2e` (see `package.json`).
 
+### Continuous integration
+
+`.github/workflows/ci.yml` runs on every push and pull request to `main`:
+one job builds the app, applies the engine size gate, runs the unit tests and
+type-checks the e2e specs; a second job installs Playwright's Chromium and
+runs the full acceptance suite, uploading traces on failure.
+
 ---
 
 ## Project Structure
