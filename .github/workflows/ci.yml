@@ -41,6 +41,14 @@ jobs:
       - name: Unit tests
         run: npm run test:unit
 
+      # Runs the vitest suite again under the coverage thresholds. Kept
+      # separate from test:unit so a coverage regression is reported as its
+      # own step rather than as an ambiguous unit-test failure; the thresholds
+      # in vitest.config.ts are a regression guard and go stale silently if
+      # nothing enforces them.
+      - name: Coverage thresholds
+        run: npm run test:coverage
+
       - name: Type-check e2e specs
         run: npm run typecheck:e2e
 
