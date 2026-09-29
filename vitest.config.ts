@@ -33,8 +33,8 @@ export default defineConfig({
       ],
       // Regression guard, not a target. Every figure below was measured
       // (npm run test:coverage) and set just under the real number so a drop
-      // fails and an improvement does not: stmts/lines 20.29, branch 83.16,
-      // funcs 40.07.
+      // fails and an improvement does not: stmts/lines 20.88, branch 82.85,
+      // funcs 42.41.
       //
       // The previous values were stale rather than aspirational: `funcs: 55`
       // no longer held — the engine facade and the tool controllers grew, and

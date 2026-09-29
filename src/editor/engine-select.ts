@@ -13,7 +13,7 @@ import type paper from 'paper'
 import { flagOf, isClipMask } from './paper-types'
 import type { EditorEngine } from './engine'
 import { colorDistanceRgb, colorToCSS, parseCssColor } from './color'
-import { getItemById, isClipGroup, walkUserItems } from './engine-layers'
+import { getItemById, indexUserItemsById, isClipGroup, walkUserItems } from './engine-layers'
 
 /**
  * Select every visible unlocked top-level user item across all layers.
@@ -235,15 +235,20 @@ function shiftSelectedOrder(e: EditorEngine, direction: 1 | -1): void {
   }
   for (const [parent, items] of byParent) {
     const children = parent.children as paper.Item[]
-    items.sort((a, b) =>
-      direction > 0
-        ? children.indexOf(b) - children.indexOf(a)
-        : children.indexOf(a) - children.indexOf(b)
-    )
+    // Position lookup instead of indexOf: the comparator ran one scan per
+    // comparison, so ordering a large selection was O(n^2 log n) over a list
+    // that never changes length during the sort.
+    const at = new Map<paper.Item, number>()
+    for (let i = 0; i < children.length; i++) at.set(children[i], i)
+    const pos = (it: paper.Item) => at.get(it) ?? -1
+    items.sort((a, b) => (direction > 0 ? pos(b) - pos(a) : pos(a) - pos(b)))
     for (const item of items) {
-      const at = children.indexOf(item)
-      const target = at + direction
-      if (target < 0 || target >= children.length) continue
+      const index = at.get(item)
+      // The map goes stale as items are inserted; re-read the live index so
+      // each move is measured against the list as it now stands.
+      const live = children.indexOf(item)
+      const target = live + direction
+      if (index === undefined || target < 0 || target >= children.length) continue
       // A selected neighbor travels with the block: leave it in place.
       if (moving.has(children[target])) continue
       parent.insertChild(target, item)
@@ -557,8 +562,11 @@ export function selectItem(e: EditorEngine, item: paper.Item, addToSelection = f
 export function selectByIds(e: EditorEngine, ids: string[]): number {
   let n = 0
   e.project.deselectAll()
+  // One traversal for the whole list: getItemById re-walked every user layer
+  // per id, which made reselect / undo / saved selections O(n * items).
+  const byId = indexUserItemsById(e)
   for (const id of ids) {
-    const item = getItemById(e, id)
+    const item = byId.get(id)
     if (!item || (item as any).locked) continue
     item.selected = true
     n++

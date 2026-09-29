@@ -278,6 +278,34 @@ export function getItemById(e: EditorEngine, id: string): paper.Item | null {
   return null
 }
 
+/**
+ * Every user item by id, in a single traversal.
+ *
+ * getItemById walks the whole tree per call, so restoring a selection of n ids
+ * cost O(n * items) — and reselect, undo, saved selections and the layer tree
+ * all funnel through it. Callers that already hold the full id list should
+ * build the map once and look up from it.
+ *
+ * First occurrence wins, matching getItemById's top-down search, so an id
+ * duplicated across layers resolves the same way either way.
+ */
+export function indexUserItemsById(e: EditorEngine): Map<string, paper.Item> {
+  const out = new Map<string, paper.Item>()
+  const walk = (item: paper.Item) => {
+    const id = (item.data as any)?.id
+    if (typeof id === 'string' && !out.has(id)) out.set(id, item)
+    const children = (item as any).children as paper.Item[] | undefined
+    if (children) {
+      for (const child of children) walk(child)
+    }
+  }
+  for (const layer of e.project.layers) {
+    if (!(layer.data as any)?.isUserLayer) continue
+    for (const child of layer.children) walk(child as paper.Item)
+  }
+  return out
+}
+
 /** Select one object-tree entry (shift extends the selection). */
 export function selectItemById(e: EditorEngine, id: string, additive = false): void {
   const item = getItemById(e, id)
