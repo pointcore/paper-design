@@ -1,7 +1,9 @@
 <template>
-  <div class="editor-root">
-    <TopBar v-if="!store.ui.zenMode" />
-    <ControlBar v-if="!store.ui.zenMode" />
+  <!-- tabindex="-1" so the shell can take focus when a dialog closes and its
+       opener is gone (a menu item destroyed with the dropdown). Not a tab
+       stop: -1 keeps it out of the normal tab order. -->
+  <div class="editor-root" tabindex="-1">
+    <TopBar v-if="!store.ui.zenMode" />    <ControlBar v-if="!store.ui.zenMode" />
     
     <div class="editor-main">
       <ToolRail v-if="!store.ui.zenMode" />

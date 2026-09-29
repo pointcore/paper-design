@@ -7,9 +7,13 @@
     :close-on-click-modal="closeOnClickModal"
     modal-class="app-dialog-overlay"
     :class="['app-dialog', instanceClass, { 'popover-mode': !!trigger }]"
+    role="dialog"
+    :aria-label="title"
+    tabindex="-1"
     @open="onOpen"
     @opened="onOpened"
     @close="onClose"
+    @closed="onClosed"
     @keydown="onKeydown"
   >
     <!-- Custom title bar: solid blue -->
@@ -142,6 +146,8 @@ const uid = getCurrentInstance()?.uid ?? Math.random().toString(36).slice(2);
 const instanceClass = `app-dialog-${uid}`;
 
 let detach: (() => void) | null = null;
+/** Element focused before the dialog opened, so focus can be returned to it. */
+let previouslyFocused: HTMLElement | null = null;
 
 function resolveTrigger(): HTMLElement | null {
   const t = props.trigger;
@@ -244,6 +250,11 @@ function attachListeners() {
 
 function onOpen() {
   emit("open");
+  // Remember where focus came from so it can be handed back on close.
+  // Without this, closing a dialog drops focus on <body> and a keyboard user
+  // has to Tab from the top of the document to reach the control that opened it.
+  previouslyFocused =
+    document.activeElement instanceof HTMLElement ? document.activeElement : null;
   nextTick(() => {
     computePosition();
     attachListeners();
@@ -252,9 +263,15 @@ function onOpen() {
     nextTick(() => {
       const dlg = document.querySelector<HTMLElement>(`.${instanceClass}`);
       const field = dlg?.querySelector<HTMLInputElement>("input:not([type=hidden]), textarea, select");
-      field?.focus();
-      // Existing text (Save As rename flows) selects so typing overwrites.
-      if (field && field.value) field.select();
+      if (field) {
+        field.focus();
+        // Existing text (Save As rename flows) selects so typing overwrites.
+        if (field.value) field.select();
+      } else {
+        // No field to focus: put it on the dialog itself so Tab continues
+        // from inside it rather than escaping to the page behind.
+        dlg?.focus();
+      }
     });
   });
 }
@@ -268,6 +285,35 @@ function onOpened() {
 function onClose() {
   detach?.();
   emit("close");
+}
+
+function onClosed() {
+  // Focus is returned here, not on `close`: Element Plus's own focus trap
+  // releases focus to <body> as the dialog tears down, and anything focused
+  // before that is immediately overwritten. `closed` fires after the leave
+  // transition, and the frame hop below lands after that teardown too.
+  requestAnimationFrame(() => restoreFocus());
+}
+
+/**
+ * Hand focus back to whatever opened the dialog, if it is still there.
+ *
+ * Two cases matter. Usually the opener was a menu item inside a dropdown that
+ * is destroyed the moment the dialog opens, so there is nothing to return to
+ * and the app shell is the nearest sensible resting place. When the opener
+ * does survive, returning to it is what a keyboard user expects.
+ */
+function restoreFocus() {
+  const target = previouslyFocused;
+  previouslyFocused = null;
+  if (target?.isConnected && document.contains(target)) {
+    target.focus();
+    if (document.activeElement !== document.body) return;
+  }
+  const shell = document.querySelector<HTMLElement>(".editor-root");
+  if (!shell) return;
+  if (!shell.hasAttribute("tabindex")) shell.setAttribute("tabindex", "-1");
+  shell.focus();
 }
 
 function onKeydown(event: KeyboardEvent) {
@@ -292,7 +338,11 @@ function onCancel() {
   emit("cancel");
 }
 
-onBeforeUnmount(() => detach?.());
+onBeforeUnmount(() => {
+  detach?.();
+  // A dialog torn down while open (parent v-if) never fires @close.
+  restoreFocus();
+});
 </script>
 
 <style>

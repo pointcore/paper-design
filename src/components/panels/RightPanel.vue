@@ -1,9 +1,17 @@
 <template>
-  <!-- Collapsed: a slim strip that restores the dock (state persisted). -->
-  <div v-if="collapsed" class="right-panel-collapsed" title="Expand panel" @click="toggleCollapsed">
+  <!-- Collapsed: a slim strip that restores the dock (state persisted).
+       A button, not a div: it is a control and must be reachable by keyboard. -->
+  <button
+    v-if="collapsed"
+    class="right-panel-collapsed"
+    type="button"
+    :title="'Expand panel'"
+    :aria-label="`Expand ${tabLabel(activeTab)} panel`"
+    @click="toggleCollapsed"
+  >
     <span class="rpc-label">{{ tabLabel(activeTab) }}</span>
-    <span class="rpc-chevron">«</span>
-  </div>
+    <span class="rpc-chevron" aria-hidden="true">«</span>
+  </button>
   <div v-else class="right-panel" :style="panelStyle">
     <div
       class="rp-resizer"
@@ -14,44 +22,51 @@
       @pointercancel="onResizeEnd"
       @dblclick="resetWidth"
     ></div>
-    <div class="rp-tabs">
+    <div class="rp-tabs" role="tablist" aria-label="Editor panels">
       <button
         v-for="t in tabs"
         :key="t.key"
         class="rp-tab"
         :class="{ active: activeTab === t.key }"
+        role="tab"
+        type="button"
+        :id="`rp-tab-${t.key}`"
+        :aria-selected="activeTab === t.key"
+        :aria-controls="`rp-panel-${t.key}`"
+        :tabindex="activeTab === t.key ? 0 : -1"
         @click="activeTab = t.key"
+        @keydown="onTabKeydown($event, t.key)"
       >
         {{ t.label }}
       </button>
-      <button class="rp-collapse" :title="'Collapse panel'" @click="toggleCollapsed">»</button>
+      <button class="rp-collapse" type="button" :title="'Collapse panel'" @click="toggleCollapsed">»</button>
     </div>
     <div class="rp-body">
-      <div v-show="activeTab === 'property'" class="rp-pane">
+      <div v-show="activeTab === 'property'" class="rp-pane" role="tabpanel" :id="`rp-panel-property`" :aria-labelledby="`rp-tab-property`" aria-label="Properties">
         <PropertyPanel />
       </div>
-      <div v-show="activeTab === 'align'" class="rp-pane">
+      <div v-show="activeTab === 'align'" class="rp-pane" role="tabpanel" :id="`rp-panel-align`" :aria-labelledby="`rp-tab-align`" aria-label="Align">
         <AlignPanel />
       </div>
-      <div v-show="activeTab === 'layer'" class="rp-pane rp-pane-layer">
+      <div v-show="activeTab === 'layer'" class="rp-pane rp-pane-layer" role="tabpanel" :id="`rp-panel-layer`" :aria-labelledby="`rp-tab-layer`" aria-label="Layers">
         <LayerPanel />
       </div>
-      <div v-show="activeTab === 'artboards'" class="rp-pane">
+      <div v-show="activeTab === 'artboards'" class="rp-pane" role="tabpanel" :id="`rp-panel-artboards`" :aria-labelledby="`rp-tab-artboards`" aria-label="Artboards">
         <ArtboardPanel />
       </div>
-      <div v-show="activeTab === 'swatches'" class="rp-pane">
+      <div v-show="activeTab === 'swatches'" class="rp-pane" role="tabpanel" :id="`rp-panel-swatches`" :aria-labelledby="`rp-tab-swatches`" aria-label="Swatches">
         <SwatchesPanel />
       </div>
-      <div v-show="activeTab === 'symbols'" class="rp-pane">
+      <div v-show="activeTab === 'symbols'" class="rp-pane" role="tabpanel" :id="`rp-panel-symbols`" :aria-labelledby="`rp-tab-symbols`" aria-label="Symbols">
         <SymbolsPanel />
       </div>
-      <div v-show="activeTab === 'history'" class="rp-pane">
+      <div v-show="activeTab === 'history'" class="rp-pane" role="tabpanel" :id="`rp-panel-history`" :aria-labelledby="`rp-tab-history`" aria-label="History">
         <HistoryPanel />
       </div>
-      <div v-show="activeTab === 'actions'" class="rp-pane">
+      <div v-show="activeTab === 'actions'" class="rp-pane" role="tabpanel" :id="`rp-panel-actions`" :aria-labelledby="`rp-tab-actions`" aria-label="Actions">
         <ActionsPanel />
       </div>
-      <div v-show="activeTab === 'appearance'" class="rp-pane">
+      <div v-show="activeTab === 'appearance'" class="rp-pane" role="tabpanel" :id="`rp-panel-appearance`" :aria-labelledby="`rp-tab-appearance`" aria-label="Appearance">
         <AppearancePanel />
       </div>
     </div>
@@ -59,7 +74,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch, defineAsyncComponent } from 'vue'
+import { computed, ref, watch, nextTick, defineAsyncComponent } from 'vue'
 import { useEditorStore } from '../../editor/store'
 import type { RightPanelTab } from '../../editor/types'
 
@@ -156,6 +171,45 @@ const activeTab = computed<RightPanelTab>({
   set: (v) => store.setRightTab(v),
 })
 
+/**
+ * Standard tablist keyboard model (WAI-ARIA authoring practices): arrows move
+ * between tabs and activate as they go, Home/End jump to the ends, and only
+ * the active tab is in the tab order.
+ *
+ * Without this the strip is reachable but not navigable — a keyboard user
+ * would have to Tab through all nine panels to reach the one they want.
+ */
+function onTabKeydown(event: KeyboardEvent, key: RightPanelTab) {
+  const index = tabs.findIndex((t) => t.key === key)
+  if (index < 0) return
+  const last = tabs.length - 1
+  let next = -1
+  switch (event.key) {
+    case 'ArrowRight':
+    case 'ArrowDown':
+      next = index >= last ? 0 : index + 1
+      break
+    case 'ArrowLeft':
+    case 'ArrowUp':
+      next = index <= 0 ? last : index - 1
+      break
+    case 'Home':
+      next = 0
+      break
+    case 'End':
+      next = last
+      break
+    default:
+      return
+  }
+  event.preventDefault()
+  activeTab.value = tabs[next].key
+  // Move focus with selection, so the next arrow press continues from there.
+  nextTick(() => {
+    document.getElementById(`rp-tab-${tabs[next].key}`)?.focus()
+  })
+}
+
 // Auto-switch to Properties on new selection, matching AI behavior
 // (only when going from empty to non-empty to avoid interrupting layer work)
 watch(
@@ -186,6 +240,7 @@ watch(
   min-width: 22px;
   height: 100%;
   background: #252526;
+  border: none;
   border-left: 1px solid #161616;
   display: flex;
   flex-direction: column;
@@ -195,6 +250,11 @@ watch(
   cursor: pointer;
   color: #9a9a9a;
   user-select: none;
+}
+/* Now a <button>: keep the browser's default chrome out of the strip. */
+.right-panel-collapsed:focus-visible {
+  outline: 1px solid #4a90d9;
+  outline-offset: -1px;
 }
 .right-panel-collapsed:hover { color: #fff; }
 .rpc-label {
