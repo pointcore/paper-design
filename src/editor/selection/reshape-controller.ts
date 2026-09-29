@@ -7,6 +7,7 @@
  * hidden art never moves. Release records one history entry; Escape ends
  * the stroke the same way (use Undo to revert, the geometry edits live).
  */
+import { isClipMask } from '../paper-types'
 import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
 import { applyToolCursor } from '../cursors'
@@ -119,7 +120,7 @@ export class ReshapeController {
       // outlines of path text. Same exclusion list the other tools use
       // (select-controller.hitTest, eyedropper, snap-service, anchor tool).
       if (data.isPatternTile || data.isPatternFill || data.textMode) return
-      if ((node as any).clipMask) return
+      if (isClipMask(node)) return
       if (node instanceof scope.Path) {
         const bounds = (node as any).bounds as paper.Rectangle | undefined
         if (bounds && !bounds.intersects(area)) return

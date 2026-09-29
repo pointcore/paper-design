@@ -9,6 +9,7 @@
  * paths, live text, rasters, pattern scaffolding and clip masks are left
  * alone (scissors handles single-path cuts).
  */
+import { isClipMask } from '../paper-types'
 import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
 import { applyToolCursor } from '../cursors'
@@ -183,13 +184,13 @@ export class KnifeController {
       const data = (item.data as any) ?? {}
       if (data.isChrome || data.isPreview || data.isGuide || data.annotation) return
       if (data.isPatternTile || data.isPatternFill || data.textMode) return
-      if ((item as any).clipMask) return
+      if (isClipMask(item)) return
       // Compound children would tear the compound apart — leave the whole
       // compound to scissors/object ops instead.
       if (item instanceof scope.CompoundPath) return
       if (item instanceof scope.Group) {
         const kids = (item as any).children as Array<any> | undefined
-        if (kids && kids.some((k) => k && k.clipMask)) return
+        if (kids && kids.some((k) => isClipMask(k))) return
       }
       if (item instanceof scope.Path) {
         if (item.segments.length >= 2 && item.bounds?.intersects(bounds)) out.push(item as paper.Path)

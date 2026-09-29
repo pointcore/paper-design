@@ -8,6 +8,7 @@
  * Alt-click samples into the defaults without touching the selection.
  * Locked and hidden artwork is never hit, like every other tool.
  */
+import { isClipMask } from '../paper-types'
 import { EditorEngine } from '../engine'
 import { applyToolCursor } from '../cursors'
 import { normalizeAlign } from '../text/text-align'
@@ -180,7 +181,7 @@ export class EyedropperController {
       if (item.locked) return
       const data = (item.data as any) ?? {}
       if (data.isPatternFill) return
-      if ((item as any).clipMask) return
+      if (isClipMask(item)) return
       if (item instanceof scope.Group) {
         for (const child of item.children) collect(child as paper.Item)
         return

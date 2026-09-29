@@ -9,6 +9,7 @@
  * mapper move along as module functions (paper math only).
  */
 import type paper from 'paper'
+import { isClipMask } from './paper-types'
 import type { EditorEngine } from './engine'
 import type { EnvelopePreset } from './types'
 
@@ -80,7 +81,7 @@ function envelopeLeaves(e: EditorEngine, item: paper.Item): Array<paper.Path | p
     if (data.isPatternTile || data.isPatternFill || data.textMode) return
     if (node instanceof scope.Group) {
       const kids = (node as any).children as Array<any> | undefined
-      if (kids && kids.some((k) => k && k.clipMask)) return
+      if (kids && kids.some((k) => isClipMask(k))) return
       for (const child of node.children) walk(child as paper.Item)
       return
     }

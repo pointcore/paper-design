@@ -9,6 +9,7 @@
  * Escape finishes the stroke the same way (use Undo to revert, the
  * geometry edits live).
  */
+import { isClipMask } from '../paper-types'
 import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
 import { applyToolCursor } from '../cursors'
@@ -133,7 +134,7 @@ export class SmoothController {
     const data = (node.data as any) ?? {}
     if ((node as any).locked || (node as any).visible === false) return null
     if (data.isPatternTile || data.isPatternFill || data.textMode || data.annotation) return null
-    if ((node as any).clipMask) return null
+    if (isClipMask(node)) return null
     if (node instanceof scope.CompoundPath) return null
     return node as paper.Path
   }

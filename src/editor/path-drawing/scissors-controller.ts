@@ -6,6 +6,7 @@
  * Clicks on endpoints are no-ops with a status hint; locked, compound and
  * non-path artwork cannot be cut.
  */
+import { isClipMask } from '../paper-types'
 import { EditorEngine } from '../engine'
 import { applyToolCursor } from '../cursors'
 import { isPrimaryButton } from '../gestures'
@@ -70,7 +71,7 @@ export class ScissorsController {
     if (data.annotation || data.isChrome || data.isPreview || data.isGuide || data.isArtboard) return null
     // Pattern tiles and clip masks hold their hosts together; cut the host
     // shape instead of its scaffolding.
-    if (data.isPatternTile || (item as any).clipMask) return null
+    if (data.isPatternTile || isClipMask(item)) return null
     if (item instanceof scope.Path && !(item instanceof scope.CompoundPath)) {
       return item.segments.length >= 2 ? (item as paper.Path) : null
     }

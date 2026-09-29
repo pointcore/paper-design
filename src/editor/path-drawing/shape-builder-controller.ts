@@ -8,6 +8,7 @@
  * covers the whole gesture (via the engine boolean pipeline).
  */
 import { PaperOffset } from 'paperjs-offset'
+import { isClipMask } from '../paper-types'
 import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
 import { applyToolCursor } from '../cursors'
@@ -177,7 +178,7 @@ export class ShapeBuilderController {
       if (data.textMode) return
       if (item instanceof scope.Group) {
         const kids = (item as any).children as Array<any> | undefined
-        if (kids && kids.some((k) => k && k.clipMask)) return
+        if (kids && kids.some((k) => isClipMask(k))) return
       }
       if (
         (item instanceof scope.Path || item instanceof scope.CompoundPath) &&

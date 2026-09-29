@@ -9,6 +9,7 @@
  */
 import type paper from 'paper'
 import type { EditorEngine } from './engine'
+import { isClipMask } from './paper-types'
 import { colorToCSS, isOutOfCmykGamut, parseCssColor, rgbToCmyk } from './color'
 
 /** One preflight finding (print-readiness check). */
@@ -35,7 +36,7 @@ export function preflight(e: EditorEngine): PreflightIssue[] {
   const walk = (node: paper.Item) => {
     const data = (node as any).data ?? {}
     if (data.isChrome || data.isPreview || data.isGuide || data.isArtboard || data.annotation) return
-    if (data.isPatternTile || (node as any).clipMask) return
+    if (data.isPatternTile || isClipMask(node)) return
     if (node instanceof scope.PointText) {
       if ((data as any).textMode === 'area' && tc?.areaOverflow) {
         try {

@@ -11,6 +11,7 @@
  * grid chrome and the thumbnail render cache.
  */
 import type paper from 'paper'
+import { isClipMask } from './paper-types'
 import type { EditorEngine } from './engine'
 
 export function createLayer(e: EditorEngine, name?: string): paper.Layer {
@@ -404,7 +405,7 @@ export function nextSublayerName(parent: paper.Item): string {
 /** Whether a group clips through a masked child. */
 export function isClipGroup(group: paper.Group): boolean {
   for (const child of group.children) {
-    if ((child as any).clipMask) return true
+    if (isClipMask(child)) return true
   }
   return false
 }

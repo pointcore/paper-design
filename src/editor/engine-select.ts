@@ -10,6 +10,7 @@
  * engine.
  */
 import type paper from 'paper'
+import { flagOf, isClipMask } from './paper-types'
 import type { EditorEngine } from './engine'
 import { colorDistanceRgb, colorToCSS, parseCssColor } from './color'
 import { getItemById, isClipGroup, walkUserItems } from './engine-layers'
@@ -197,7 +198,7 @@ export function moveSelectionToActiveLayer(e: EditorEngine): number {
   const picked: paper.Item[] = []
   const seen = new Set<paper.Item>()
   for (const item of e.getSelection()) {
-    if ((item as any).locked) continue
+    if (flagOf(item, 'locked')) continue
     let top: paper.Item | null = item
     while (top && !(top.parent instanceof e.scope.Layer)) {
       top = top.parent as paper.Item | null
@@ -492,7 +493,7 @@ function appearanceLeaves(e: EditorEngine): paper.Item[] {
     locked = locked || !!(item as any).locked
     if (data.isPatternTile) return
     // Clip masks are scaffolding: match the visible content instead.
-    if ((item as any).clipMask) return
+    if (isClipMask(item)) return
     if (
       item instanceof scope.Path ||
       item instanceof scope.CompoundPath ||
@@ -584,7 +585,7 @@ export function selectStrays(e: EditorEngine): number {
   const walk = (node: paper.Item) => {
     const data = (node as any).data ?? {}
     if (data.isChrome || data.isPreview || data.isGuide || data.isArtboard || data.annotation) return
-    if (data.isPatternTile || (node as any).clipMask) return
+    if (data.isPatternTile || isClipMask(node)) return
     if ((node as any).visible === false || (node as any).locked) return
     if (node instanceof scope.Path && !(node instanceof scope.CompoundPath)) {
       if (node.segments.length <= 1) strays.push(node)

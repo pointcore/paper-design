@@ -7,6 +7,7 @@
  * path is selected its anchors and handles are drawn and can be dragged to
  * reshape the path (handle > anchor > segment > object hit priority).
  */
+import { isClipMask } from '../paper-types'
 import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
 import { AnchorChrome } from '../path-drawing/anchor-chrome'
@@ -1312,7 +1313,7 @@ export class SelectController {
       if (data.isChrome || data.isPreview || data.isGuide || data.isArtboard || data.annotation) return
       if (data.isPatternTile || data.isPatternFill || data.textMode) return
       // Clipping masks reshape their whole group; never direct-edit one.
-      if ((item as any).clipMask) return
+      if (isClipMask(item)) return
       if (item instanceof scope.Path && !(item instanceof scope.CompoundPath)) {
         const path = item as paper.Path
         if (!path.parent || path.segments.length < 2) return

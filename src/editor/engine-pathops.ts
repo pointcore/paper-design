@@ -9,6 +9,7 @@
  */
 import type paper from 'paper'
 import { PaperOffset } from 'paperjs-offset'
+import { isClipMask } from './paper-types'
 import type { EditorEngine } from './engine'
 
 /**
@@ -232,7 +233,7 @@ export function cleanUp(e: EditorEngine): number {
     (item instanceof scope.CompoundPath && ((item as any).children?.length ?? 0) === 0)
   const sweep = (node: paper.Item): boolean => {
     const data = (node as any).data ?? {}
-    if (data.isPatternTile || data.annotation || (node as any).clipMask) return false
+    if (data.isPatternTile || data.annotation || isClipMask(node)) return false
     if ((node as any).locked) return false
     const children = (node as any).children as paper.Item[] | undefined
     if (children) {
