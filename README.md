@@ -55,7 +55,7 @@ Not yet implemented: mesh gradients, opacity masks, and multi-fill/stroke appear
 | State management | Pinia |
 | UI components | Element Plus 2.14 + `@element-plus/icons-vue` |
 | Build tool | Vite 5 + `vue-tsc` type checking |
-| Testing | `npm test` runs `scripts/check-engine-size.js` plus `vitest run` (unit tests for pure modules like color conversion and shortcut routing) |
+| Testing | `npm test` runs `scripts/check-engine-size.js` plus `vitest run` (unit tests for pure modules like color conversion and shortcut routing); `npm run test:e2e` runs the Playwright acceptance specs in `e2e/` |
 
 ---
 
@@ -88,11 +88,19 @@ npm run preview      # Preview the production build locally
 ### Run checks
 
 ```bash
-npm test             # Engine size check (scripts/check-engine-size.js) + unit tests (vitest run)
-npm run test:unit    # Unit tests only
+npm test               # Engine size check (scripts/check-engine-size.js) + unit tests (vitest run)
+npm run test:unit      # Unit tests only
+npm run test:coverage  # Unit tests with a coverage report
+npm run test:e2e       # Playwright acceptance specs (e2e/*.spec.ts)
+npm run typecheck:e2e  # Type-check the e2e specs
 ```
 
-Available scripts are `dev`, `build`, `preview`, `test` and `test:unit` (see `package.json`).
+`npm run test:e2e` starts the dev server itself, so no manual `npm run dev` is
+needed. By default it drives your system Chrome; set `E2E_CHANNEL=bundled` to
+use Playwright's downloaded Chromium instead (what CI does).
+
+Available scripts: `dev`, `build`, `preview`, `test`, `test:unit`,
+`test:coverage`, `test:e2e`, `typecheck:e2e` (see `package.json`).
 
 ---
 

@@ -11,7 +11,8 @@
     "test": "node scripts/check-engine-size.js && vitest run",
     "test:unit": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "npx playwright test"
+    "test:e2e": "playwright test",
+    "typecheck:e2e": "tsc -p tsconfig.e2e.json"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.1",

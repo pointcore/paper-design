@@ -13,7 +13,11 @@ export default defineConfig({
   use: {
     baseURL: 'http://localhost:5173',
     headless: true,
-    viewport: { width: 1280, height: 720 },
+    // 1500x900 is what the acceptance scripts were originally written and
+    // calibrated against. A smaller viewport silently breaks the specs that
+    // drag a cut line across +/-550 project units: the ends map off-canvas,
+    // so paper.js never sees those mouse events and nothing gets cut.
+    viewport: { width: 1500, height: 900 },
     ...(channel === 'bundled' ? {} : { channel }),
   },
   webServer: {
