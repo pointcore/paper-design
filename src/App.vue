@@ -40,6 +40,7 @@
       <RightPanel v-if="store.ui.showPropertyPanel || store.ui.showLayerPanel" />
     </div>
     <BusyOverlay />
+    <ErrorDialog />
     <CommandPalette />
   </div>
 </template>
@@ -51,6 +52,7 @@ import { useEditorStore } from './editor/store'
 import { rulerUnitFactor } from './editor/geometry'
 import { pluginApi } from './editor/plugin-api'
 import { registerSampleCommands } from './editor/plugin-sample'
+import { errorLog } from './editor/error-reporting'
 import type { EditorEngine } from './editor/engine'
 import TopBar from './components/menus/TopBar.vue'
 import ControlBar from './components/menus/ControlBar.vue'
@@ -60,6 +62,7 @@ import DocTabs from './components/canvas/DocTabs.vue'
 import ColorBar from './components/canvas/ColorBar.vue'
 import RightPanel from './components/panels/RightPanel.vue'
 import BusyOverlay from './components/BusyOverlay.vue'
+import ErrorDialog from './components/ErrorDialog.vue'
 // Async so the palette dialog ships in its own chunk, not the main bundle.
 const CommandPalette = defineAsyncComponent(() => import('./components/CommandPalette.vue'))
 
@@ -71,6 +74,9 @@ registerSampleCommands(pluginApi)
 
 const engineRef = ref<EditorEngine | null>(null)
 provide('engine', engineRef)
+
+// Unsubscribe handle for the error-log subscription set up in onMounted.
+let stopErrorWatch: (() => void) | null = null
 
 // Restore dock prefs saved by the Actions panel (best effort).
 onMounted(() => {
@@ -96,6 +102,21 @@ onMounted(() => {
     if (typeof prefs.panelWidth === 'number') store.setPanelWidth(prefs.panelWidth)
     if (typeof prefs.panelCollapsed === 'boolean') store.setPanelCollapsed(prefs.panelCollapsed)
   } catch { /* private mode: defaults stand */ }
+
+  // Surface what the global handlers caught. Repeats of an already-logged
+  // failure only bump that entry's counter, so a handler throwing on every
+  // mousemove cannot reopen the dialog on every event.
+  stopErrorWatch = errorLog.subscribe(({ notice, isNew }) => {
+    // Unwind first: a throw inside a mouse handler skips the rest of it, so
+    // the mouse-up that would commit the gesture never arrives and the canvas
+    // stays stranded mid-drag. Every controller implements deactivate() for
+    // this teardown; recoverFromError reuses that contract.
+    engineRef.value?.recoverFromError()
+    // Also surface through the status bar: it survives zen mode, where the
+    // dialog is still mounted but the app chrome is hidden.
+    store.setStatusMessage(`${notice.name}: ${notice.message}`)
+    if (isNew) store.setErrorLogOpen(true)
+  })
 })
 
 function onBeforeUnload(e: BeforeUnloadEvent) {
@@ -104,6 +125,8 @@ function onBeforeUnload(e: BeforeUnloadEvent) {
 
 onUnmounted(() => {
   window.removeEventListener('beforeunload', onBeforeUnload)
+  stopErrorWatch?.()
+  stopErrorWatch = null
 })
 
 const zoomPercent = computed(() => `${Math.round(store.view.zoom * 100)}%`)

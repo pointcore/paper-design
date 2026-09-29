@@ -40,11 +40,18 @@ import 'element-plus/es/components/switch/style/css'
 import 'element-plus/es/components/tag/style/css'
 import 'element-plus/es/components/tooltip/style/css'
 import App from './App.vue'
+import { installGlobalErrorHandlers } from './editor/error-reporting'
 
 const app = createApp(App)
 const pinia = createPinia()
 
 app.use(pinia)
+
+// Must run before mount: a failure during the first render has no component
+// tree to bubble through, so app.config.errorHandler is the only catch-all.
+// Without it a throw in a tool controller or panel watcher reached the console
+// only, leaving the document half-modified with no way for the user to see it.
+installGlobalErrorHandlers(app)
 
 // Register only the components the editor actually renders — pulling in the
 // whole library through app.use(ElementPlus) cost hundreds of KB of the

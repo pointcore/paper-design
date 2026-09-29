@@ -392,6 +392,56 @@ export class EditorEngine {
     return this.controllers.get(toolName) ?? null
   }
 
+  /**
+   * Unwind after an uncaught error so the canvas is not stranded mid-gesture.
+   *
+   * A throw inside a mouse handler skips the rest of that handler, so the
+   * mouse-up that would normally commit the gesture never runs: drag flags
+   * stay set, the pointer is left in capture, and transient chrome (rubber
+   * bands, previews) survives. Every controller already implements
+   * `deactivate()` for exactly this teardown (setTool calls it on switch), so
+   * reuse that contract instead of duplicating per-tool cleanup.
+   *
+   * Best-effort by design: this runs while handling a failure, so it must not
+   * throw a second time and mask the original error.
+   */
+  recoverFromError(): void {
+    // Drop any pointer capture the canvas is holding. Releasing is only legal
+    // while captured, so probe first: hasPointerCapture returning false is
+    // the normal case and must not throw.
+    try {
+      const holder = this.canvas as unknown as {
+        hasPointerCapture?: (id: number) => boolean
+        releasePointerCapture?: (id: number) => void
+      }
+      if (typeof holder.hasPointerCapture === 'function' && typeof holder.releasePointerCapture === 'function') {
+        for (let id = 1; id <= 5; id++) {
+          if (holder.hasPointerCapture(id)) holder.releasePointerCapture(id)
+        }
+      }
+    } catch { /* recovery must not throw */ }
+
+    // Unwind the active controller's in-flight gesture.
+    try {
+      this.controllers.get(this.toolName)?.deactivate?.()
+    } catch { /* recovery must not throw */ }
+
+    // Hand paper.js back its native decoration and sweep leftover chrome.
+    try {
+      const selectCtrl = this.controllers.get('select') as { releaseNativeSuppressions?: () => void } | undefined
+      selectCtrl?.releaseNativeSuppressions?.()
+    } catch { /* recovery must not throw */ }
+    try {
+      this.clearTransientChrome()
+    } catch { /* recovery must not throw */ }
+
+    // Clear the drag flag so panels stop rendering a transform readout for a
+    // gesture that no longer exists.
+    try {
+      this.store.setDragging(false)
+    } catch { /* recovery must not throw */ }
+  }
+
   /** See engine-select.ts. */
   getSelection(): paper.Item[] {
     return select.getSelection(this)

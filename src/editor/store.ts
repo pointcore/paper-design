@@ -264,6 +264,8 @@ export const useEditorStore = defineStore('editor', {
       blendDialogOpen: false,
       /** Command palette (Ctrl+Shift+P, or Ctrl+K with empty selection) */
       commandPaletteOpen: false,
+      /** Error log dialog, raised by the global error handlers */
+      errorLogOpen: false,
       showNavigator: true,
       zenMode: false,
       showControlBar: true,
@@ -574,6 +576,11 @@ export const useEditorStore = defineStore('editor', {
     /** Open/close the command palette (store-shared so shortcuts can reach it) */
     setCommandPaletteOpen(val: boolean) {
       this.ui.commandPaletteOpen = val
+    },
+
+    /** Open/close the error log dialog (raised by the global error handlers) */
+    setErrorLogOpen(val: boolean) {
+      this.ui.errorLogOpen = val
     },
 
     /** Set page size */
