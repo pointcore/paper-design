@@ -10,7 +10,7 @@
         <div class="tool-item" v-for="tool in filteredTools" :key="tool.name"
              :class="{ active: store.tool === tool.name }"
              :title="tool.tip" @click="selectTool(tool.name)">
-          <el-icon v-if="tool.icon" :size="16"><component :is="tool.icon" /></el-icon>
+          <ToolIcon v-if="tool.icon" :name="tool.icon" :size="16" />
           <span v-else class="glyph">{{ tool.glyph }}</span>
         </div>
       </div>
@@ -29,7 +29,7 @@
                  @click="selectTool(currentOf(g).name)"
                  @dblclick="cycleGroup(g)"
                  @contextmenu.prevent="toggleFlyout(g.key, $event)">
-              <el-icon v-if="currentOf(g).icon" :size="16"><component :is="currentOf(g).icon" /></el-icon>
+              <ToolIcon v-if="currentOf(g).icon" :name="currentOf(g).icon" :size="16" />
               <span v-else class="glyph">{{ currentOf(g).glyph }}</span>
               <span v-if="g.members.length > 1" class="flyout-mark" @click.stop="toggleFlyout(g.key, $event)">▸</span>
             </div>
@@ -46,7 +46,7 @@
         <div v-for="m in openGroup.members" :key="m.name" class="flyout-item"
              :class="{ active: store.tool === m.name }"
              :title="m.tip" @click="pickFromGroup(openFlyout, m.name)">
-          <el-icon v-if="m.icon" :size="14"><component :is="m.icon" /></el-icon>
+          <ToolIcon v-if="m.icon" :name="m.icon" :size="14" />
           <span v-else class="glyph">{{ m.glyph }}</span>
           <span class="flyout-label">{{ shortLabel(m.name) }}</span>
         </div>
@@ -70,15 +70,11 @@
 
 <script setup lang="ts">
 import { ref, computed, inject, nextTick, type Ref, onMounted, onUnmounted } from 'vue'
-import {
-  Pointer, Aim, EditPen, Edit, MagicStick,
-  Position, Setting, Brush, BrushFilled, Star, Operation, ChatLineRound,
-  CirclePlus, Remove, Tickets, Link, Document, Delete, Stamp, Scissor, Crop,
-  Discount, Loading, Lollipop, Coordinate, Share, Expand, Search, Grid,
-} from '@element-plus/icons-vue'
+import { Search, Grid, Setting } from '@element-plus/icons-vue'
 import { useEditorStore } from '../../editor/store'
 import type { ToolName } from '../../editor/types'
 import type { EditorEngine } from '../../editor/engine'
+import ToolIcon from './ToolIcon.vue'
 
 const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
@@ -86,7 +82,8 @@ const engineRef = inject<Ref<EditorEngine | null>>('engine')
 interface ToolDef {
   name: ToolName
   tip: string
-  icon?: any
+  /** Key into the AI/CDR-style SVG icon set (tool-icons.ts). */
+  icon?: string
   glyph?: string
 }
 
@@ -97,66 +94,66 @@ interface ToolGroup {
 
 const groups: ToolGroup[] = [
   { key: 'select', members: [
-    { name: 'select', tip: 'Select Tool (V)', icon: Pointer },
-    { name: 'direct-select', tip: 'Direct Select Tool (A)', icon: Aim },
-    { name: 'lasso', tip: 'Lasso Tool (Q, drag a loop)', glyph: '◎' },
-    { name: 'wand', tip: 'Magic Wand (Y, click a fill)', glyph: '🪄' },
-    { name: 'free-transform', tip: 'Free Transform (Shift+F)', glyph: '⛶' },
+    { name: 'select', tip: 'Select Tool (V)', icon: 'select' },
+    { name: 'direct-select', tip: 'Direct Select Tool (A)', icon: 'direct-select' },
+    { name: 'lasso', tip: 'Lasso Tool (Q, drag a loop)', icon: 'lasso' },
+    { name: 'wand', tip: 'Magic Wand (Y, click a fill)', icon: 'wand' },
+    { name: 'free-transform', tip: 'Free Transform (Shift+F)', icon: 'free-transform' },
   ] },
   { key: 'draw', members: [
-    { name: 'pen', tip: 'Pen Tool (P)', icon: EditPen },
-    { name: 'curvature', tip: 'Curvature Tool (Shift+~)', icon: Operation },
-    { name: 'add-anchor', tip: 'Add Anchor Point Tool (+)', icon: CirclePlus },
-    { name: 'delete-anchor', tip: 'Delete Anchor Point Tool (-)', icon: Remove },
-    { name: 'convert-anchor', tip: 'Convert Anchor Point Tool (Shift+C)', icon: MagicStick },
+    { name: 'pen', tip: 'Pen Tool (P)', icon: 'pen' },
+    { name: 'curvature', tip: 'Curvature Tool (Shift+~)', icon: 'curvature' },
+    { name: 'add-anchor', tip: 'Add Anchor Point Tool (+)', icon: 'add-anchor' },
+    { name: 'delete-anchor', tip: 'Delete Anchor Point Tool (-)', icon: 'delete-anchor' },
+    { name: 'convert-anchor', tip: 'Convert Anchor Point Tool (Shift+C)', icon: 'convert-anchor' },
   ] },
   { key: 'text', members: [
-    { name: 'type', tip: 'Text Tool (T)', icon: Edit },
-    { name: 'area-type', tip: 'Area Text Tool (drag a frame)', icon: Tickets },
-    { name: 'type-on-path', tip: 'Type on Path Tool (click a path)', icon: Link },
-    { name: 'vertical-type', tip: 'Vertical Text Tool', icon: Document },
+    { name: 'type', tip: 'Text Tool (T)', icon: 'type' },
+    { name: 'area-type', tip: 'Area Text Tool (drag a frame)', icon: 'area-type' },
+    { name: 'type-on-path', tip: 'Type on Path Tool (click a path)', icon: 'type-on-path' },
+    { name: 'vertical-type', tip: 'Vertical Text Tool', icon: 'vertical-type' },
   ] },
   { key: 'shapes', members: [
-    { name: 'rect', tip: 'Rectangle Tool (R)', icon: MagicStick },
-    { name: 'rounded-rect', tip: 'Rounded Rectangle Tool', icon: Crop },
-    { name: 'ellipse', tip: 'Ellipse Tool (L)', icon: Star },
-    { name: 'polygon', tip: 'Polygon / Star Tool', icon: Discount },
-    { name: 'arc', tip: 'Arc Tool', glyph: '◠' },
-    { name: 'line', tip: 'Line Segment Tool (\\)', icon: Position },
-    { name: 'spiral', tip: 'Spiral Tool', icon: Loading },
-    { name: 'rect-grid', tip: 'Rectangular Grid Tool', glyph: '#' },
-    { name: 'polar-grid', tip: 'Polar Grid Tool', glyph: '⊙' },
+    { name: 'rect', tip: 'Rectangle Tool (R)', icon: 'rect' },
+    { name: 'rounded-rect', tip: 'Rounded Rectangle Tool', icon: 'rounded-rect' },
+    { name: 'ellipse', tip: 'Ellipse Tool (L)', icon: 'ellipse' },
+    { name: 'polygon', tip: 'Polygon / Star Tool', icon: 'polygon' },
+    { name: 'arc', tip: 'Arc Tool', icon: 'arc' },
+    { name: 'line', tip: 'Line Segment Tool (\\)', icon: 'line' },
+    { name: 'spiral', tip: 'Spiral Tool', icon: 'spiral' },
+    { name: 'rect-grid', tip: 'Rectangular Grid Tool', icon: 'rect-grid' },
+    { name: 'polar-grid', tip: 'Polar Grid Tool', icon: 'polar-grid' },
   ] },
   { key: 'paint', members: [
-    { name: 'pencil', tip: 'Pencil Tool (N)', icon: BrushFilled },
-    { name: 'blob-brush', tip: 'Blob Brush Tool (Shift+B)', icon: Lollipop },
-    { name: 'brush', tip: 'Brush Tool (B)', icon: Brush },
-    { name: 'eraser', tip: 'Eraser Tool (Shift+E)', icon: Delete },
-    { name: 'spray', tip: 'Symbol Sprayer (drag to scatter, needs a symbol)', glyph: '⁂' },
+    { name: 'pencil', tip: 'Pencil Tool (N)', icon: 'pencil' },
+    { name: 'blob-brush', tip: 'Blob Brush Tool (Shift+B)', icon: 'blob-brush' },
+    { name: 'brush', tip: 'Brush Tool (B)', icon: 'brush' },
+    { name: 'eraser', tip: 'Eraser Tool (Shift+E)', icon: 'eraser' },
+    { name: 'spray', tip: 'Symbol Sprayer (drag to scatter, needs a symbol)', icon: 'spray' },
   ] },
   { key: 'edit', members: [
-    { name: 'scissors', tip: 'Scissors Tool (C)', icon: Scissor },
-    { name: 'knife', tip: 'Knife Tool (K, drag a line to slice paths)', glyph: '🗡' },
-    { name: 'shape-builder', tip: 'Shape Builder Tool (Shift+M)', icon: Share },
-    { name: 'width', tip: 'Width Tool (Shift+W)', icon: Expand },
-    { name: 'reshape', tip: 'Reshape Tool (drag to push anchors)', glyph: '〰' },
-    { name: 'smooth', tip: 'Smooth Tool (drag along a path to smooth it)', glyph: '∿' },
-    { name: 'gradient', tip: 'Gradient Tool (G, drag to set angle)', glyph: '🌈' },
-    { name: 'eyedropper', tip: 'Eyedropper Tool (I, Alt = sample only)', icon: Stamp },
-    { name: 'perspective-grid', tip: 'Perspective Grid (Shift+P, cycle 1/2/3-point)', glyph: '◇' },
+    { name: 'scissors', tip: 'Scissors Tool (C)', icon: 'scissors' },
+    { name: 'knife', tip: 'Knife Tool (K, drag a line to slice paths)', icon: 'knife' },
+    { name: 'shape-builder', tip: 'Shape Builder Tool (Shift+M)', icon: 'shape-builder' },
+    { name: 'width', tip: 'Width Tool (Shift+W)', icon: 'width' },
+    { name: 'reshape', tip: 'Reshape Tool (drag to push anchors)', icon: 'reshape' },
+    { name: 'smooth', tip: 'Smooth Tool (drag along a path to smooth it)', icon: 'smooth' },
+    { name: 'gradient', tip: 'Gradient Tool (G, drag to set angle)', icon: 'gradient' },
+    { name: 'eyedropper', tip: 'Eyedropper Tool (I, Alt = sample only)', icon: 'eyedropper' },
+    { name: 'perspective-grid', tip: 'Perspective Grid (Shift+P, cycle 1/2/3-point)', icon: 'perspective-grid' },
   ] },
   { key: 'transform', members: [
-    { name: 'rotate', tip: 'Rotate Tool (Shift+R, drag to rotate)', glyph: '⟳' },
-    { name: 'scale', tip: 'Scale Tool (Shift+S, drag to scale)', glyph: '⤢' },
-    { name: 'mirror', tip: 'Mirror Tool (Shift+O, click flips)', glyph: '⇋' },
+    { name: 'rotate', tip: 'Rotate Tool (Shift+R, drag to rotate)', icon: 'rotate' },
+    { name: 'scale', tip: 'Scale Tool (Shift+S, drag to scale)', icon: 'scale' },
+    { name: 'mirror', tip: 'Mirror Tool (Shift+O, click flips)', icon: 'mirror' },
   ] },
   { key: 'annot', members: [
-    { name: 'callout', tip: 'Callout Tool', icon: ChatLineRound },
-    { name: 'measure', tip: 'Measure Tool (drag for length and angle)', icon: Coordinate },
+    { name: 'callout', tip: 'Callout Tool', icon: 'callout' },
+    { name: 'measure', tip: 'Measure Tool (drag for length and angle)', icon: 'measure' },
   ] },
   { key: 'view', members: [
-    { name: 'view-hand', tip: 'Hand Tool (H)', glyph: '✋' },
-    { name: 'zoom', tip: 'Zoom Tool (Z)', glyph: '🔍' },
+    { name: 'view-hand', tip: 'Hand Tool (H)', icon: 'view-hand' },
+    { name: 'zoom', tip: 'Zoom Tool (Z)', icon: 'zoom' },
   ] },
 ]
 
@@ -309,11 +306,22 @@ onUnmounted(() => {
 .tool-rail.density-double { width: 76px; }
 .tool-rail::-webkit-scrollbar { width: 3px; }
 .tool-rail::-webkit-scrollbar-thumb { background: #555; border-radius: 2px; }
-.rail-search { width: 100%; padding: 2px 4px 6px; }
+.rail-search { width: 100%; padding: 2px 4px 6px; position: relative; }
 .rail-search :deep(.el-input__wrapper) {
   background: #111; border: 1px solid #3d3d3d; box-shadow: none !important; border-radius: 3px;
 }
 .rail-search :deep(.el-input__inner) { color: #e6e6e6; font-size: 11px; }
+/* A small el-input with prefix (magnifier) + suffix (clearable ×) needs ~58px
+   but the 48px rail only leaves 39px — the flex input collapses to 0 and the
+   filter becomes unusable. Collapse to the icon at rest; on focus expand as a
+   floating overlay over the canvas (rail overflow would clip it otherwise).
+   .rail-search keeps its box so the list below does not jump. */
+.rail-search :deep(.el-input) { transition: width 0.15s ease; }
+.rail-search :deep(.el-input:focus-within) {
+  position: absolute; left: 0; top: 2px; width: 180px; z-index: 600;
+  background: #2b2b2b; border: 1px solid #3d3d3d; border-radius: 3px; padding: 3px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
 .rail-empty { color: #666; font-size: 11px; text-align: center; padding: 8px 0; }
 .tool-section { padding: 4px; width: 100%; display: flex; justify-content: center; }
 .tool-grid { display: flex; flex-wrap: wrap; gap: 0px; justify-content: center; }

@@ -358,7 +358,9 @@ export class SelectController {
     this.restoreAllNativeSelections()
     this.mode = store.tool === 'direct-select' ? 'direct-select' : 'select'
     // AI-aligned defaults: black arrow for select, white arrow for direct.
-    applyToolCursor(this.engine.canvas, this.mode)
+    // Cursor follows the *tool* — free-transform reuses this controller but
+    // keeps its own dashed-frame cursor — while `mode` drives behavior.
+    applyToolCursor(this.engine.canvas, store.tool)
     this.clearAnchorState()
     this.resetTransformDrag()
     // Drop any in-progress marquee / object drag orphaned by a mid-gesture
@@ -790,7 +792,7 @@ export class SelectController {
         // Restore the tool cursor before the O(document) history snapshot:
         // mousedown parks the move affordance (cross-shaped) on the canvas,
         // and a plain click used to freeze on it for the whole pushHistory.
-        engine.canvas.style.cursor = cursorForTool(this.mode)
+        engine.canvas.style.cursor = cursorForTool(engine.store.tool)
         this.reflowEditedPaths()
         // Total drag delta from the tracked start positions feeds
         // Transform Again (AI repeats drag moves too).
@@ -831,8 +833,9 @@ export class SelectController {
       this.dragStartPoint = null
       this.dragConstrainOrigin = null
       engine.store.setDragging(false)
-      // Back to the AI-aligned tool default (arrow / white arrow).
-      engine.canvas.style.cursor = cursorForTool(this.mode)
+      // Back to the AI-aligned tool default (arrow / white arrow / the
+      // free-transform frame — by tool, not by this controller's mode).
+      engine.canvas.style.cursor = cursorForTool(engine.store.tool)
       // Geometry changed without the id set changing, so the store would
       // otherwise keep pre-drag bounds: the Properties panel would recompute
       // X/Y from a stale anchor and snap the object back on the next edit.
