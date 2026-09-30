@@ -13,8 +13,10 @@ import {
   layoutParagraphs,
   layoutToContent,
   normalizeParagraphSettings,
+  wrapParagraphIndented,
+  wrapParagraphIndentedWithOffsets,
 } from './paragraphs'
-import { wrapTextWithParagraphs } from './line-break'
+import { wrapParagraph, wrapTextWithParagraphs } from './line-break'
 
 /** A space is 4 units wide and a character 10, so indents are readable. */
 const measure = (line: string) => {
@@ -118,6 +120,103 @@ describe('layoutParagraphs', () => {
       measure
     )
     expect(lines.map((l) => l.text)).toEqual(['  one', '', '  two', ''])
+  })
+})
+
+describe('hanging indent', () => {
+  it('leaves the first line flush and indents the body', () => {
+    const laid = layoutParagraphs(
+      [
+        { text: 'first', paragraph: 0 },
+        { text: 'second', paragraph: 0 },
+        { text: 'third', paragraph: 0 },
+      ],
+      { firstLineIndent: 0, hangingIndent: 20, spaceBefore: 0, spaceAfter: 0 },
+      // A space is 10 units, so a 20-unit indent is two of them.
+      (s) => s.length * 10,
+    )
+    expect(laid.map((l) => l.text)).toEqual(['first', '  second', '  third'])
+  })
+
+  it('combines with a first-line indent the way AI does', () => {
+    const laid = layoutParagraphs(
+      [
+        { text: 'first', paragraph: 0 },
+        { text: 'second', paragraph: 0 },
+      ],
+      { firstLineIndent: 40, hangingIndent: 20, spaceBefore: 0, spaceAfter: 0 },
+      (s) => s.length * 10,
+    )
+    // The first line is out by (40 - 20), the body by 20.
+    expect(laid.map((l) => l.text)).toEqual(['  first', '  second'])
+  })
+
+  it('starts every paragraph flush, not just the first', () => {
+    const laid = layoutParagraphs(
+      [
+        { text: 'a', paragraph: 0 },
+        { text: 'a2', paragraph: 0 },
+        { text: 'b', paragraph: 1 },
+        { text: 'b2', paragraph: 1 },
+      ],
+      { firstLineIndent: 0, hangingIndent: 20, spaceBefore: 0, spaceAfter: 0 },
+      (s) => s.length * 10,
+    )
+    expect(laid.map((l) => l.text)).toEqual(['a', '  a2', 'b', '  b2'])
+  })
+})
+
+describe('wrapParagraphIndented', () => {
+  const measure = (s: string) => s.length * 10
+
+  it('is the plain wrap when the two widths match', () => {
+    expect(wrapParagraphIndented('aaaa bbbb cccc', { firstLine: 50, body: 50 }, measure)).toEqual(
+      wrapParagraph('aaaa bbbb cccc', 50, measure),
+    )
+  })
+
+  it('narrows only the first line for a first-line indent', () => {
+    // 30 units for the first line (three characters), 50 for the body.
+    expect(wrapParagraphIndented('abcdefgh ij', { firstLine: 30, body: 50 }, measure)).toEqual([
+      'abc',
+      'defgh',
+      'ij',
+    ])
+  })
+
+  it('narrows only the body for a hanging indent', () => {
+    expect(wrapParagraphIndented('abcdefgh ij', { firstLine: 50, body: 30 }, measure)).toEqual([
+      'abcde',
+      'fgh',
+      'ij',
+    ])
+  })
+
+  it('never drops or invents a character', () => {
+    const text = 'The quick brown fox jumps over the lazy dog and keeps on going for a while'
+    for (const widths of [
+      { firstLine: 30, body: 50 },
+      { firstLine: 50, body: 30 },
+      { firstLine: 80, body: 40 },
+      { firstLine: 12, body: 12 },
+    ]) {
+      const joined = wrapParagraphIndented(text, widths, measure).join('').replace(/\s+/g, '')
+      expect(joined).toBe(text.replace(/\s+/g, ''))
+    }
+  })
+
+  it('reports an end offset for every line', () => {
+    const lines = wrapParagraphIndentedWithOffsets('abcdefgh', { firstLine: 30, body: 50 }, measure)
+    expect(lines.map((l) => l.text)).toEqual(['abc', 'defgh'])
+    expect(lines[lines.length - 1].end).toBe('abcdefgh'.length)
+    // Offsets increase, which is what a threaded reflow relies on.
+    for (let i = 1; i < lines.length; i++) {
+      expect(lines[i].end).toBeGreaterThan(lines[i - 1].end)
+    }
+  })
+
+  it('handles an empty paragraph without looping', () => {
+    expect(wrapParagraphIndented('', { firstLine: 30, body: 50 }, measure)).toEqual([''])
   })
 })
 

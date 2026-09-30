@@ -58,7 +58,7 @@ describe('flowTextThroughFrames', () => {
     const out = flowTextThroughFrames('one\ntwo', frames(2, 100, 40), {
       leading,
       measure,
-      settings: { firstLineIndent: 0, spaceBefore: 1, spaceAfter: 0 },
+      settings: { firstLineIndent: 0, hangingIndent: 0, spaceBefore: 1, spaceAfter: 0 },
     })
     expect(out[0].fits).toBe(2)
     expect(out[0].content).toBe('one')
@@ -77,7 +77,7 @@ describe('flowTextThroughFrames', () => {
     const out = flowTextThroughFrames('one\ntwo', frames(2, 100, 40), {
       leading,
       measure,
-      settings: { firstLineIndent: 0, spaceBefore: 1, spaceAfter: 0 },
+      settings: { firstLineIndent: 0, hangingIndent: 0, spaceBefore: 1, spaceAfter: 0 },
     })
     expect(out[0].content.split('\n')).toEqual(['one'])
   })
@@ -109,15 +109,29 @@ describe('flowTextThroughFrames', () => {
     expect(short[1].end).toBe(text.length)
   })
 
-  it('re-wraps a first line narrower when the indent would overflow it', () => {
+  it('gives a first-line indent a narrower first line and a full-width body', async () => {
     const out = flowTextThroughFrames('abcdefgh', frames(1, 50, 40), {
       leading,
       measure,
-      settings: { firstLineIndent: 20, spaceBefore: 0, spaceAfter: 0 },
+      settings: { firstLineIndent: 20, hangingIndent: 0, spaceBefore: 0, spaceAfter: 0 },
     })
-    // Five characters fit 50 units, but the indent (20) would push the first
-    // line over, so it is wrapped at 30 units: three characters per line.
-    expect(out[0].content).toBe('  abc\ndef\ngh')
+    // A 20-unit first-line indent leaves the first line 30 units (three
+    // characters); the body keeps the whole 50, so it is not needlessly short.
+    // The old rule wrapped the whole paragraph at 30 and left 'gh' stranded on
+    // a third line.
+    expect(out[0].content).toBe('  abc\ndefgh')
+  })
+
+  it('gives a hanging indent a flush first line and an indented body', () => {
+    const out = flowTextThroughFrames('abcdefgh', frames(1, 50, 40), {
+      leading,
+      measure,
+      settings: { firstLineIndent: 0, hangingIndent: 20, spaceBefore: 0, spaceAfter: 0 },
+    })
+    // A hanging indent is the mirror image: the first line is flush and keeps
+    // the full width (five characters), and the body is indented and narrower
+    // (30 units of text, two spaces of indent).
+    expect(out[0].content).toBe('abcde\n  fgh')
   })
 
   it('never loops on a degenerate frame', () => {

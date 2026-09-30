@@ -130,7 +130,8 @@ test.describe('Paragraph settings', () => {
 
     const paraRow = section.locator('.prop-row', { hasText: 'Para' }).first()
     const fields = paraRow.locator('input')
-    check('the paragraph row has three fields', (await fields.count()) === 3, String(await fields.count()))
+    // First-line indent, hanging indent, space before, space after.
+    check('the paragraph row has four fields', (await fields.count()) === 4, String(await fields.count()))
 
     // Type an indent into the first field and commit with Enter.
     await fields.first().fill('24')

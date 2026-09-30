@@ -91,6 +91,16 @@
             @change="onParagraphChange"
           />
           <el-input-number
+            v-model="hangingValue"
+            :min="0"
+            :max="200"
+            :precision="1"
+            size="small"
+            controls-position="right"
+            title="Hanging indent: indents the paragraph body and leaves the first line flush"
+            @change="onParagraphChange"
+          />
+          <el-input-number
             v-model="spaceBeforeValue"
             :min="0"
             :max="10"
@@ -186,6 +196,7 @@ const isAreaSelected = ref(false)
 const frameW = ref(0)
 const frameH = ref(0)
 const indentValue = ref(0)
+const hangingValue = ref(0)
 const spaceBeforeValue = ref(0)
 const spaceAfterValue = ref(0)
 const hasOverflow = ref(false)
@@ -297,6 +308,7 @@ function syncAreaFromSelection() {
     frameH.value = Math.round(info.frame.height * 10) / 10
     const paragraphs = tc.paragraphSettings(single)
     indentValue.value = Math.round(paragraphs.firstLineIndent * 10) / 10
+    hangingValue.value = Math.round(paragraphs.hangingIndent * 10) / 10
     spaceBeforeValue.value = paragraphs.spaceBefore
     spaceAfterValue.value = paragraphs.spaceAfter
   const over = tc.areaOverflow(single)
@@ -735,6 +747,7 @@ function onTrackingChange(val: number | undefined) {
     if (!item) return
     const applied = tc.setParagraphSettings(item, {
       firstLineIndent: Number(indentValue.value) || 0,
+      hangingIndent: Number(hangingValue.value) || 0,
       spaceBefore: Math.round(Number(spaceBeforeValue.value) || 0),
       spaceAfter: Math.round(Number(spaceAfterValue.value) || 0),
     })

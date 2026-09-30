@@ -16,7 +16,7 @@
  * This module is pure: text in, per-frame windows out. The controller owns the
  * paper items and the links between them.
  */
-import { layoutParagraphs, normalizeParagraphSettings, type ParagraphSettings, type PositionedLine } from './paragraphs'
+import { layoutParagraphs, normalizeParagraphSettings, wrapParagraphIndentedWithOffsets, type ParagraphSettings, type PositionedLine } from './paragraphs'
 import { wrapParagraphWithOffsets } from './line-break'
 
 /** One frame's box, in chain order. */
@@ -150,18 +150,23 @@ function wrapTail(
   settings: ParagraphSettings,
   measure: (line: string) => number
 ): { wrapped: Array<{ text: string; paragraph: number; end: number }> } {
-  const indentWidth = settings.firstLineIndent
+  const { firstLineIndent, hangingIndent } = settings
   const paragraphs = tail.split('\n')
   const wrapped: Array<{ text: string; paragraph: number; end: number }> = []
   let pos = 0
   for (let p = 0; p < paragraphs.length; p++) {
     const paragraph = paragraphs[p]
-    const first = wrapParagraphWithOffsets(paragraph, width, measure)
-    const firstText = first[0]?.text ?? ''
-    const lines =
-      indentWidth > 0 && measure(firstText) + indentWidth > width
-        ? wrapParagraphWithOffsets(paragraph, Math.max(1, width - indentWidth), measure)
-        : first
+    // The continuation frame lays out exactly like the frame before it: the
+    // body is narrower by the hanging indent, and the first line gets its
+    // allowance back.
+    const lines = wrapParagraphIndentedWithOffsets(
+      paragraph,
+      {
+        firstLine: Math.max(1, width - Math.max(0, firstLineIndent - hangingIndent)),
+        body: Math.max(1, width - hangingIndent),
+      },
+      measure
+    )
     for (const line of lines) {
       wrapped.push({ text: line.text, paragraph: p, end: pos + line.end })
     }

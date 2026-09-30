@@ -24,6 +24,7 @@ import {
   defaultParagraphSettings,
   layoutParagraphs,
   normalizeParagraphSettings,
+  wrapParagraphIndented,
   type ParagraphSettings,
 } from './paragraphs'
 import { flowTextThroughFrames, spliceThreadedText, type FlowWindow } from './thread-flow'
@@ -1218,13 +1219,19 @@ export class TextController {
     metrics?: TextMetrics
   ): { content: string; lineCount: number } {
     const measure = (line: string) => this.measureLineWidth(line, metrics)
-    const indent = normalizeParagraphSettings(settings).firstLineIndent
+    const { firstLineIndent, hangingIndent } = normalizeParagraphSettings(settings)
     const out: Array<{ text: string; paragraph: number }> = []
     raw.split('\n').forEach((paragraph, index) => {
-      let lines = wrapParagraph(paragraph, maxWidth, measure)
-      if (indent > 0 && lines.length > 0 && measure(lines[0]) + indent > maxWidth) {
-        lines = wrapParagraph(paragraph, Math.max(1, maxWidth - indent), measure)
-      }
+      // The body carries the hanging indent, so it is the narrow width; the
+      // first line gets its own (wider) allowance back after wrapping.
+      const lines = wrapParagraphIndented(
+        paragraph,
+        {
+          firstLine: Math.max(1, maxWidth - Math.max(0, firstLineIndent - hangingIndent)),
+          body: Math.max(1, maxWidth - hangingIndent),
+        },
+        measure
+      )
       for (const text of lines) out.push({ text, paragraph: index })
     })
     const laid = layoutParagraphs(out, settings, measure)
