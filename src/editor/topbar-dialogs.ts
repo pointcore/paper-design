@@ -34,6 +34,7 @@ export const EXPORT_FORMATS: Array<{ value: RasterExportFormat; label: string }>
   { value: 'png', label: 'PNG' },
   { value: 'jpeg', label: 'JPEG' },
   { value: 'webp', label: 'WebP' },
+  { value: 'tiff', label: 'TIFF (print)' },
 ]
 
 /** Raster scale options for the export dialog. */
@@ -80,7 +81,7 @@ export function sanitizeExportForm(v: unknown): ExportForm {
   const raw = v as Partial<ExportForm>
   return {
     format:
-      raw.format === 'png' || raw.format === 'jpeg' || raw.format === 'webp'
+      raw.format === 'png' || raw.format === 'jpeg' || raw.format === 'webp' || raw.format === 'tiff'
         ? raw.format
         : fallback.format,
     scale: raw.scale === 1 || raw.scale === 2 || raw.scale === 3 ? raw.scale : fallback.scale,

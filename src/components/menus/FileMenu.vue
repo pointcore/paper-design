@@ -87,7 +87,9 @@
             </el-select>
           </div>
 
-          <div v-if="exportForm.format !== 'png'" class="setting-row">
+          <!-- Only the lossy encoders take a quality; PNG is lossless and TIFF
+               is written uncompressed. -->
+          <div v-if="exportForm.format === 'jpeg' || exportForm.format === 'webp'" class="setting-row">
             <div class="setting-label">
               <span class="setting-name">Quality</span>
             </div>

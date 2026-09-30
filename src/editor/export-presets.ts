@@ -19,7 +19,7 @@ export interface ExportPreset {
 }
 
 const AREAS: RasterExportArea[] = ['selection', 'artwork', 'page']
-const FORMATS: RasterExportFormat[] = ['png', 'jpeg', 'webp']
+const FORMATS: RasterExportFormat[] = ['png', 'jpeg', 'webp', 'tiff']
 
 /** Built-in starting points (web 1x, retina 2x, print 3x, full set). */
 export function defaultExportPresets(): ExportPreset[] {
@@ -27,6 +27,7 @@ export function defaultExportPresets(): ExportPreset[] {
     { id: 'preset-web-1x', name: 'Web 1x PNG', area: 'artwork', format: 'png', scales: [1] },
     { id: 'preset-retina-2x', name: 'Retina 2x PNG', area: 'artwork', format: 'png', scales: [2] },
     { id: 'preset-print-3x', name: 'Print 3x PNG', area: 'page', format: 'png', scales: [3] },
+    { id: 'preset-tiff-page', name: 'Print TIFF', area: 'page', format: 'tiff', scales: [1] },
     { id: 'preset-full-set', name: 'Full set 1x+2x+3x', area: 'artwork', format: 'png', scales: [1, 2, 3] },
   ]
 }

@@ -31,6 +31,7 @@
           <el-option value="png" label="PNG" />
           <el-option value="jpeg" label="JPEG" />
           <el-option value="webp" label="WebP" />
+          <el-option value="tiff" label="TIFF" />
         </el-select>
       </div>
       <div class="row">

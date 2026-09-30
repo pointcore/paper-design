@@ -494,7 +494,7 @@ export interface ViewSettings {
 export type ExportFormat = 'svg' | 'png' | 'jpeg' | 'pdf' | 'webp'
 
 /** Raster export format supported by the canvas capture. */
-export type RasterExportFormat = 'png' | 'jpeg' | 'webp'
+export type RasterExportFormat = 'png' | 'jpeg' | 'webp' | 'tiff'
 
 /** Artwork source for raster export (page means the page-size rect). */
 export type RasterExportArea = 'artwork' | 'selection' | 'page'
@@ -506,8 +506,14 @@ export interface RasterExportOptions {
   scale: number
   /** Which artwork fills the output frame. */
   area: RasterExportArea
-  /** JPEG/WebP quality 0.1-1 (default 0.92, ignored for PNG). */
-  quality?: number
+    /** JPEG/WebP quality 0.1-1 (default 0.92, ignored for PNG and TIFF). */
+    quality?: number
+    /**
+     * Pixels per inch recorded in a TIFF's resolution tags. Defaults to the
+     * export scale, so a 1x export of a 96-unit-per-inch document claims the
+     * document's own resolution rather than a guess.
+     */
+    dpi?: number
 }
 
 /** Versioned project file envelope used by Save/Open. */

@@ -54,7 +54,7 @@ describe('page presets', () => {
 
 describe('export option lists', () => {
   it('covers the runnable combinations', () => {
-    expect(EXPORT_FORMATS.map((o) => o.value)).toEqual(['png', 'jpeg', 'webp'])
+    expect(EXPORT_FORMATS.map((o) => o.value)).toEqual(['png', 'jpeg', 'webp', 'tiff'])
     expect(EXPORT_SCALES.map((o) => o.value)).toEqual([1, 2, 3])
     expect(EXPORT_QUALITIES.map((o) => o.value)).toEqual([0.92, 0.75, 0.55])
     expect(EXPORT_AREAS.map((o) => o.value)).toEqual(['artwork', 'selection', 'page'])
