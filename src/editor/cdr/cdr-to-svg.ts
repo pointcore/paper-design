@@ -874,11 +874,27 @@ const CDR = (() => {
               const font = view(b).getUint16(p, true),
                 charset = view(b).getUint16(p + 2, true);
               skip(12);
-              const size = long();
+              // CDR X4 font records carry three size-like longs here: the
+              // first and third echo the nominal size, the middle one holds
+              // the size CorelDRAW displays once "fit text to frame" has
+              // stretched the text. Plain styles keep all three in agreement,
+              // but a stretched frame leaves a stale nominal first slot that
+              // is an order of magnitude off (a production title stored as
+              // 201.9pt that displays at 16.1pt, or cell text stored as
+              // 0.77pt that displays at 9pt). The slots of untouched styles
+              // stay within ~3x of each other, so when the first slot
+              // diverges from the middle by 10x, the middle one is the size
+              // to render with.
+              const size = long(),
+                stretched = u(b, p);
+              const effective =
+                stretched > 0 && (size / stretched > 10 || size / stretched < 0.1)
+                  ? stretched
+                  : size;
               fonts.set(id, {
                 ...legacyFonts.get(font),
                 charset: String(charset || legacyFonts.get(font)?.charset || 0),
-                size: String(size),
+                size: String(effective),
               });
               skip(20);
             }

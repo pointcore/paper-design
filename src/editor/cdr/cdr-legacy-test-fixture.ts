@@ -521,3 +521,128 @@ export function buildLayeredLegacyCdr(spec: LayeredCdrSpec): Uint8Array {
   const riffData = cat(ascii('RIFF'), u32(4 + records.length), ascii('CDRE'), records)
   return storedZip('content/riffData.cdr', riffData)
 }
+
+export interface LegacyTextSpec {
+  /** Font-table entry's first size slot in CDR units (254000 per inch). */
+  nominalSize: number
+  /** Middle size slot: the size CorelDRAW displays for the style. */
+  stretchedSize: number
+  /** Third size slot (echoes the nominal slot in production files). */
+  thirdSlotSize?: number
+}
+
+function utf16le(s: string): Uint8Array {
+  const out = new Uint8Array(s.length * 2)
+  for (let k = 0; k < s.length; k++) {
+    out[k * 2] = s.charCodeAt(k) & 0xff
+    out[k * 2 + 1] = s.charCodeAt(k) >> 8
+  }
+  return out
+}
+
+/**
+ * Legacy (X4 riffData/CDRE) ZIP with one page holding a single artistic text
+ * object ("测试") styled through a `stlt` style table whose font record
+ * carries three size slots, so the frame-stretch repair in readOldStyleTable
+ * can be tested end to end: the character style inherits the font entry, and
+ * the rendered font-size must come from the effective (middle) slot when the
+ * nominal first slot is absurd, and from the nominal slot otherwise.
+ */
+export function buildLegacyTextCdr(spec: LegacyTextSpec): Uint8Array {
+  // loda blob: type 4 (artistic text), no parameters; the payload is txsm.
+  const loda = cat(u32(20), u32(0), u32(0), u32(0), u32(4))
+  const lodaLeaf = record('loda', 3, loda)
+  const lgobPayload = cat(ascii('lgob'), lodaLeaf)
+  const lgob = record('LIST', 2, lgobPayload)
+  // txsm: frame header + one paragraph ("测试") with a table-inherited style.
+  const txsm = cat(
+    u32(0xffffffff), // frame flag (set)
+    zeros(32),
+    u32(1), // one frame
+    zeros(52), // frame record (no on-path)
+    u32(0), // textOnPath
+    u32(1), // one paragraph
+    u32(1001), // base style id -> stlt record
+    zeros(2), // skip(1 + frame?1)
+    u32(1), // one character style
+    u16(2), // chars covered (discarded)
+    new Uint8Array([0, 0]), // flags = 0: inherit the table's font + size
+    u32(2), // two characters
+    u32(1),
+    zeros(4), // char 0: wide, style 0
+    u32(1),
+    zeros(4), // char 1: wide, style 0
+    u32(4), // text byte length
+    utf16le('测试'),
+    zeros(1), // terminator
+  )
+  const objPayload = cat(ascii('obj '), lgob, record('txsm', 4, txsm))
+  const obj = record('LIST', 1, objPayload)
+  // 20x20 mm page bounds in CDR units (no canvas size -> no culling).
+  const bbox = record('bbox', 5, cat(i32(-100000), i32(100000), i32(100000), i32(-100000)))
+  const pagePayload = cat(ascii('page'), bbox, obj)
+  const page = record('LIST', 0, pagePayload)
+  const lengths = cat(
+    u32(pagePayload.length),
+    u32(objPayload.length),
+    u32(lgobPayload.length),
+    u32(loda.length),
+    u32(txsm.length),
+    u32(16),
+  )
+  const zR = new Uint8Array(deflateSync(page))
+  const zT = new Uint8Array(deflateSync(lengths))
+  const size = zR.length + 8
+  const cmprPayload = cat(
+    ascii('cmpr'),
+    u32(size),
+    zeros(12),
+    ascii('CPng'),
+    zeros(4),
+    zR,
+    ascii('CPng'),
+    zeros(4),
+    zT,
+  )
+  const cmpr = record('LIST', cmprPayload.length, cmprPayload)
+  // Style table: one font entry with the three size slots, one style record
+  // (num=2: fill, outline, font, justify) pointing at the font entry.
+  const stltPayload = cat(
+    u32(1), // style count
+    u32(0), // fills
+    u32(0), // outlines
+    u32(1), // fonts
+    u32(2001), // font entry id
+    zeros(20),
+    u16(0), // font id (unnamed -> default fallback font; peeked, p stays)
+    u16(0), // charset (peeked)
+    zeros(8), // rest of the parser's skip(12)
+    u32(spec.nominalSize), // first size slot (the one libcdr reads)
+    u32(spec.stretchedSize), // middle slot: the effective displayed size
+    u32(spec.thirdSlotSize ?? spec.nominalSize), // third slot
+    zeros(12),
+    u32(0), // aligns
+    u32(0), // 52-byte section
+    u32(0), // 152-byte section
+    u32(0), // 784-byte section
+    u32(0), // intervals
+    u32(0), // 28-byte section
+    u32(0), // 36-byte section
+    u32(0), // 28-byte section
+    u32(0), // 12-byte section
+    u32(2), // record: fill/outline/font/justify level
+    u32(1001), // record id
+    u32(0), // parent
+    zeros(8),
+    u32(0), // no extra words
+    u32(0), // fill table id (dangling)
+    u32(0), // outline table id (dangling)
+    u32(2001), // font entry
+    u32(0), // align id (dangling)
+    zeros(12),
+  )
+  const stlt = record('stlt', stltPayload.length, stltPayload)
+  const records = cat(cmpr, stlt)
+  const riffData = cat(ascii('RIFF'), u32(4 + records.length), ascii('CDRE'), records)
+  return storedZip('content/riffData.cdr', riffData)
+}
