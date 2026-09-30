@@ -11,6 +11,7 @@ import type paper from 'paper'
 import type { EditorEngine } from './engine'
 import type { RasterExportOptions } from './types'
 import { unitedBoundsOf } from './engine-arrange'
+import { encodeTiff } from './tiff'
 
 /** Serialize unlocked selected user items into a standalone SVG string. */
 export function exportSelectionSVG(e: EditorEngine): string | null {
@@ -113,6 +114,10 @@ export function rasterizeSelection(e: EditorEngine): boolean {
  * then restored, so no intermediate frame ever paints. Editor chrome
  * layers stay hidden like in SVG export. Returns null when there is
  * nothing to export or the output exceeds the size guard.
+ *
+ * `area: 'page'` keeps the artboard layer visible: the page *is* the sheet,
+ * so hiding it exported a transparent page with the artwork floating on it
+ * (which JPEG's white fill happened to hide and PNG did not).
  */
 export function exportRaster(e: EditorEngine, options: RasterExportOptions): string | null {
   const bounds = rasterBoundsFor(e, options.area)
@@ -124,7 +129,27 @@ export function exportRaster(e: EditorEngine, options: RasterExportOptions): str
   const quality = Number.isFinite(options.quality)
     ? Math.min(1, Math.max(0.1, Number(options.quality)))
     : 0.92
-  return withCapturedView(e, bounds, scale, false, (canvas, width, height) => {
+  return withCapturedView(e, bounds, scale, options.area === 'page', (canvas, width, height) => {
+    if (options.format === 'tiff') {
+      // No canvas encoder writes TIFF, so the bytes are produced here. The
+      // dpi falls back to the export scale: a 3x export of a 96dpi document
+      // is a 288dpi page, which is what a print tool needs to place it.
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return null
+      const data = ctx.getImageData(0, 0, width, height)
+      try {
+        const bytes = encodeTiff({
+          width,
+          height,
+          rgba: data.data,
+          dpi: Number.isFinite(options.dpi) ? Number(options.dpi) : 96 * scale,
+        })
+        return bytesToDataUrl(bytes, 'image/tiff')
+      } catch (err) {
+        e.showStatus(err instanceof Error ? err.message : 'TIFF export failed')
+        return null
+      }
+    }
     if (options.format === 'png') {
       return canvas.toDataURL('image/png')
     }
@@ -140,6 +165,16 @@ export function exportRaster(e: EditorEngine, options: RasterExportOptions): str
     ctx.drawImage(canvas, 0, 0)
     return output.toDataURL(mime, quality)
   })
+}
+
+/** Base64 data URL for raw bytes, chunked so a large page cannot blow the stack. */
+function bytesToDataUrl(bytes: Uint8Array, mime: string): string {
+  let binary = ''
+  const chunk = 0x8000
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk))
+  }
+  return `data:${mime};base64,${btoa(binary)}`
 }
 
 /**
