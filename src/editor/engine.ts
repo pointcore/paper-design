@@ -23,6 +23,15 @@ import * as tree from './engine-tree'
 import * as pathfinder from './engine-pathfinder'
 import * as join from './engine-join'
 import * as widthProfile from './engine-width'
+import {
+  BASELINE_SNAP_SCREEN_PX,
+  baselineLines,
+  baselineOffsetFor,
+  defaultBaselineGrid,
+  firstBaselineY,
+  normalizeBaselineGrid,
+  snapBaseline,
+} from './baseline-grid'
 import type { WidthProfile } from './path-drawing/width-profile'
 import * as compound from './engine-compound'
 import * as appearance from './engine-appearance'
@@ -961,7 +970,96 @@ export class EditorEngine {
         `${Math.ceil((b.x + b.width) / step)},${Math.ceil((b.y + b.height) / step)}`
       )
     }
+    // The baseline grid has to be part of the key, or changing the interval
+    // would leave the old lines on screen with nothing to trigger a redraw.
+    const grid = this.store.baselineGrid
+    if (grid.visible) parts.push(`b${grid.interval},${grid.origin},${grid.color},${Math.floor(b.y)},${Math.ceil(b.y + b.height)}`)
     return parts.join('|')
+  }
+
+  /**
+   * Baselines across the viewport, drawn over the document grid.
+   *
+   * The baseline grid is horizontal only — that is the whole difference from
+   * the document grid — and every fifth line is drawn stronger so the eye has
+   * something to count against. The major line of the document grid and a
+   * baseline can share a colour only by accident, so it gets its own.
+   */
+  private drawBaselineGrid() {
+    if (!this.gridLayer) return
+    const v = this.scope.view
+    const b = v.bounds
+    if (!(b.width > 0) || !(b.height > 0)) return
+    const settings = this.store.baselineGrid
+    const lineWidth = 1 / (v.zoom || 1)
+    const style = (alpha: number) => {
+      const color = new this.scope.Color(settings.color || '#4a90d9')
+      color.alpha = alpha
+      return { strokeColor: color, strokeWidth: lineWidth, strokeCap: 'round' as const }
+    }
+    for (const line of baselineLines(b, settings)) {
+      const item = new this.scope.Path.Line(
+        new this.scope.Point(b.x, line.y),
+        new this.scope.Point(b.x + b.width, line.y)
+      )
+      item.set(style(line.major ? 0.45 : 0.2))
+      item.data.isGridItem = true
+      // Tagged so anything reading the grid layer (tests, future exports) can
+      // tell a baseline from a document-grid line: they share a layer and can
+      // share a y.
+      item.data.isBaselineItem = true
+      this.gridLayer.addChild(item)
+    }
+  }
+
+  /** Whether the document still uses the stock baseline grid. */
+  private baselineGridIsDefault(): boolean {
+    const current = normalizeBaselineGrid(this.store.baselineGrid)
+    const base = defaultBaselineGrid()
+    return (
+      current.visible === base.visible &&
+      current.interval === base.interval &&
+      current.origin === base.origin &&
+      current.color === base.color &&
+      current.alignText === base.alignText &&
+      current.snap === base.snap
+    )
+  }
+
+  /**
+   * Snap a y coordinate to the baseline grid, in document units.
+   *
+   * The tolerance is derived from the current zoom so the snap feels the same
+   * on screen at any magnification: a snap that only works at 100% is a snap
+   * nobody trusts.
+   */
+  snapBaseline(y: number): { y: number; snapped: boolean } {
+    const settings = this.store.baselineGrid
+    if (!settings.snap) return { y, snapped: false }
+    const tolerance = BASELINE_SNAP_SCREEN_PX / (this.scope.view.zoom || 1)
+    return snapBaseline(y, settings, tolerance)
+  }
+  /**
+   * Put a text item's first baseline on the grid.
+   *
+   * The *baseline* goes on the line, not the frame top: a PointText is
+   * positioned by its top edge, so aligning that instead puts every block a
+   * leading above the grid — visibly off, and the reason the earlier version of
+   * this looked broken. Aligning the first baseline also carries the rest of
+   * the block, because the leading steps to the next grid line whenever it is a
+   * multiple of the interval. Returns the shift applied, so the caller can
+   * tell "already aligned" from "moved".
+   */
+  alignTextToBaselineGrid(item: paper.PointText): number {
+    const settings = this.store.baselineGrid
+    if (!settings.alignText || !item.parent) return 0
+    // `point` is the anchor; `position` sits above it by the ascent, so using
+    // it would land every block a font's ascent off the rhythm.
+    const baseline = firstBaselineY(item.point.y, Number(item.fontSize) || 12)
+    const { shift } = baselineOffsetFor(baseline, settings)
+    if (Math.abs(shift) < 1e-6) return 0
+    item.point = new this.scope.Point(item.point.x, item.point.y + shift)
+    return shift
   }
 
   /**
@@ -971,7 +1069,8 @@ export class EditorEngine {
    * more than the screen can display. Hiding applies immediately.
    */
   refreshGrid() {
-    if (!this.store.view.showGrid && !this.store.view.pixelPreview) {
+    const baselineOn = this.store.baselineGrid.visible
+    if (!this.store.view.showGrid && !this.store.view.pixelPreview && !baselineOn) {
       if (this.gridRaf) {
         cancelAnimationFrame(this.gridRaf)
         this.gridRaf = 0
@@ -987,17 +1086,19 @@ export class EditorEngine {
     if (this.gridRaf) return
     this.gridRaf = requestAnimationFrame(() => {
       this.gridRaf = 0
-      if (!this.store.view.showGrid && !this.store.view.pixelPreview) return
+      const baselines = this.store.baselineGrid.visible
+      if (!this.store.view.showGrid && !this.store.view.pixelPreview && !baselines) return
       const layer = this.ensureGridLayer()
       layer.visible = true
-      // One combined rebuild for the document grid and the pixel preview:
-      // they share the layer, so either change redraws both.
+      // One combined rebuild for the document grid, the pixel preview and the
+      // baseline grid: they share the layer, so any change redraws all of them.
       const key = this.viewGridsKey()
       if (key !== this.lastGridKey) {
         this.lastGridKey = key
         layer.removeChildren()
         if (this.store.view.showGrid) this.drawGrid(this.store.snap.gridSize || 10)
         if (this.store.view.pixelPreview) this.drawPixelGrid()
+        if (baselines) this.drawBaselineGrid()
       }
       this.scope.view.update()
     })
@@ -1534,6 +1635,9 @@ export class EditorEngine {
       snapshot: this.snapshotProjectObject(),
       artboards: this.store.artboards.map((board) => ({ ...board })),
       activeArtboardId: this.store.activeArtboardId,
+      // Only written once it differs from the default, so a project that has
+      // never heard of a baseline grid keeps the file shape it had.
+      baselineGrid: this.baselineGridIsDefault() ? undefined : { ...this.store.baselineGrid },
     }
     return JSON.stringify(data)
   }
@@ -1607,6 +1711,9 @@ export class EditorEngine {
     }
     // Same for bleed: absent means "none", not "whatever was open before".
     this.store.setBleed(Number.isFinite(parsed.bleed) ? Math.max(0, Number(parsed.bleed)) : 0)
+    // And the same for the baseline grid: a file without the field gets the
+    // defaults, not the outgoing document's grid.
+    this.store.setBaselineGrid(normalizeBaselineGrid(parsed.baselineGrid))
     // The key object id never survives a document switch: the old item is gone.
     this.store.setKeyObject('')
     this.restoreArtboards(parsed.artboards, parsed.activeArtboardId, pageSize)
@@ -1623,8 +1730,7 @@ export class EditorEngine {
   }
 
   /** Reset the document to an empty state with the given page size. */
-  newDocument(width: number, height: number): void {
-    const w = Number.isFinite(width) ? Math.min(16384, Math.max(1, Math.round(width))) : 1920
+  newDocument(width: number, height: number): void {    const w = Number.isFinite(width) ? Math.min(16384, Math.max(1, Math.round(width))) : 1920
     const h = Number.isFinite(height) ? Math.min(16384, Math.max(1, Math.round(height))) : 1080
     this.clearIsolationState()
     this.project.clear()
@@ -1633,6 +1739,7 @@ export class EditorEngine {
     this.pointActiveLayerAtRestoredStack()
     this.store.setPageSize(w, h)
     this.store.setBleed(0)
+    this.store.setBaselineGrid(defaultBaselineGrid())
     this.store.setKeyObject('')
     const boardId = this.genId()
     this.store.setArtboards([

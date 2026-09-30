@@ -25,6 +25,7 @@ import type {
   WorkspacePreset,
 } from './types'
 import { defaultWidthProfiles, normalizeProfile, type WidthProfile } from './path-drawing/width-profile'
+import { defaultBaselineGrid, normalizeBaselineGrid, type BaselineGridSettings } from './baseline-grid'
 
 // --- Defaults ---
 
@@ -213,6 +214,12 @@ export const useEditorStore = defineStore('editor', {
      * user profiles are prepended, newest first.
      */
     widthProfiles: defaultWidthProfiles() as WidthProfile[],
+    /**
+     * Typographic baseline grid (AI parity): horizontal lines at the type
+     * leading, plus the two behaviours that make it worth setting — snapping
+     * a dragged baseline, and forcing text onto the grid.
+     */
+    baselineGrid: defaultBaselineGrid() as BaselineGridSettings,
     /** Live-shape options surfaced in the contextual control bar */
     polygonSides: 5,
     polygonStar: false,
@@ -741,6 +748,11 @@ export const useEditorStore = defineStore('editor', {
       /** Delete a user width profile (the built-ins stay) */
       removeWidthProfile(id: string) {
         this.widthProfiles = this.widthProfiles.filter((p) => p.id !== id)
+      },
+
+      /** Replace the baseline grid settings (storage load, panel edits) */
+      setBaselineGrid(grid: unknown) {
+        this.baselineGrid = normalizeBaselineGrid(grid)
       },
 
 

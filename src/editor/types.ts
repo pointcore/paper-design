@@ -2,6 +2,9 @@
  * Editor type definitions
  * All shared TypeScript types are defined here
  */
+import type { BaselineGridSettings } from './baseline-grid'
+
+export type { BaselineGridSettings }
 
 /** Tool name */
 export type ToolName =
@@ -531,6 +534,11 @@ export interface ProjectFileData {
   pageSize: { width: number; height: number }
   /** Print bleed in document units (absent/legacy means 0). */
   bleed?: number
+  /**
+   * Typographic baseline grid settings (absent in files predating it, and in
+   * files that never changed it — both mean the defaults).
+   */
+  baselineGrid?: BaselineGridSettings
   /**
    * Paper.js project snapshot in its native format: an array of
    * `["Class", {...}]` tuples (nested since v2, JSON string in v1).

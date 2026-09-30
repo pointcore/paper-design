@@ -2719,6 +2719,13 @@ export class SelectController {
     const correction = this.snapService.alignDraggedBounds(candidate, this.dragItems)
     let totalX = dx + correction.dx
     let totalY = dy + correction.dy
+    // A single dragged text item also snaps its first baseline to the
+    // typographic grid, the way a designer expects when one is set: type has
+    // to land on the rhythm, geometry does not.
+    if (this.dragItems.length === 1 && (totalX !== 0 || totalY !== 0)) {
+      const baseline = this.snapService.snapTextBaseline(this.dragItems[0])
+      if (baseline.snapped) totalY += baseline.dy
+    }
     if (modifiers && modifiers.shift && (totalX !== 0 || totalY !== 0)) {
       if (Math.abs(totalX) > Math.abs(totalY)) totalY = 0
       else totalX = 0

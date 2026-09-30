@@ -20,6 +20,7 @@
  */
 import type { EditorEngine } from '../engine'
 import { project as guideProject } from '../guides/guide-geometry'
+import { firstBaselineY, snapBaseline } from '../baseline-grid'
 
 /** Bounds correction plus temporary guide segments for one drag step. */
 export interface SmartCorrection {
@@ -253,6 +254,36 @@ export class SnapService {
     const engine = this.engine
     if (!engine) return 0
     return 6 / (engine.scope.view.zoom || 1)
+  }
+
+  /**
+   * Snap a dragged text item's first baseline onto the baseline grid.
+   *
+   * Only offered for a drag of text: geometry has no business on a typographic
+   * grid, and a mixed drag has no single baseline to offer. The returned dy
+   * is 0 when the grid is off, the snap is off, or the baseline is already
+   * within tolerance of a line.
+   *
+   * The tolerance is zoom-derived, so the snap behaves the same on screen at
+   * 800% and at 10% — a snap that only works at 100% is one nobody trusts.
+   */
+  snapTextBaseline(item: paper.Item): { dy: number; snapped: boolean } {
+    const engine = this.engine
+    const none = { dy: 0, snapped: false }
+    if (!engine) return none
+    if (!(item instanceof engine.scope.PointText)) return none
+    if ((item.data as any)?.annotation) return none
+    const grid = engine.store.baselineGrid
+    if (!grid.snap) return none
+    // `point`, not `position`: for a PointText the two differ by the distance
+    // from the anchor to the top of the drawn bounds (ascent and half-leading),
+    // so `position` would put every baseline a font's ascent above where the
+    // text actually sits. The baseline, not the frame top, is the grid line.
+    const baseline = firstBaselineY((item as paper.PointText).point.y, Number((item as any).fontSize) || 12)
+    const tol = this.tolerance()
+    const result = snapBaseline(baseline, grid, tol)
+    if (!result.snapped) return none
+    return { dy: result.y - baseline, snapped: true }
   }
 
   /**

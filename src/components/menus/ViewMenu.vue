@@ -87,6 +87,56 @@
               @change="onGridSizeChange" />
           </div>
 
+          <!-- Baseline grid: the typographic rhythm, not a geometry grid -->
+          <div class="setting-row">
+            <div class="setting-label">
+              <span class="setting-name">Baseline Grid</span>
+              <span class="setting-desc">Horizontal lines at the type leading</span>
+            </div>
+            <el-switch v-model="settings.baseline" size="small" @change="onBaselineToggle" />
+          </div>
+
+          <div v-if="settings.baseline" class="setting-section setting-sub">
+            <div class="setting-row setting-sub">
+              <div class="setting-label">
+                <span class="setting-name">Interval</span>
+                <span class="setting-desc">Distance between baselines (use the leading)</span>
+              </div>
+              <el-input-number v-model="settings.baselineInterval" :min="1" :max="400" :step="0.1"
+                size="small" @change="onBaselineChange" />
+            </div>
+            <div class="setting-row setting-sub">
+              <div class="setting-label">
+                <span class="setting-name">First Baseline</span>
+                <span class="setting-desc">Y of the topmost line</span>
+              </div>
+              <el-input-number v-model="settings.baselineOrigin" :step="1" size="small"
+                @change="onBaselineChange" />
+            </div>
+            <div class="setting-row setting-sub">
+              <div class="setting-label">
+                <span class="setting-name">Align Text</span>
+                <span class="setting-desc">Put every text block on the grid</span>
+              </div>
+              <el-switch v-model="settings.baselineAlignText" size="small" @change="onBaselineChange" />
+            </div>
+            <div class="setting-row setting-sub">
+              <div class="setting-label">
+                <span class="setting-name">Snap</span>
+                <span class="setting-desc">Pull a dragged baseline onto the nearest line</span>
+              </div>
+              <el-switch v-model="settings.baselineSnap" size="small" @change="onBaselineChange" />
+            </div>
+            <div class="setting-row setting-sub">
+              <div class="setting-label">
+                <span class="setting-name">Color</span>
+                <span class="setting-desc">Grid line color</span>
+              </div>
+              <el-color-picker v-model="settings.baselineColor" size="small" show-alpha
+                @change="onBaselineChange" />
+            </div>
+          </div>
+
           <div class="setting-row">
             <div class="setting-label">
               <span class="setting-name">Transparent Background</span>
@@ -321,6 +371,7 @@ import {
   preflightSeverity,
 } from '../../editor/topbar-dialogs'
 import type { RulerUnit } from '../../editor/types'
+import type paper from 'paper'
 import { displayGuideAngle } from '../../editor/guides/guide-geometry'
 
 const store = useEditorStore()
@@ -487,6 +538,12 @@ const settings = reactive({
   rulers: store.view.rulersVisible,
   grid: store.view.showGrid,
   gridSize: store.snap.gridSize,
+  baseline: store.baselineGrid.visible,
+  baselineInterval: store.baselineGrid.interval,
+  baselineOrigin: store.baselineGrid.origin,
+  baselineAlignText: store.baselineGrid.alignText,
+  baselineSnap: store.baselineGrid.snap,
+  baselineColor: store.baselineGrid.color,
   transparent: store.view.transparentBackground,
   unit: store.rulerUnit as RulerUnit,
   snap: store.snap.enable,
@@ -649,6 +706,60 @@ function onGridSizeChange(val: number | undefined) {
   store.updateSnap({ gridSize: val })
   const e = engineRef?.value
   if (e) e.refreshGrid()
+}
+
+/**
+ * Baseline grid edits.
+ *
+ * The panel is the only place the interval is set, so it also pushes the
+ * current leading into it on the first show: a grid that is not the leading is
+ * a grid the type does not sit on, which is the whole point of one.
+ */
+function onBaselineToggle(val: boolean) {
+  const e = engineRef?.value
+  const current = store.baselineGrid
+  if (val && e) {
+    const tc = e.getController('type') as { effectiveLeading?: () => number } | null
+    const leading = tc?.effectiveLeading?.()
+    if (leading && leading > 0) {
+      settings.baselineInterval = Math.round(leading * 100) / 100
+    }
+  }
+  store.setBaselineGrid({ ...current, visible: val, interval: settings.baselineInterval })
+  e?.refreshGrid()
+}
+
+function onBaselineChange() {
+  store.setBaselineGrid({
+    visible: settings.baseline,
+    interval: settings.baselineInterval,
+    origin: settings.baselineOrigin,
+    alignText: settings.baselineAlignText,
+    snap: settings.baselineSnap,
+    color: settings.baselineColor,
+  })
+  const e = engineRef?.value
+  if (!e) return
+  e.refreshGrid()
+  // Aligning text is a document-wide rule, so turning it on has to reach the
+  // text that is already there — not only text created afterwards.
+  if (settings.baselineAlignText) {
+    const touched = E_alignAllTextToGrid(e)
+    if (touched > 0) e.pushHistory('Align Text to Baseline Grid')
+  }
+}
+
+/** Put every text item in the document on the grid; returns how many moved. */
+function E_alignAllTextToGrid(e: EditorEngine): number {
+  const items = e.project
+    .getItems({ class: e.scope.PointText })
+    .filter((it: paper.Item) => !!(it as any).parent && !(it as any).data?.annotation) as paper.PointText[]
+  let moved = 0
+  for (const item of items) {
+    if (Math.abs(e.alignTextToBaselineGrid(item)) > 1e-6) moved += 1
+  }
+  if (moved > 0) e.scope.view.update()
+  return moved
 }
 
 function onTransparentToggle(val: boolean) {

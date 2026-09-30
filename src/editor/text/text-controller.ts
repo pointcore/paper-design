@@ -631,6 +631,10 @@ export class TextController {
     // field must still read back as the defaults.
     text.data.paragraphs = normalizeParagraphSettings(data.paragraphs)
     engine.getActiveLayer().addChild(text)
+    // With "align to baseline grid" on, new type lands on the rhythm: the
+    // first baseline goes onto a grid line and the leading carries the rest of
+    // the block down the grid.
+    if (data.textMode !== 'path') engine.alignTextToBaselineGrid(text as paper.PointText)
 
     if (push) {
       engine.selectItem(text)
