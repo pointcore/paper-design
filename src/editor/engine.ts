@@ -1370,6 +1370,11 @@ export class EditorEngine {
     masks.toggleOpacityMaskInvert(this, item, invert)
   }
 
+  /** See engine-masks.ts. What the mask composites as, in panel words. */
+  maskCompositeNote(item: paper.Item | null): string | null {
+    return masks.maskCompositeNote(this, item)
+  }
+
   // ===== Mesh gradients (simulated via triangle tessellation) =====
   //
   // Paper.js has no native mesh gradient. We simulate one by:

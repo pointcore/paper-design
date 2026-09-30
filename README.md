@@ -42,7 +42,10 @@ A vector graphics editor built with **Vue 3 + TypeScript + Paper.js**, offering 
 
 - **Plugin API**: a small in-page command registry (`src/editor/plugin-api.ts`; `plugin-sample.ts` ships three examples) whose commands surface in the command palette. Scope caveat: it is **convenience isolation, not a security boundary** — commands run with the full engine and store inside the same realm, errors are contained per invocation only, and there is no realm sandbox or install manifest. Only register plugins you trust.
 
-Not yet implemented: mesh gradients, opacity masks. (Both have engine methods and a canvas approximation — a semi-transparent clone and a triangle tessellation respectively — but neither is real compositing yet.)
+- **Opacity masks**: real compositing, not a preview. With several objects selected the top one becomes the mask and everything under it is masked (Illustrator's arrangement, one clip group per target); with a single object the mask is a clip of its own bounds, which reveals the object in full (the same default as Illustrator's "Make Mask"). The mask source is consumed, the clip shape is not artwork, and turning the mask off brings the artwork back; releasing it restores the original item. Canvas and export agree without any export-side rewriting: paper exports the clip mask as an SVG `<clipPath>` and points the artwork at it. The panel says what the mask really composites as — the shape's silhouette, or the union of several shapes; a gradient or photo mask loses its tones, because compositing luminance into alpha needs a raster pipeline paper does not have, and **invert** is therefore not offered.
+- **Mesh gradients**: an approximation only — engine methods plus a triangle tessellation, not real compositing.
+
+Not yet implemented: real tonal (luminance) opacity masks and mesh gradients.
 
 ---
 

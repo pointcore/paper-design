@@ -54,17 +54,14 @@
         <!-- Opacity Mask -->
         <div class="layer-header">
           <span>Opacity Mask</span>
-          <el-icon v-if="!hasOpacityMask" size="14" class="add-btn" title="Create Opacity Mask" @click="createOpacityMask"><Plus /></el-icon>
-          <el-icon v-else size="14" class="add-btn" title="Remove Opacity Mask" @click="removeOpacityMask"><Delete /></el-icon>
+          <el-icon v-if="!hasOpacityMask" size="14" class="add-btn" :title="maskButtonTitle" @click="createOpacityMask"><Plus /></el-icon>
+          <el-icon v-else size="14" class="add-btn" title="Release Opacity Mask" @click="removeOpacityMask"><Delete /></el-icon>
         </div>
         <div v-if="hasOpacityMask" class="mask-controls">
           <div class="row">
             <el-checkbox v-model="maskEnabled" size="small" @change="onMaskEnabledChange">Enabled</el-checkbox>
           </div>
-          <div class="row">
-            <el-checkbox v-model="maskInvert" size="small" @change="onMaskInvertChange">Invert</el-checkbox>
-          </div>
-          <div class="hint">Mask uses luminance to control alpha</div>
+          <div v-if="maskNote" class="hint">{{ maskNote }}</div>
         </div>
         <div v-else class="hint">No opacity mask applied</div>
 
@@ -137,7 +134,16 @@ const blendModes = [
 // Opacity mask state
 const hasOpacityMask = ref(false)
 const maskEnabled = ref(true)
-const maskInvert = ref(false)
+const maskNote = ref('')
+// With more than one object selected the top object becomes the mask, which
+// is what "Make Mask" does in Illustrator and CorelDRAW. With a single object
+// there is nothing to mask with, so the button is a clip of the object's own
+// bounds and the label has to say so.
+const maskButtonTitle = computed(() =>
+  store.selectedItemIds.length > 1
+    ? 'Mask with the top object'
+    : 'Add a mask (nothing selected to mask with: the artwork stays fully visible)',
+)
 
 // Mesh gradient state
 const hasMeshGradient = ref(false)
@@ -167,7 +173,7 @@ function syncFromItem() {
   const mask = engineRef.value.getOpacityMask(item)
   hasOpacityMask.value = !!mask
   maskEnabled.value = mask?.enabled ?? true
-  maskInvert.value = mask?.invert ?? false
+  maskNote.value = engineRef.value.maskCompositeNote(item) ?? ''
   // Sync mesh gradient state
   const mesh = engineRef.value.getMeshGradient(item)
   hasMeshGradient.value = !!mesh
@@ -275,19 +281,40 @@ function onItemBlendChange(val: string) {
 
 // Opacity mask functions
 function createOpacityMask() {
+  const engine = engineRef?.value
+  if (!engine) return
+  const selection = engine.getSelection().filter((it) => !it.locked && it.parent)
+  if (selection.length > 1) {
+    // Illustrator's arrangement: the top object is the mask and everything
+    // under it is what gets masked. Each object is masked on its own (paper
+    // clips per group), so nothing has to be joined destructively first.
+    const ordered = selection
+      .slice()
+      .sort((a, b) => (a.isBelow(b) ? -1 : a.isAbove(b) ? 1 : 0))
+    const mask = ordered[ordered.length - 1]
+    if (!mask.bounds) return
+    for (const content of ordered.slice(0, -1)) {
+      // A clone per target: applying the mask consumes its source.
+      engine.applyOpacityMask(content, mask.clone({ insert: false }))
+    }
+    engine.pushHistory('Apply Opacity Mask')
+    return
+  }
   const item = selectedItem.value
-  if (!item || !engineRef?.value) return
-  const scope = engineRef.value.scope
+  if (!item) return
+  const scope = engine.scope
   const bounds = item.bounds
   if (!bounds) return
+  // Nothing selected to mask with: a clip of the object's own bounds, which
+  // reveals the object in full. Same default as Illustrator's "Make Mask".
   const maskRect = new scope.Path.Rectangle({
     rectangle: bounds,
     fillColor: new scope.Color(1),
     insert: false,
   })
-  maskRect.data = { id: engineRef.value.genId(), isUserItem: true, isOpacityMask: true }
-  engineRef.value.applyOpacityMask(item, maskRect)
-  engineRef.value.pushHistory('Apply Opacity Mask')
+  maskRect.data = { id: engine.genId(), isUserItem: true, isOpacityMask: true }
+  engine.applyOpacityMask(item, maskRect)
+  engine.pushHistory('Apply Opacity Mask')
   syncFromItem()
 }
 
@@ -304,13 +331,6 @@ function onMaskEnabledChange(val: boolean) {
   if (!item || !engineRef?.value) return
   engineRef.value.toggleOpacityMask(item, val)
   engineRef.value.pushHistory('Toggle Opacity Mask')
-}
-
-function onMaskInvertChange(val: boolean) {
-  const item = selectedItem.value
-  if (!item || !engineRef?.value) return
-  engineRef.value.toggleOpacityMaskInvert(item, val)
-  engineRef.value.pushHistory('Invert Opacity Mask')
 }
 
 // Mesh gradient functions

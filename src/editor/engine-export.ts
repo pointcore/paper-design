@@ -309,8 +309,11 @@ export function exportBoardVectorSVG(
     if (opts?.marks && bleed > 0) {
       appendCropMarks(root, ns, board, bleed)
     }
-    // Convert opacity-mask groups to SVG <mask> elements
-    applySvgMasks(root)
+    // No mask post-processing: an opacity mask is a paper clip mask, and paper
+    // exports it as an SVG <clipPath> that the artwork points at — the same
+    // silhouette the canvas composites. (The old rewrite looked for
+    // `data-isOpacityMaskGroup` attributes that paper never writes, so it had
+    // never run.)
     return root
   } catch {
     return null
@@ -368,77 +371,6 @@ function appendCropMarks(
   root.appendChild(group)
 }
 
-/**
- * Post-process exported SVG to convert opacity-mask groups into proper
- * SVG `<mask>` elements. Paper.js has no native mask export, so we
- * detect groups with `data-isOpacityMaskGroup` and rewrite them.
- */
-function applySvgMasks(root: SVGSVGElement): void {
-  const ns = 'http://www.w3.org/2000/svg'
-  const defs = document.createElementNS(ns, 'defs')
-  let defsInserted = false
-  let maskId = 0
-
-  const groups = root.querySelectorAll('g')
-  for (const g of Array.from(groups)) {
-    const dataStr = g.getAttribute('data-isOpacityMaskGroup')
-    if (dataStr !== 'true') continue
-
-    const children = Array.from(g.children)
-    if (children.length < 1) continue
-
-    // The first child is the masked content, second (if present) is the mask shape
-    const maskedContent = children[0]
-    const maskShape = children.length > 1 ? children[1] : null
-
-    if (!maskShape) continue
-
-    const id = `vve-mask-${maskId++}`
-
-    // Build a <mask> element with the mask shape
-    const mask = document.createElementNS(ns, 'mask')
-    mask.setAttribute('id', id)
-    mask.setAttribute('maskUnits', 'userSpaceOnUse')
-
-    // Copy the mask shape into the mask (luminance mask = white=opaque)
-    const maskContent = maskShape.cloneNode(true) as SVGElement
-    // Ensure the mask shape renders in luminance
-    if (maskContent.tagName === 'path' || maskContent.tagName === 'rect' ||
-        maskContent.tagName === 'ellipse' || maskContent.tagName === 'circle') {
-      maskContent.removeAttribute('fill')
-      maskContent.setAttribute('fill', 'white')
-    }
-    mask.appendChild(maskContent)
-
-    // Insert defs if not done yet
-    if (!defsInserted) {
-      root.insertBefore(defs, root.firstChild)
-      defsInserted = true
-    }
-    defs.appendChild(mask)
-
-    // Get the masked content's existing attributes
-    const transform = g.getAttribute('transform') || ''
-
-    // Replace the group with the masked content wrapped in mask reference
-    const wrapper = document.createElementNS(ns, 'g')
-    if (transform) wrapper.setAttribute('transform', transform)
-    wrapper.setAttribute('mask', `url(#${id})`)
-
-    // Move all children of the original masked content into the wrapper
-    while (maskedContent.firstChild) {
-      wrapper.appendChild(maskedContent.firstChild)
-    }
-    // If maskedContent has attributes (like transform), copy them
-    for (const attr of Array.from(maskedContent.attributes)) {
-      if (attr.name !== 'transform') {
-        wrapper.setAttribute(attr.name, attr.value)
-      }
-    }
-
-    g.parentNode?.replaceChild(wrapper, g)
-  }
-}
 
 /**
  * Compute an N-up imposition layout. Returns a list of { page, x, y }

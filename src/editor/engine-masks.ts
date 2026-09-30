@@ -14,10 +14,46 @@ import type { OpacityMaskState } from './types'
 import { isClipGroup } from './engine-layers'
 import { cssOrNull, releasePatternGroup } from './engine-patterns'
 
+/** How a mask made of a given item composites on the canvas. */
+type MaskComposite = 'shape' | 'shapes' | 'gradient' | 'pattern' | 'raster'
+
+/**
+ * The mask group an item belongs to, whether the caller hands over the group,
+ * the content inside it, or nothing masked at all.
+ */
+export function opacityMaskGroup(e: EditorEngine, item: paper.Item | null): paper.Group | null {
+  if (!item) return null
+  if (item instanceof e.scope.Group && (item.data as any)?.isOpacityMaskGroup) {
+    return item as paper.Group
+  }
+  const parent = item.parent
+  if (parent instanceof e.scope.Group && (parent.data as any)?.isOpacityMaskGroup) {
+    return parent as paper.Group
+  }
+  return null
+}
+
+/** The clip shape inside a mask group — the geometry the mask composites as. */
+function maskShapeOf(group: paper.Group): paper.Item | null {
+  return ((group.children ?? []) as paper.Item[])
+    .find((k) => (k.data as any)?.isOpacityMaskShape) ?? null
+}
+
+/** The masked content inside a mask group. */
+export function maskContentOf(group: paper.Group): paper.Item | null {
+  return ((group.children ?? []) as paper.Item[])
+    .find((k) => (k.data as any)?.isOpacityMaskContent) ?? null
+}
+
 export function getOpacityMask(e: EditorEngine, item: paper.Item): OpacityMaskState | null {
-  void e
-  const data = (item.data as any) ?? {}
-  return data.opacityMask ?? null
+  const direct = ((item.data as any) ?? {}).opacityMask ?? null
+  if (direct) return direct
+  // The masked content carries the state, and a group selection resolves to
+  // its content, so the panel does not have to know which one it holds.
+  const group = opacityMaskGroup(e, item)
+  if (!group) return null
+  const content = maskContentOf(group)
+  return (((content?.data as any) ?? {}).opacityMask ?? null)
 }
 
 /** Create a default opacity mask state. */
@@ -33,9 +69,12 @@ function createDefaultOpacityMask(): OpacityMaskState {
 export { createDefaultOpacityMask }
 
 /**
- * Apply an opacity mask to an item. The mask content is a Paper.js item
- * whose luminance controls the alpha channel. For live preview, we use
- * a simplified approach: the mask is stored and applied during export.
+ * Apply an opacity mask to an item.
+ *
+ * The mask source is *consumed*: it becomes the group's clip shape, exactly
+ * as "Make Opacity Mask" consumes the top object in Illustrator and CorelDRAW.
+ * Leaving the source in the document is not a cosmetic slip — it paints over
+ * the content it is supposed to be masking.
  */
 export function applyOpacityMask(e: EditorEngine, target: paper.Item, maskContent: paper.Item | null): void {
   const data = (target.data as any) ?? {}
@@ -43,20 +82,7 @@ export function applyOpacityMask(e: EditorEngine, target: paper.Item, maskConten
     // Remove mask.
     delete data.opacityMask
     target.data = data
-    // Remove mask group if it exists.
-    if (target.parent instanceof e.scope.Group && (target.parent as any).data?.isOpacityMaskGroup) {
-      const group = target.parent
-      const parent = group.parent ?? e.getActiveLayer()
-      const at = parent.children.indexOf(group)
-      // Move target out of the group.
-      for (const child of group.children.slice()) {
-        if (child !== target) {
-          parent.insertChild(Math.min(at, parent.children.length), child)
-        }
-      }
-      group.remove()
-      target.selected = true
-    }
+    releaseOpacityMaskGroup(e, target)
     return
   }
 
@@ -79,45 +105,168 @@ export function applyOpacityMask(e: EditorEngine, target: paper.Item, maskConten
   target.data = data
 
   // For live preview: wrap in a group with the mask applied via alpha.
-  // This is a simplified preview; full mask is applied during SVG export.
-  applyOpacityMaskPreview(e, target, maskContent)
+  // Composite for real: the group is the mask, not a preview of one.
+  applyOpacityMaskGroup(e, target, maskContent)
 }
 
 /**
- * Simplified live preview of opacity mask using Paper.js group compositing.
- * The full mask is applied during SVG/PDF export.
+ * Live composition of the opacity mask on the canvas.
+ *
+ * The arrangement is the one the clipping-mask feature already ships and
+ * proves: a group whose first child is the mask shape with `clipMask = true`
+ * and *no paint of its own*, followed by the masked content. Paper clips the
+ * content to the mask's geometry, so:
+ *
+ * - the canvas composites for real instead of showing the old preview, which
+ *   drew a translucent white copy of the mask *over* the artwork and
+ *   therefore hid the very thing the mask was supposed to reveal;
+ * - the mask's own paint is irrelevant, because the clip is geometric, so
+ *   nothing veils the page around the masked content;
+ * - canvas and export agree without any export-side rewriting: paper already
+ *   emits the clip mask as an SVG `<clipPath>` and points the artwork at it.
+ *
+ * What this still is not: a *luminance* mask. Paper has no primitive that
+ * composites an image's luminance into a path's alpha, so a mask made of a
+ * gradient, a photo or several tones composites as its silhouette, in the
+ * export as well. `maskCompositeNote` is what the panel says about it.
  */
-function applyOpacityMaskPreview(e: EditorEngine, target: paper.Item, maskContent: paper.Item): void {
+function applyOpacityMaskGroup(e: EditorEngine, target: paper.Item, maskContent: paper.Item): void {
   const scope = e.scope
   const parent = target.parent ?? e.getActiveLayer()
   const at = parent.children.indexOf(target)
 
-  // Create a group to hold the masked content.
   const group = new scope.Group({ insert: false }) as paper.Group
-  ;(group as any).data = { isOpacityMaskGroup: true, id: e.genId(), isUserItem: true }
+  ;(group as any).data = {
+    isOpacityMaskGroup: true,
+    id: e.genId(),
+    isUserItem: true,
+    // What the mask composites as has to be decided here: the clip shape
+    // loses its paint two lines down, and that paint (a gradient, a raster's
+    // tones) is the only evidence of what the mask was made of.
+    maskComposite: maskCompositeKind(scope, maskContent),
+  }
 
-  // Clone the target for the masked version.
-  const clone = target.clone({ insert: false }) as paper.Item
-  clone.data = { ...clone.data, isOpacityMaskClone: true }
+  // The mask shape: geometry only. Its paint is dropped, which is what lets
+  // the clip work without drawing anything of its own.
+  const maskShape = maskContent.clone({ insert: false }) as paper.Item
+  const maskAny = maskShape as any
+  maskAny.data = {
+    isOpacityMaskShape: true,
+    // The clip shape is not artwork: it must stay out of the layer panel and
+    // out of any artwork selection, or the user would grab the mask by
+    // accident.
+    isUserItem: false,
+  }
+  maskAny.selected = false
+  if (maskAny.fillColor !== undefined) maskAny.fillColor = null
+  if (maskAny.strokeColor !== undefined) maskAny.strokeColor = null
+  ;(maskShape as any).clipMask = true
 
-  // Create the mask shape (white fill = opaque, black = transparent).
-  const maskClone = maskContent.clone({ insert: false }) as paper.Item
-  maskClone.fillColor = new scope.Color(1, 1, 1) // White = opaque
-  maskClone.opacity = 0.5 // Semi-transparent for preview
-  ;(maskClone as any).data = { isOpacityMaskPreview: true }
+  // The masked content, cloned from the item the mask was applied to.
+  const content = target.clone({ insert: false }) as paper.Item
+  const contentAny = content as any
+  contentAny.data = {
+    ...(contentAny.data ?? {}),
+    isOpacityMaskContent: true,
+  }
+  contentAny.selected = false
 
-  group.addChild(clone)
-  group.addChild(maskClone)
+  // Mask first, then the content: paper clips the group's other children to
+  // the clip mask.
+  group.addChild(maskShape)
+  group.addChild(content)
 
-  // Replace the original with the group.
   parent.insertChild(Math.min(at, parent.children.length), group)
   target.remove()
+  // The mask source is consumed: it is now the group's clip shape. Left in the
+  // document it would paint over the content it is meant to mask.
+  if (maskContent.parent && maskContent !== target) maskContent.remove()
 
-  // Store reference for cleanup.
   const groupData = (group as any).data
-  groupData.maskedItemId = (clone as any).data?.id
+  groupData.maskedItemId = (content as any).data?.id
 
+  // The masked item is a clone now: leave the selection on the live one, or
+  // the panel would keep a reference to an item that is no longer in the
+  // document.
+  content.selected = true
+  e.syncSelectionToStore()
   e.scope.view.update()
+}
+
+/**
+ * Undo a mask group: the masked content comes back out, the clip shape goes.
+ *
+ * `item` may be the group itself or the content inside it, because the panel
+ * hands over whatever the user selected.
+ */
+function releaseOpacityMaskGroup(e: EditorEngine, item: paper.Item): void {
+  const group = opacityMaskGroup(e, item)
+  if (!group) return
+  const parent = group.parent ?? e.getActiveLayer()
+  const at = parent.children.indexOf(group)
+  const kids = group.children.slice() as paper.Item[]
+  const content = maskContentOf(group)
+  for (const child of kids) {
+    // The clip shape is not artwork: it goes with the group.
+    if (child === content) {
+      parent.insertChild(Math.min(at, parent.children.length), child)
+    }
+  }
+  group.remove()
+  if (content) {
+    // The item is artwork again: leaving the mask markers on it would let a
+    // later lookup mistake it for a masked one.
+    const data = (content.data as any) ?? {}
+    delete data.isOpacityMaskContent
+    delete data.opacityMask
+    content.data = data
+    content.selected = true
+    e.syncSelectionToStore()
+  }
+}
+
+/**
+ * What the mask composites as, in words the panel can show.
+ *
+ * The distinction matters to anyone handing files to a print shop: a
+ * silhouette mask composites identically on canvas and in SVG, a luminance
+ * mask composites as its silhouette here and would need a raster pipeline to
+ * composite for real.
+ *
+ * `null` when the item is not masked, so the panel can show no note at all
+ * rather than a claim about nothing.
+ */
+export function maskCompositeNote(e: EditorEngine, item: paper.Item | null): string | null {
+  const group = opacityMaskGroup(e, item)
+  if (!group) return null
+  const kind = ((group.data as any)?.maskComposite ?? 'shape') as MaskComposite
+  if (kind === 'raster') {
+    return 'Composites as the photo silhouette — tonal masks need a raster pipeline'
+  }
+  if (kind === 'gradient') {
+    return 'Composites as the gradient silhouette — tonal masks need a raster pipeline'
+  }
+  if (kind === 'shapes') {
+    return 'Composites as the union of the mask shapes — only the shape counts, not its tones'
+  }
+  return 'Composites as the shape silhouette'
+}
+
+/**
+ * What a mask made of this item can composite as.
+ *
+ * A flat shape composites as its own outline, several shapes as their union,
+ * and anything tonal (a gradient, a photo) as its outline too — the tones
+ * cannot be composited without a raster pipeline, so the distinction has to be
+ * recorded before the shape is reduced to geometry.
+ */
+function maskCompositeKind(scope: typeof paper, maskContent: paper.Item): MaskComposite {
+  if (maskContent instanceof scope.Raster) return 'raster'
+  if ((maskContent as any).fillColor?.gradient) return 'gradient'
+  if ((maskContent as any).fillColor?.pattern) return 'pattern'
+  const kids = (maskContent as any).children as paper.Item[] | undefined
+  if (kids && kids.length > 1) return 'shapes'
+  return 'shape'
 }
 
 /** Remove opacity mask from an item. */
@@ -125,17 +274,39 @@ export function removeOpacityMask(e: EditorEngine, item: paper.Item): void {
   applyOpacityMask(e, item, null)
 }
 
-/** Toggle opacity mask enabled state. */
+/**
+ * Enable or disable the mask.
+ *
+ * Turning the mask off is turning the clip off: the shape has no paint of its
+ * own, so with `clipMask` cleared the group draws the content unmasked and the
+ * shape draws nothing. That is why the toggle has to touch the group and not
+ * only the stored flag.
+ */
 export function toggleOpacityMask(e: EditorEngine, item: paper.Item, enabled: boolean): void {
-  const data = (item.data as any) ?? {}
-  const mask = data.opacityMask as OpacityMaskState | undefined
-  if (mask) {
-    mask.enabled = enabled
-    item.data = data
+  const group = opacityMaskGroup(e, item)
+  const shape = group ? maskShapeOf(group) : null
+  if (shape) (shape as any).clipMask = enabled
+  for (const holder of [item, group ? maskContentOf(group) : null]) {
+    if (!holder) continue
+    const data = (holder.data as any) ?? {}
+    const mask = data.opacityMask as OpacityMaskState | undefined
+    if (mask) {
+      mask.enabled = enabled
+      holder.data = data
+    }
   }
+  e.scope.view.update()
 }
 
-/** Toggle opacity mask invert. */
+/**
+ * Invert the mask.
+ *
+ * There is nothing to invert: the mask composites as geometry, and
+ * "everything except this shape" is not expressible as a clip. The flag is
+ * kept for file round-trips, so a mask that arrives inverted from an AI or
+ * CDR file keeps its intent instead of silently rendering as the opposite of
+ * what it says.
+ */
 export function toggleOpacityMaskInvert(e: EditorEngine, item: paper.Item, invert: boolean): void {
   const data = (item.data as any) ?? {}
   const mask = data.opacityMask as OpacityMaskState | undefined
