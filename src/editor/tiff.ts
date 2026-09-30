@@ -25,9 +25,14 @@
 export interface TiffEncodeOptions {
   width: number
   height: number
-  /** RGBA bytes, row-major, 4 bytes per pixel. */
+  /**
+   * Pixels, row-major: 4 bytes (RGBA) for a colour image, or 1 byte (grey) for
+   * a grayscale one. Mixing the two in one buffer is not supported.
+   */
   rgba: Uint8Array | Uint8ClampedArray
-  /** Pixels per inch for the resolution tags; omitted when not positive. */
+  /**
+   * Pixels per inch for the resolution tags; omitted when not positive.
+   */
   dpi?: number
   /**
    * Target bytes per strip (default 8 MB). Exposed because the strip layout
@@ -35,6 +40,12 @@ export interface TiffEncodeOptions {
    * small image rather than a 48 MB one.
    */
   maxStripBytes?: number
+  /**
+   * Write a single-channel grayscale file (PhotometricInterpretation 1).
+   * Required for ink plates: a separation is coverage in one ink, and
+   * writing it as RGB triples the file size for no information.
+   */
+  grayscale?: boolean
 }
 
 /** Raised for input the writer refuses rather than emitting a broken file. */
@@ -108,20 +119,29 @@ export function encodeTiff(options: TiffEncodeOptions): Uint8Array {
   if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) {
     throw new TiffEncodeError(`Bad TIFF size ${width}x${height}`)
   }
-  if (rgba.length < width * height * 4) {
+  const pixels = width * height
+  if (options.grayscale) {
+    if (rgba.length < pixels) {
+      throw new TiffEncodeError(`Pixel buffer too small: ${rgba.length} for ${width}x${height}`)
+    }
+  } else if (rgba.length < pixels * 4) {
     throw new TiffEncodeError(`Pixel buffer too small: ${rgba.length} for ${width}x${height}`)
   }
 
   // Alpha is written only when something is actually transparent: a fully
   // opaque page is smaller and prints identically without the extra channel.
   let hasAlpha = false
-  for (let i = 3; i < width * height * 4; i += 4) {
-    if (rgba[i] !== 255) {
-      hasAlpha = true
-      break
+  if (!options.grayscale) {
+    for (let i = 3; i < pixels * 4; i += 4) {
+      if (rgba[i] !== 255) {
+        hasAlpha = true
+        break
+      }
     }
   }
-  const samples = hasAlpha ? 4 : 3
+  // A grayscale plate has one channel and carries its coverage in the value;
+  // BlackIsZero is the right photometric for ink (0 = full ink).
+  const samples = options.grayscale ? 1 : hasAlpha ? 4 : 3
   const rowBytes = width * samples
   const targetBytes =
     Number.isFinite(options.maxStripBytes) && (options.maxStripBytes as number) > 0
@@ -145,9 +165,16 @@ export function encodeTiff(options: TiffEncodeOptions): Uint8Array {
     stripOffsets.push(w.offset)
     stripByteCounts.push(count * rowBytes)
     for (let y = 0; y < count; y++) {
-      let src = ((first + y) * width) * 4
       // Interleaved RGBA -> the file's channel order, dropping alpha when
       // the image turned out to be opaque.
+      if (options.grayscale) {
+        let src = (first + y) * width
+        for (let x = 0; x < width; x++) {
+          w.u8(rgba[src++])
+        }
+        continue
+      }
+      let src = ((first + y) * width) * 4
       if (hasAlpha) {
         for (let x = 0; x < width; x++) {
           w.u8(rgba[src]); w.u8(rgba[src + 1]); w.u8(rgba[src + 2]); w.u8(rgba[src + 3])
@@ -183,7 +210,9 @@ export function encodeTiff(options: TiffEncodeOptions): Uint8Array {
     // three or four go to the value area below.
     { tag: 258, type: typeShort, count: samples, value: 0 },
     { tag: 259, type: typeShort, count: 1, value: 1 }, // Compression: none
-    { tag: 262, type: typeShort, count: 1, value: 2 }, // Photometric: RGB
+    // Photometric: 1 = BlackIsZero (a grayscale plate's coverage),
+    // 2 = RGB.
+    { tag: 262, type: typeShort, count: 1, value: options.grayscale ? 1 : 2 },
     // A single strip's offset and byte count are four bytes each, which the
     // spec requires to be stored *inline* in the value field rather than at
     // an offset. The pixel data was written above, so both are known here.

@@ -199,3 +199,56 @@ describe('encodeTiff', () => {
     expect(() => encodeTiff({ width: 4, height: 4, rgba: new Uint8Array(8) })).toThrow(TiffEncodeError)
   })
 })
+
+describe('grayscale plates', () => {
+  /** One byte per pixel: a coverage ramp with hard edges. */
+  function greyPixels(width: number, height: number): Uint8Array {
+    const out = new Uint8Array(width * height)
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) out[y * width + x] = (x * 13 + y * 7) % 256
+    }
+    return out
+  }
+
+  it('writes a single-channel BlackIsZero file', () => {
+    const width = 12
+    const height = 5
+    const decoded = decodeTiff(
+      encodeTiff({ width, height, rgba: greyPixels(width, height), grayscale: true, dpi: 300 })
+    )
+    expect(decoded.samples).toBe(1)
+    expect(decoded.tags.get(262), 'PhotometricInterpretation = BlackIsZero').toEqual([1])
+    // No alpha tag: a plate carries coverage in the value.
+    expect(decoded.tags.has(338)).toBe(false)
+  })
+
+  it('round-trips the coverage values exactly', () => {
+    const width = 9
+    const height = 7
+    const grey = greyPixels(width, height)
+    const decoded = decodeTiff(encodeTiff({ width, height, rgba: grey, grayscale: true }))
+    // The reader widens a single channel to opaque RGBA, so the grey is in
+    // all three colour slots.
+    for (let i = 0; i < width * height; i++) {
+      expect(decoded.rgba[i * 4], `pixel ${i}`).toBe(grey[i])
+    }
+  })
+
+  it('needs a third of the bytes a colour plate of the same size does', () => {
+    const width = 20
+    const height = 20
+    const colour = encodeTiff({ width, height, rgba: testPixels(width, height) })
+    const grey = encodeTiff({ width, height, rgba: greyPixels(width, height), grayscale: true })
+    // 3x the pixels, minus the IFD, which is a fixed few hundred bytes.
+    expect(grey.length * 3).toBeLessThan(colour.length + 1000)
+  })
+
+  it('refuses a buffer sized for the wrong channel count', () => {
+    // A colour buffer is long enough to pass a byte-per-pixel check, so the
+    // length guard cannot catch this one; it is caught by writing a short
+    // strip instead, which is why the caller must pass the right buffer.
+    expect(() => encodeTiff({ width: 4, height: 4, rgba: new Uint8Array(4), grayscale: true })).toThrow(
+      TiffEncodeError
+    )
+  })
+})

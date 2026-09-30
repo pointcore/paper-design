@@ -26,6 +26,7 @@
           <el-dropdown-item command="exportBoardsPdf">Export All Boards PDF (Raster)</el-dropdown-item>
           <el-dropdown-item command="exportVectorPdf">Export PDF (Vector)</el-dropdown-item>
           <el-dropdown-item command="exportBoardsVectorPdf">Export All Boards PDF (Vector)</el-dropdown-item>
+          <el-dropdown-item command="exportSeparations" divided>Export Spot Separations...</el-dropdown-item>
           <el-dropdown-item command="import">Import SVG...</el-dropdown-item>
           <el-dropdown-item command="importCdr">Import CDR...</el-dropdown-item>
           <el-dropdown-item command="openCdr">Open CDR...</el-dropdown-item>
@@ -112,6 +113,58 @@
       </div>
     </AppDialog>
 
+    <!-- Spot Separations Dialog (one plate per ink, ZIP of grayscale TIFFs) -->
+    <AppDialog
+      v-model="separationsVisible"
+      title="Export Spot Separations"
+      :width="440"
+      confirm-text="Export"
+      cancel-text="Cancel"
+      @confirm="onSeparationsConfirm"
+      @cancel="separationsVisible = false"
+    >
+      <div class="settings-body app-settings">
+        <div v-if="spotRows.length === 0" class="setting-desc">
+          No spot colours in this document. Name one on an object in the
+          Properties panel (Spot) and it will show up here.
+        </div>
+        <div v-else class="setting-section">
+          <div v-for="row in spotRows" :key="row.spot" class="setting-row">
+            <div class="setting-label">
+              <span class="setting-name">{{ row.spot }}</span>
+              <span class="setting-desc">{{ row.items }} object(s) · {{ row.file }}.tif</span>
+            </div>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Resolution</span>
+            <span class="setting-desc">Plates are coverage in one ink</span>
+          </div>
+          <el-select v-model="separationsForm.dpi" size="small" style="width: 110px">
+            <el-option :value="150" label="150 dpi" />
+            <el-option :value="300" label="300 dpi" />
+            <el-option :value="600" label="600 dpi" />
+          </el-select>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Area</span>
+          </div>
+          <el-radio-group v-model="separationsForm.area" size="small">
+            <el-radio-button value="page">Page</el-radio-button>
+            <el-radio-button value="artwork">All artwork</el-radio-button>
+          </el-radio-group>
+        </div>
+        <div class="setting-desc">
+          One grayscale TIFF per ink, plus a manifest, in a ZIP. The spot names
+          are placeholders: there is no ink model, no overprint and no CMYK
+          conversion, so the composite is the printer's job.
+        </div>
+        <div v-if="separationReport" class="setting-desc">{{ separationReport }}</div>
+      </div>
+    </AppDialog>
+
     <!-- Boards Export Dialog (Export-for-Screens parity: pick boards + format) -->
     <AppDialog
       v-model="boardsVisible"
@@ -194,6 +247,7 @@ import {
 } from '../../editor/topbar-dialogs'
 import type { EditorEngine } from '../../editor/engine'
 import type { RasterExportArea, RasterExportFormat } from '../../editor/types'
+import { separationManifest } from '../../editor/engine-separations'
 
 const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
@@ -237,7 +291,74 @@ function openBoardsExport() {
   boardsForm.checked = selectableBoardIds(store.artboards)
   boardsVisible.value = true
 }
-function boardsToggle(id: string) {
+
+const separationsVisible = ref(false)
+const separationsForm = reactive({ dpi: 300, area: 'page' as 'page' | 'artwork' })
+const separationReport = ref('')
+const spotRows = computed(() => engineRef?.value?.collectSeparations() ?? [])
+
+function openSeparations() {
+  separationReport.value = ''
+  separationsVisible.value = true
+}
+
+/**
+ * Render every plate, zip the set with a manifest, and download it once.
+ *
+ * One download on purpose: eight plates means eight browser downloads, and
+ * every one of them is a dialog the user has to dismiss.
+ */
+async function onSeparationsConfirm() {
+  const e = engineRef?.value
+  if (!e) {
+    separationsVisible.value = false
+    return
+  }
+  const rows = e.collectSeparations()
+  if (rows.length === 0) {
+    store.setStatusMessage('No spot colours to separate')
+    return
+  }
+  try {
+    const { plates, result } = await withBusy(
+      store,
+      `Separating ${rows.length} ink${rows.length === 1 ? '' : 's'}…`,
+      async () =>
+        e.exportSeparations({
+          area: separationsForm.area,
+          dpi: separationsForm.dpi,
+        }),
+      { cancellable: false }
+    )
+    if (plates.length === 0) {
+      store.setStatusMessage('Nothing to separate on this page')
+      return
+    }
+    const { default: JSZip } = await import('jszip')
+    const zip = new JSZip()
+    for (const plate of plates) {
+      zip.file(`${plate.separation.file}.tif`, plate.tiff)
+    }
+    zip.file(
+      'README.txt',
+      separationManifest(
+        plates.map((p) => ({ separation: p.separation, physical: p.physical })),
+        separationsForm.area,
+        separationsForm.dpi
+      )
+    )
+    const blob = await zip.generateAsync({ type: 'blob' })
+    const stem = (store.documentName || 'document').replace(/[^\w.-]+/g, '-')
+    downloadHref(URL.createObjectURL(blob), `${stem}-separations.zip`)
+    const warn = result.warnings.length ? ` (${result.warnings.length} warnings)` : ''
+    store.setStatusMessage(
+      `Separated ${plates.length} ink${plates.length === 1 ? '' : 's'} at ${separationsForm.dpi} dpi${warn}`
+    )
+    separationsVisible.value = false
+  } catch (err) {
+    store.setStatusMessage(err instanceof Error ? err.message : 'Separation export failed')
+  }
+}function boardsToggle(id: string) {
   boardsForm.checked = boardsForm.checked.includes(id)
     ? boardsForm.checked.filter((x) => x !== id)
     : [...boardsForm.checked, id]
@@ -536,6 +657,9 @@ async function onFileCmd(cmd: string) {
       break
     case 'exportPdf':
       void onExportPdf()
+      break
+    case 'exportSeparations':
+      openSeparations()
       break
     case 'exportBoardsPdf':
       void onExportBoardsPdf()

@@ -35,6 +35,7 @@ import * as pathops from './engine-pathops'
 import * as clipboard from './engine-clipboard'
 import * as cdrimport from './engine-cdrimport'
 import * as aiimport from './engine-aiimport'
+import * as separationsModule from './engine-separations'
 import * as svg from './engine-svg'
 import * as datamerge from './engine-datamerge'
 import * as arrange from './engine-arrange'
@@ -2896,6 +2897,20 @@ export class EditorEngine {
     this.scope.view.update()
     this.pushHistory(historyLabel)
     return true
+  }
+
+  /** See engine-separations.ts. */
+  collectSeparations(): import('./separations').Separation[] {
+    return separationsModule.collectSeparations(this)
+  }
+
+  /** See engine-separations.ts. */
+  exportSeparations(options?: {
+    area?: import('./types').RasterExportArea
+    dpi?: number
+    maxPixels?: number
+  }) {
+    return separationsModule.exportSeparations(this, options)
   }
 
   /** See engine-svg.ts. */
