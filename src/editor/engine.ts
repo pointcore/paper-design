@@ -22,6 +22,8 @@ import * as layers from './engine-layers'
 import * as tree from './engine-tree'
 import * as pathfinder from './engine-pathfinder'
 import * as join from './engine-join'
+import * as widthProfile from './engine-width'
+import type { WidthProfile } from './path-drawing/width-profile'
 import * as compound from './engine-compound'
 import * as appearance from './engine-appearance'
 import * as appearancePasses from './engine-appearance-passes'
@@ -2487,6 +2489,31 @@ export class EditorEngine {
   /** See engine-join.ts. */
   joinPaths(): boolean {
     return join.joinPaths(this)
+  }
+
+  /** See engine-width.ts. Apply a library width profile to the selection. */
+  applyWidthProfileToSelection(profile: WidthProfile): number {
+    return widthProfile.applyWidthProfileToSelection(this, profile)
+  }
+
+  /** See engine-width.ts. The width profile stored on an item, if any. */
+  getWidthProfile(item: paper.Item | null): WidthProfile | null {
+    return widthProfile.widthProfileOf(this, item)
+  }
+
+  /** See engine-width.ts. Re-expand an expanded stroke with a new profile. */
+  updateWidthProfile(item: paper.Item, profile: WidthProfile): boolean {
+    return widthProfile.updateItemWidthProfile(this, item, profile)
+  }
+
+  /** See engine-width.ts. Expand back into the stroked path it came from. */
+  releaseWidthProfile(item: paper.Item): boolean {
+    return widthProfile.releaseWidthProfile(this, item)
+  }
+
+  /** See engine-width.ts. Save the item's profile into the library. */
+  saveWidthProfile(item: paper.Item, name: string): string | null {
+    return widthProfile.saveItemWidthProfile(this, item, name)
   }
 
   /** See engine-join.ts. */

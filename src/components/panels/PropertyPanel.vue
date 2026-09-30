@@ -183,6 +183,33 @@
               <el-option v-for="j in lineJoins" :key="j.value" :label="j.label" :value="j.value" />
             </el-select>
           </div>
+          <!-- Width profile: the shape of a variable-width stroke -->
+          <div class="prop-row">
+            <span class="prop-label-sm">Width</span>
+            <el-select
+              v-model="widthProfileId"
+              size="small"
+              class="flex-ctl"
+              :title="widthProfileTitle"
+              @change="onWidthProfileChange"
+            >
+              <el-option label="Uniform" value="" />
+              <el-option v-for="p in store.widthProfiles" :key="p.id" :label="p.name" :value="p.id" />
+            </el-select>
+            <el-button
+              v-if="itemWidthProfile"
+              size="small"
+              class="icon-btn"
+              plain
+              title="Release the width profile back to the stroked path"
+              @click="onReleaseWidthProfile"
+            >
+              ⤺
+            </el-button>
+          </div>
+          <div v-if="itemWidthProfile" class="prop-row">
+            <el-input v-model="widthProfileName" size="small" placeholder="Profile name" @change="onSaveWidthProfile" />
+          </div>
           <template v-if="lineJoin === 'miter'">
             <div class="prop-row">
               <span class="prop-label-sm">Miter</span>
@@ -302,6 +329,7 @@ import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
 import { cssToCmykString, isOutOfCmykGamut } from '../../editor/color'
 import { DASH_PRESETS, parseDashPattern } from '../../editor/property-helpers'
+import type { WidthProfile } from '../../editor/path-drawing/width-profile'
 import GradientSection from './GradientSection.vue'
 import PatternSection from './PatternSection.vue'
 import TextSection from './TextSection.vue'
@@ -457,9 +485,72 @@ function syncStyleFromSelection() {
   fillRule.value = style.fillRule ?? 'nonzero'
   blendMode.value = style.blendMode
   opacityValue.value = Math.round((style.opacity ?? 1) * 100)
+  syncWidthProfileFromSelection(items[0])
 }
 
 const lineCap = ref<LineCap>(store.style.lineCap)
+
+// Width profile: the variable width stored on the selected item, if any.
+const widthProfileId = ref('')
+const itemWidthProfile = ref<WidthProfile | null>(null)
+const widthProfileName = ref('')
+/** A profile is a shape; applying one needs a stroke to apply it to. */
+const widthProfileTitle = computed(() =>
+  store.hasSelection ? 'Apply a width profile to the selected stroke' : 'Select a stroked path first',
+)
+
+function syncWidthProfileFromSelection(item: unknown) {
+  const e = getEngine()
+  if (!e || !item) {
+    itemWidthProfile.value = null
+    widthProfileId.value = ''
+    return
+  }
+  const profile = e.getWidthProfile(item as Parameters<typeof e.getWidthProfile>[0])
+  itemWidthProfile.value = profile
+  widthProfileId.value = profile?.id ?? ''
+  widthProfileName.value = profile?.name ?? ''
+}
+
+function onWidthProfileChange(id: string) {
+  const e = getEngine()
+  if (!e) return
+  if (!id) {
+    // Picking "Uniform" on an expanded stroke releases it, which is the only
+    // way back to an editable stroke: the outline itself has no width left.
+    const item = firstSelected()
+    if (item) e.releaseWidthProfile(item)
+    syncWidthProfileFromSelection(firstSelected())
+    return
+  }
+  const profile = store.widthProfiles.find((p) => p.id === id)
+  if (!profile) return
+  e.applyWidthProfileToSelection(profile)
+  syncWidthProfileFromSelection(firstSelected())
+}
+
+function onReleaseWidthProfile() {
+  const e = getEngine()
+  const item = firstSelected()
+  if (!e || !item) return
+  e.releaseWidthProfile(item)
+  syncWidthProfileFromSelection(firstSelected())
+}
+
+function onSaveWidthProfile() {
+  const e = getEngine()
+  const item = firstSelected()
+  if (!e || !item) return
+  e.saveWidthProfile(item, widthProfileName.value)
+  syncWidthProfileFromSelection(firstSelected())
+}
+
+/** The first selected paper item, or null. */
+function firstSelected() {
+  const e = getEngine()
+  if (!e || !store.hasSelection) return null
+  return e.getSelection()[0] ?? null
+}
 const lineJoin = ref<LineJoin>(store.style.lineJoin)
 const miterLimit = ref(store.style.miterLimit)
 const dashPattern = ref(store.style.dashArray.join(' '))

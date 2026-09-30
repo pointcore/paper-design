@@ -24,6 +24,7 @@ import type {
   ToolRailDensity,
   WorkspacePreset,
 } from './types'
+import { defaultWidthProfiles, normalizeProfile, type WidthProfile } from './path-drawing/width-profile'
 
 // --- Defaults ---
 
@@ -205,6 +206,13 @@ export const useEditorStore = defineStore('editor', {
     globalColors: [] as GlobalColor[],
     /** Named text style presets (char + paragraph snapshot) */
     textStylePresets: [] as TextStylePreset[],
+    /**
+     * Named variable-width stroke profiles (AI width-profile parity).
+     *
+     * Seeded with the built-ins so the panel is usable in a fresh document;
+     * user profiles are prepended, newest first.
+     */
+    widthProfiles: defaultWidthProfiles() as WidthProfile[],
     /** Live-shape options surfaced in the contextual control bar */
     polygonSides: 5,
     polygonStar: false,
@@ -707,10 +715,34 @@ export const useEditorStore = defineStore('editor', {
       return id
     },
 
-    /** Delete a style preset */
-    removeStylePreset(id: string) {
-      this.stylePresets = this.stylePresets.filter((p) => p.id !== id)
-    },
+      /** Delete a style preset */
+      removeStylePreset(id: string) {
+        this.stylePresets = this.stylePresets.filter((p) => p.id !== id)
+      },
+
+      /** Replace the width-profile library (storage load; built-ins restored) */
+      setWidthProfiles(list: WidthProfile[]) {
+        const user = Array.isArray(list) ? list.map((p) => normalizeProfile(p)) : []
+        // The built-ins are not the user's to delete: they are what makes an
+        // empty library usable, so a load merges rather than replaces them.
+        this.widthProfiles = [...user, ...defaultWidthProfiles()].slice(0, 32)
+      },
+
+      /** Save a width profile in the library (dedupe by id, cap 32) */
+      addWidthProfile(profile: WidthProfile): string {
+        const clean = normalizeProfile(profile, `wp-${Date.now().toString(36)}`)
+        this.widthProfiles = [
+          clean,
+          ...this.widthProfiles.filter((p) => p.id !== clean.id),
+        ].slice(0, 32)
+        return clean.id
+      },
+
+      /** Delete a user width profile (the built-ins stay) */
+      removeWidthProfile(id: string) {
+        this.widthProfiles = this.widthProfiles.filter((p) => p.id !== id)
+      },
+
 
     /** Replace the global-color list (storage load, cap 48) */
     setGlobalColors(list: GlobalColor[]) {

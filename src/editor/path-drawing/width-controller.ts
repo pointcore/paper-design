@@ -1,24 +1,26 @@
 /**
  * Width tool controller (Shift+W).
  *
- * Paper.js strokes have uniform width, so variable width is a destructive
- * expand like Outline Stroke: grab a stroked path, drag up/down to set the
- * local width (a profile stop is added where grabbed), and on release the
- * path is replaced by a filled variable-width outline. Escape cancels.
+ * Paper.js strokes have uniform width, so a variable width has to be drawn by
+ * expanding the stroke into a filled outline: grab a stroked path, drag
+ * up/down to set the local width (a profile stop is added where grabbed), and
+ * on release the path is replaced by a filled variable-width outline. Escape
+ * cancels.
+ *
+ * The commit goes through engine-width, not through local geometry, so the
+ * profile it produces is the same object the panel can re-edit, save and
+ * release — the expansion is a rendering of the profile, not the only copy of
+ * it. The geometry and the stop math live in ./width-profile.
  * Compound children, text, patterns and clip content are refused with a
  * status hint.
  */
-
-/** One width profile stop (offset 0-1 along the path, scale multiplier). */
-interface WidthStop {
-  offset: number
-  scale: number
-}
 
 import { EditorEngine } from '../engine'
 import { isEditableTarget } from '../shortcuts'
 import { applyToolCursor } from '../cursors'
 import { isPrimaryButton } from '../gestures'
+import { expandWithProfile } from '../engine-width'
+import { expandVariableWidth, makeProfile, scaleAt, type WidthStop } from './width-profile'
 
 /** Drag sensitivity: scale units per screen pixel. */
 const DRAG_RATE = 0.01
@@ -183,18 +185,7 @@ export class WidthController {
 
   /** Piecewise-linear scale at a normalized offset. */
   private scaleAt(profile: WidthStop[], u: number): number {
-    const stops = profile.slice().sort((a, b) => a.offset - b.offset)
-    if (u <= stops[0].offset) return stops[0].scale
-    for (let i = 1; i < stops.length; i++) {
-      if (u <= stops[i].offset) {
-        const a = stops[i - 1]
-        const b = stops[i]
-        const span = b.offset - a.offset || 1
-        const t = (u - a.offset) / span
-        return a.scale + (b.scale - a.scale) * t
-      }
-    }
-    return stops[stops.length - 1].scale
+    return scaleAt(makeProfile('', '', 1, profile), u)
   }
 
   /** Rebuild the overlay preview from the target + current profile. */
@@ -213,75 +204,15 @@ export class WidthController {
     this.preview = built
   }
 
-  /**
-   * Variable-width outline of a path: rails sampled along the centerline
-   * with round caps (open paths). Returns an overlay-owned closed path.
-   */
+  /** Variable-width outline of a path, for the transient preview. */
   private buildExpanded(path: paper.Path, profile: WidthStop[], baseWidth: number): paper.Path | null {
     const engine = this.engine
     if (!engine) return null
-    const scope = engine.scope
-    const length = path.length
-    if (!(length > 0) || !(baseWidth > 0)) return null
-    const samples = Math.min(160, Math.max(24, Math.ceil(length / 2)))
-    const left: paper.Point[] = []
-    const right: paper.Point[] = []
-    const radii: number[] = []
-    for (let i = 0; i <= samples; i++) {
-      const offset = (i / samples) * length
-      const pt = path.getPointAt(offset)
-      const tangent = path.getTangentAt(offset)
-      if (!pt || !tangent || tangent.length < 1e-9) return null
-      const normal = new scope.Point(-tangent.y, tangent.x).normalize()
-      const r = (baseWidth / 2) * this.scaleAt(profile, i / samples)
-      radii.push(r)
-      left.push(pt.add(normal.multiply(r)))
-      right.push(pt.subtract(normal.multiply(r)))
-    }
-    const outline = new scope.Path({ insert: false }) as paper.Path
-    const closed = !!path.closed
-    if (closed) {
-      left.forEach((pt) => outline.add(new scope.Segment(pt.clone())))
-      for (let i = right.length - 1; i >= 0; i--) {
-        outline.add(new scope.Segment(right[i].clone()))
-      }
-      outline.closed = true
-    } else {
-      this.addCap(outline, left[0], right[0], radii[0], false)
-      left.forEach((pt) => outline.add(new scope.Segment(pt.clone())))
-      this.addCap(outline, left[left.length - 1], right[right.length - 1], radii[radii.length - 1], true)
-      for (let i = right.length - 1; i >= 0; i--) {
-        outline.add(new scope.Segment(right[i].clone()))
-      }
-      outline.closed = true
-    }
-    const anyPath = path as any
-    outline.fillColor = anyPath.strokeColor?.clone?.() ?? anyPath.strokeColor
-    outline.strokeColor = null
-    outline.opacity = anyPath.opacity ?? 1
-    if (anyPath.blendMode !== undefined) outline.blendMode = anyPath.blendMode
-    return outline
-  }
-
-  /** Semicircle fan between rail ends (round cap). */
-  private addCap(outline: paper.Path, left: paper.Point, right: paper.Point, radius: number, atEnd: boolean) {
-    const engine = this.engine
-    if (!engine || radius <= 0) return
-    const scope = engine.scope
-    const center = left.add(right).divide(2)
-    const startAngle = Math.atan2(left.y - center.y, left.x - center.x) * 180 / Math.PI
-    const steps = 8
-    // Fan from the left rail end around to the right rail end.
-    for (let i = 1; i < steps; i++) {
-      const sweep = atEnd ? -180 : 180
-      const angle = startAngle + (sweep * i) / steps
-      const rad = (angle * Math.PI) / 180
-      outline.add(
-        new scope.Segment(
-          new scope.Point(center.x + Math.cos(rad) * radius, center.y + Math.sin(rad) * radius)
-        )
-      )
-    }
+    return expandVariableWidth(
+      engine.scope,
+      path,
+      makeProfile('', '', baseWidth, profile),
+    )
   }
 
   /** Replace the target with the committed expanded fill. */
@@ -297,25 +228,21 @@ export class WidthController {
       this.preview.remove()
       this.preview = null
     }
-    const built = this.buildExpanded(target, this.profile, this.baseWidth)
+    // Through the engine, so the committed item keeps the profile and the
+    // source path: the width stays adjustable instead of being a one-way trip
+    // into a filled outline.
+    const built = expandWithProfile(
+      engine,
+      target,
+      makeProfile('', 'Width', this.baseWidth, this.profile),
+      'Width Tool',
+    )
     if (!built) {
       target.visible = true
       this.target = null
       engine.scope.view.update()
       return
     }
-    const parent = target.parent ?? engine.getActiveLayer()
-    const at = Math.max(0, parent.children.indexOf(target))
-    const color = (target as any).strokeColor
-    target.remove()
-    ;(built as any).fillColor = color
-    parent.insertChild(Math.min(at, parent.children.length), built)
-    built.data.id = engine.genId()
-    built.data.isUserItem = true
-    engine.clearSelection()
-    built.selected = true
-    engine.syncSelectionToStore()
-    engine.pushHistory('Width Tool')
     this.target = null
     engine.scope.view.update()
   }
