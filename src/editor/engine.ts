@@ -35,6 +35,7 @@ import * as pathops from './engine-pathops'
 import * as clipboard from './engine-clipboard'
 import * as cdrimport from './engine-cdrimport'
 import * as aiimport from './engine-aiimport'
+import * as svg from './engine-svg'
 import * as datamerge from './engine-datamerge'
 import * as arrange from './engine-arrange'
 import * as envelope from './engine-envelope'
@@ -2867,6 +2868,11 @@ export class EditorEngine {
     this.scope.view.update()
     this.pushHistory(historyLabel)
     return true
+  }
+
+  /** See engine-svg.ts. */
+  openSvgText(svgText: string, fileName = 'SVG'): boolean {
+    return svg.openSvgText(this, svgText, fileName)
   }
 
   /** See engine-datamerge.ts. */

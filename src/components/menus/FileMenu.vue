@@ -473,7 +473,7 @@ async function onFileCmd(cmd: string) {
       if (!confirmDiscard()) break
       const input = document.createElement('input')
       input.type = 'file'
-      input.accept = '.json,.vec.json,.cdr,.ai,.pdf,application/json'
+      input.accept = '.json,.vec.json,.cdr,.ai,.pdf,.svg,application/json,image/svg+xml'
       input.onchange = async () => {
         const file = input.files?.[0]
         if (!file || !e) return
@@ -496,6 +496,14 @@ async function onFileCmd(cmd: string) {
             const skipped = result.skippedPages > 0 ? `, ${result.skippedPages} skipped` : ''
             store.setStatusMessage(`CDR opened: ${result.pages} page${result.pages > 1 ? 's' : ''}${skipped}${warn}`)
             if (result.warnings.length) console.warn('[CDR open warnings]', result.warnings)
+          } else if (/\.svg$/i.test(file.name) || file.type === 'image/svg+xml') {
+            await withBusy(store, `Opening ${file.name}…`, async (report) => {
+              const text = await file.text()
+              report(0.4, 'Opening SVG…')
+              await yieldToUI()
+              if (!e.openSvgText(text, file.name)) throw new Error('No drawable artwork in this SVG')
+            })
+            store.setStatusMessage('SVG opened')
           } else {
             await withBusy(store, `Opening ${file.name}…`, async (report) => {
               const text = await file.text()
