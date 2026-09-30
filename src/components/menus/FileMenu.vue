@@ -29,6 +29,8 @@
           <el-dropdown-item command="import">Import SVG...</el-dropdown-item>
           <el-dropdown-item command="importCdr">Import CDR...</el-dropdown-item>
           <el-dropdown-item command="openCdr">Open CDR...</el-dropdown-item>
+          <el-dropdown-item command="importAi">Import AI/PDF...</el-dropdown-item>
+          <el-dropdown-item command="openAi">Open AI/PDF...</el-dropdown-item>
           <el-dropdown-item command="place">Place Image...</el-dropdown-item>
         </el-dropdown-menu>
       </template>
@@ -471,12 +473,21 @@ async function onFileCmd(cmd: string) {
       if (!confirmDiscard()) break
       const input = document.createElement('input')
       input.type = 'file'
-      input.accept = '.json,.vec.json,.cdr,application/json'
+      input.accept = '.json,.vec.json,.cdr,.ai,.pdf,application/json'
       input.onchange = async () => {
         const file = input.files?.[0]
         if (!file || !e) return
         try {
-          if (/\.cdr$/i.test(file.name)) {
+          if (/\.(ai|pdf)$/i.test(file.name)) {
+            const result = await withBusy(store, `Opening ${file.name}…`, async (report) => {
+              const bytes = new Uint8Array(await file.arrayBuffer())
+              return e.openAiBytes(bytes, file.name, report)
+            })
+            const warn = result.warnings.length ? ` (${result.warnings.length} warnings)` : ''
+            const skipped = result.skippedPages > 0 ? `, ${result.skippedPages} skipped` : ''
+            store.setStatusMessage(`AI opened: ${result.pages} page${result.pages > 1 ? 's' : ''}${skipped}${warn}`)
+            if (result.warnings.length) console.warn('[AI open warnings]', result.warnings)
+          } else if (/\.cdr$/i.test(file.name)) {
             const result = await withBusy(store, `Opening ${file.name}…`, async (report) => {
               const bytes = new Uint8Array(await file.arrayBuffer())
               return e.openCdrBytes(bytes, file.name, report)
@@ -682,6 +693,61 @@ async function onFileCmd(cmd: string) {
           // previous document on the way out, so nothing is reported as lost.
           if (isCancelled(err)) store.setStatusMessage('CDR open cancelled')
           else store.setStatusMessage(err instanceof Error ? err.message : 'CDR open failed')
+        }
+      }
+      input.click()
+      break
+    }
+    case 'importAi': {
+      if (!e) break
+      const input = document.createElement('input')
+      input.type = 'file'
+      input.accept = '.ai,.pdf'
+      input.onchange = async () => {
+        const file = input.files?.[0]
+        if (!file || !e) return
+        try {
+          const result = await withBusy(store, `Importing ${file.name}…`, async (report) => {
+            const bytes = new Uint8Array(await file.arrayBuffer())
+            return e.importAiBytes(bytes, file.name, report)
+          })
+          const warn = result.warnings.length ? ` (${result.warnings.length} warnings)` : ''
+          const skipped = result.skippedPages > 0 ? `, ${result.skippedPages} skipped` : ''
+          store.setStatusMessage(
+            result.pages > 0
+              ? `AI imported: ${result.pages} page${result.pages > 1 ? 's' : ''}${skipped}${warn}`
+              : 'AI import failed'
+          )
+          if (result.warnings.length) console.warn('[AI import warnings]', result.warnings)
+        } catch (err) {
+          store.setStatusMessage(err instanceof Error ? err.message : 'AI import failed')
+        }
+      }
+      input.click()
+      break
+    }
+    case 'openAi': {
+      if (!e) break
+      if (!confirmDiscard()) break
+      const input = document.createElement('input')
+      input.type = 'file'
+      input.accept = '.ai,.pdf'
+      input.onchange = async () => {
+        const file = input.files?.[0]
+        if (!file || !e) return
+        try {
+          const result = await withBusy(store, `Opening ${file.name}…`, async (report) => {
+            const bytes = new Uint8Array(await file.arrayBuffer())
+            return e.openAiBytes(bytes, file.name, report)
+          })
+          const warn = result.warnings.length ? ` (${result.warnings.length} warnings)` : ''
+          const skipped = result.skippedPages > 0 ? `, ${result.skippedPages} skipped` : ''
+          store.setStatusMessage(
+            `AI opened: ${result.pages} page${result.pages > 1 ? 's' : ''}${skipped}${warn}`
+          )
+          if (result.warnings.length) console.warn('[AI open warnings]', result.warnings)
+        } catch (err) {
+          store.setStatusMessage(err instanceof Error ? err.message : 'AI open failed')
         }
       }
       input.click()

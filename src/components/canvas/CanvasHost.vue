@@ -950,6 +950,18 @@ async function onDropFiles(e: DragEvent) {
               imported++
               skippedPages += result.skippedPages
               if (result.warnings.length) console.warn('[CDR drop warnings]', result.warnings)
+            } else if (/\.(ai|pdf)$/i.test(file.name)) {
+              // AI (PDF-compatible) / PDF import appends one artboard per page,
+              // mirroring the CDR drop path.
+              if (file.size > 150 * 1024 * 1024) {
+                store.setStatusMessage(`"${file.name}" too large (150 MB max)`)
+                continue
+              }
+              const bytes = new Uint8Array(await file.arrayBuffer())
+              const result = await eng.importAiBytes(bytes, file.name, slice, signal)
+              imported++
+              skippedPages += result.skippedPages
+              if (result.warnings.length) console.warn('[AI drop warnings]', result.warnings)
             } else if (/\.svg$/i.test(file.name) || file.type === 'image/svg+xml') {
               const text = await file.text()
               slice(0.4)
@@ -982,7 +994,9 @@ async function onDropFiles(e: DragEvent) {
   } catch (err) {
     if (!isCancelled(err)) throw err
     store.setStatusMessage(
-      imported > 0 ? `Import cancelled — ${imported} file${imported > 1 ? 's' : ''} already imported` : 'Import cancelled'
+      imported > 0
+        ? `Import cancelled — ${imported} file${imported > 1 ? 's' : ''} already imported`
+        : 'Import cancelled'
     )
     return
   }

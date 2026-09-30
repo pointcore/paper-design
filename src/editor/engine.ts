@@ -34,6 +34,7 @@ import * as transforms from './engine-transforms'
 import * as pathops from './engine-pathops'
 import * as clipboard from './engine-clipboard'
 import * as cdrimport from './engine-cdrimport'
+import * as aiimport from './engine-aiimport'
 import * as datamerge from './engine-datamerge'
 import * as arrange from './engine-arrange'
 import * as envelope from './engine-envelope'
@@ -2899,6 +2900,26 @@ export class EditorEngine {
     signal?: AbortSignal
   ): Promise<CdrImportResult> {
     return cdrimport.importCdrBytes(this, input, baseName, onProgress, signal)
+  }
+
+  /** See engine-aiimport.ts. */
+  async openAiBytes(
+    input: Uint8Array | ArrayBuffer,
+    baseName = 'AI',
+    onProgress?: ProgressReport,
+    signal?: AbortSignal
+  ): Promise<CdrImportResult> {
+    return aiimport.openAiBytes(this, input, baseName, onProgress, signal)
+  }
+
+  /** See engine-aiimport.ts. */
+  async importAiBytes(
+    input: Uint8Array | ArrayBuffer,
+    baseName = 'AI',
+    onProgress?: ProgressReport,
+    signal?: AbortSignal
+  ): Promise<CdrImportResult> {
+    return aiimport.importAiBytes(this, input, baseName, onProgress, signal)
   }
 
   /** Payload of our last OS clipboard write (external-copy detection). */
