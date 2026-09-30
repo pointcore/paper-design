@@ -27,6 +27,7 @@ import {
   type ParagraphSettings,
 } from './paragraphs'
 import { flowTextThroughFrames, spliceThreadedText, type FlowWindow } from './thread-flow'
+import { lineWidth, metricsForItem, metricsForStyle, type TextMetrics } from './metrics'
 import { isPrimaryButton } from '../gestures'
 
 /** Text creation / editing mode, resolved from the active text tool. */
@@ -476,7 +477,7 @@ export class TextController {
         engine.clearSelection()
         engine.pushHistory('Delete Text')
       } else if (raw !== this.originalContent) {
-        item.content = this.layoutFrame(raw, frame.width, settings).content
+          item.content = this.layoutFrame(raw, frame.width, settings, this.metricsFor(item)).content
         item.point = this.frameAnchor(frame)
         ;(item.data as any).raw = raw
         ;(item.data as any).frame = { ...frame }
@@ -484,7 +485,7 @@ export class TextController {
         engine.pushHistory('Edit Text')
       }
     } else if (!item && raw.length > 0) {
-      this.createTextItem(this.layoutFrame(raw, frame.width, settings).content, this.frameAnchor(frame), {
+        this.createTextItem(this.layoutFrame(raw, frame.width, settings, this.metricsFor()).content, this.frameAnchor(frame), {
         textMode: 'area',
         raw,
         frame: { ...frame },
@@ -740,7 +741,9 @@ export class TextController {
     let cursor = Math.max(0, startOffset)
 
     for (const ch of raw) {
-      const advance = this.measureLineWidth(ch === '\t' ? ' ' : ch) + tracking * 0
+      // The glyphs below are created from the store's character style, so the
+      // store's style is also the right thing to measure them with here.
+      const advance = this.measureLineWidth(ch === '\t' ? ' ' : ch)
       const mid = cursor + advance / 2
       if (mid > total) break
       if (advance > 0) {
@@ -923,7 +926,7 @@ export class TextController {
     ;(item.data as any).paragraphs = clean
     const info = this.areaInfo(item)
     if (info) {
-      const laid = this.layoutFrame(info.raw, info.frame.width, clean)
+        const laid = this.layoutFrame(info.raw, info.frame.width, clean, this.metricsFor(item))
       item.content = laid.content
       // The measured line count includes the indent and the blank spacer
       // lines, so the overflow readout stays honest.
@@ -939,11 +942,12 @@ export class TextController {
     if (!info) return { lines: 0, fits: 0, overflowChars: 0 }
     // Counted after paragraph layout: the indent and the blank spacer lines
     // occupy the frame just like any other line.
-    const laid = this.layoutFrame(
-      info.raw,
-      Math.max(info.frame.width, MIN_FRAME_SPAN),
-      this.paragraphSettings(item)
-    )
+      const laid = this.layoutFrame(
+        info.raw,
+        Math.max(info.frame.width, MIN_FRAME_SPAN),
+        this.paragraphSettings(item),
+        this.metricsFor(item)
+      )
     const lines = laid.content === '' ? [] : laid.content.split('\n')
     const leading = this.effectiveLeading()
     const fits = Math.max(1, Math.floor(info.frame.height / (leading || 1)))
@@ -1031,7 +1035,7 @@ export class TextController {
     const settings = this.paragraphSettings(frames[0])
     const windows = flowTextThroughFrames(raw, boxes, {
       leading: this.effectiveLeading(),
-      measure: (line) => this.measureLineWidth(line),
+        measure: (line) => this.measureLineWidth(line, this.metricsFor(frames[0])),
       settings,
       minSpan: MIN_FRAME_SPAN,
     })
@@ -1070,7 +1074,12 @@ export class TextController {
     const frame: TextFrame = { ...info.frame, width, height }
     // layoutFrame reserves the indent out of the width, so the first line of
     // every paragraph still fits the frame after the spaces go in front of it.
-    const { content } = this.layoutFrame(this.threadText(this.threadRoot(item)), width, this.paragraphSettings(item))
+      const { content } = this.layoutFrame(
+        this.threadText(this.threadRoot(item)),
+        width,
+        this.paragraphSettings(item),
+        this.metricsFor(this.threadRoot(item))
+      )
     item.content = content
     item.point = this.frameAnchor(frame)
     ;(item.data as any).frame = { ...frame }
@@ -1142,7 +1151,7 @@ export class TextController {
     const root = this.threadRoot(item)
     const settings = this.paragraphSettings(root)
     const width = Math.max(info.frame.width, MIN_FRAME_SPAN)
-    const laid = this.layoutFrame(this.threadText(root), width, settings)
+      const laid = this.layoutFrame(this.threadText(root), width, settings, this.metricsFor(root))
     const lines = laid.content === '' ? [] : laid.content.split('\n')
     const leading = this.effectiveLeading()
     const fits = Math.max(1, Math.floor(info.frame.height / (leading || 1)))
@@ -1180,8 +1189,8 @@ export class TextController {
    * The breaking rules live in ./line-break so they can be unit tested
    * without a canvas; this only supplies the measurement probe.
    */
-  private wrapLines(raw: string, maxWidth: number): string[] {
-    return wrapText(raw, maxWidth, (line) => this.measureLineWidth(line))
+  private wrapLines(raw: string, maxWidth: number, metrics?: TextMetrics): string[] {
+    return wrapText(raw, maxWidth, (line) => this.measureLineWidth(line, metrics))
   }
 
   /**
@@ -1193,13 +1202,18 @@ export class TextController {
    * The indent is reserved out of the frame before wrapping rather than
    * appended afterwards: a first line that would run past the frame edge has
    * to be re-wrapped narrower, and padding it after the fact would overflow.
+   *
+   * `metrics` is the item's own font. Without it the layout falls back to the
+   * type tool's current style, which is wrong for every item that is not
+   * exactly that style.
    */
   private layoutFrame(
     raw: string,
     maxWidth: number,
-    settings: ParagraphSettings
+    settings: ParagraphSettings,
+    metrics?: TextMetrics
   ): { content: string; lineCount: number } {
-    const measure = (line: string) => this.measureLineWidth(line)
+    const measure = (line: string) => this.measureLineWidth(line, metrics)
     const indent = normalizeParagraphSettings(settings).firstLineIndent
     const out: Array<{ text: string; paragraph: number }> = []
     raw.split('\n').forEach((paragraph, index) => {
@@ -1213,25 +1227,45 @@ export class TextController {
     return { content: laid.map((line) => line.text).join('\n'), lineCount: laid.length }
   }
 
-  /** Canvas font string matching the current character style. */
-  private textMeasureFont(): string {
-    const charStyle = this.engine!.store.charStyle
-    return `${charStyle.fontStyle} ${charStyle.fontWeight} ${charStyle.fontSize}px ${charStyle.fontFamily}`
+  /**
+   * Metrics for a text item, falling back to the type tool's current style for
+   * an item that has no font of its own (a legacy item, or a frame being laid
+   * out before it exists).
+   */
+  private metricsFor(item?: paper.Item | null): TextMetrics {
+    const charStyle = this.engine?.store.charStyle
+    const fallback = {
+      fontSize: Number(charStyle?.fontSize) || 12,
+      fontFamily: charStyle?.fontFamily || 'sans-serif',
+      fontWeight: charStyle?.fontWeight || 'normal',
+      fontStyle: charStyle?.fontStyle || 'normal',
+      tracking: Number(charStyle?.tracking) || 0,
+    }
+    return item ? metricsForItem(item, fallback) : metricsForStyle(fallback)
   }
 
-  /** Width of one line in document units under the current style (tracking-aware). */
-  private measureLineWidth(line: string): number {
+  /** Canvas font string for a set of metrics. */
+  private textMeasureFont(metrics?: TextMetrics): string {
+    return (metrics ?? this.metricsFor()).font
+  }
+
+  /**
+   * Width of one line in document units, tracking-aware.
+   *
+   * The probe measures with the browser's own kerning, which is what the
+   * renderer does too, so a line that measures as fitting does fit.
+   */
+  private measureLineWidth(line: string, metrics?: TextMetrics): number {
     if (!this.measureCtx) {
       const canvas = document.createElement('canvas')
       this.measureCtx = canvas.getContext('2d')
     }
-    const charStyle = this.engine!.store.charStyle
-    const tracking = (Number(charStyle.tracking) || 0) / 1000 * (Number(charStyle.fontSize) || 12)
-    if (!this.measureCtx) return line.length * (6 + tracking)
-    this.measureCtx.font = this.textMeasureFont()
-    const base = this.measureCtx.measureText(line).width
-    // Tracking adds per-character advance (no trailing space after last glyph).
-    return base + Math.max(0, line.length - 1) * tracking
+    const resolved = metrics ?? this.metricsFor()
+    if (!this.measureCtx) {
+      return lineWidth(line, resolved, (text) => text.length * (resolved.fontSize * 0.5))
+    }
+    this.measureCtx.font = this.textMeasureFont(resolved)
+    return lineWidth(line, resolved, (text) => this.measureCtx!.measureText(text).width)
   }
 
   /** Effective leading for new/updated text (auto = 1.2x). */
