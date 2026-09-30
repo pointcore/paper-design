@@ -33,7 +33,10 @@ export const TOOL_SHORTCUTS: Record<ToolName, ShortcutDef | null> = {
   select:          { label: 'V',    match: (e) => key(e) === 'v' },
   'direct-select': { label: 'A',    match: (e) => key(e) === 'a' },
   lasso:           { label: 'Q',    match: (e) => key(e) === 'q' },
-  pen:             { label: 'P',    match: (e) => key(e) === 'p' },
+  // `pen` guards the modifiers explicitly: it shares its letter with the
+  // Perspective Grid binding (Shift+P), so an unguarded `key(e) === 'p'`
+  // would swallow the shifted press if the order below ever flipped.
+  pen:             { label: 'P',    match: (e) => !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey && key(e) === 'p' },
   curvature:       { label: 'Shift+~', match: (e) => !e.altKey && !e.ctrlKey && !e.metaKey && e.key === '~' },
   'add-anchor':    { label: '+',    match: (e) => !e.altKey && !e.ctrlKey && !e.metaKey && e.key === '+' },
   'delete-anchor': { label: '-',    match: (e) => !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey && e.key === '-' },
@@ -99,8 +102,8 @@ const SHORTCUT_ORDER: ToolName[] = [
   'lasso',
   'gradient',
   'wand',
-  'pen',
   'perspective-grid',
+  'pen',
   'pencil',
   'eraser',
   'eyedropper',

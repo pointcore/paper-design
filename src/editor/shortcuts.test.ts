@@ -4,7 +4,7 @@
  * plain Node — run with `vitest run`.
  */
 import { describe, expect, it, vi } from 'vitest'
-import { handleGlobalKeydown, resolveToolShortcut } from './shortcuts'
+import { handleGlobalKeydown, resolveToolShortcut, TOOL_SHORTCUTS } from './shortcuts'
 
 /** Minimal synthetic key event for matcher tests. */
 function key(init: Partial<KeyboardEvent>): KeyboardEvent {
@@ -44,12 +44,30 @@ describe('resolveToolShortcut', () => {
     expect(resolveToolShortcut(key({ key: 's', shiftKey: true }))).toBe('scale')
     expect(resolveToolShortcut(key({ key: 'o', shiftKey: true }))).toBe('mirror')
     expect(resolveToolShortcut(key({ key: 'f', shiftKey: true }))).toBe('free-transform')
+    expect(resolveToolShortcut(key({ key: 'p', shiftKey: true }))).toBe('perspective-grid')
   })
 
   it('keeps plain letters for the base tools', () => {
     expect(resolveToolShortcut(key({ key: 'b' }))).toBe('brush')
     expect(resolveToolShortcut(key({ key: 'c' }))).toBe('scissors')
     expect(resolveToolShortcut(key({ key: 'r' }))).toBe('rect')
+    // The letter the Perspective Grid binding shares.
+    expect(resolveToolShortcut(key({ key: 'p' }))).toBe('pen')
+  })
+
+  it('routes every documented label to its own tool', () => {
+    // Driven off the map rather than a hand-written list: a new binding whose
+    // label is shadowed by an earlier one (the bug that left Shift+P
+    // unreachable behind the bare "p" of the pen) fails here immediately.
+    const mismatches: string[] = []
+    for (const [tool, def] of Object.entries(TOOL_SHORTCUTS)) {
+      if (!def) continue
+      const shifted = def.label.startsWith('Shift+')
+      const chord = shifted ? def.label.slice('Shift+'.length).toLowerCase() : def.label
+      const resolved = resolveToolShortcut(key({ key: chord, shiftKey: shifted }))
+      if (resolved !== tool) mismatches.push(`${def.label} -> ${resolved ?? 'null'} (want ${tool})`)
+    }
+    expect(mismatches).toEqual([])
   })
 
   it('returns null for unbound keys', () => {
