@@ -166,9 +166,25 @@ export function wrapParagraph(
  * Wrap a whole text block, keeping explicit newlines as paragraph breaks.
  */
 export function wrapText(raw: string, maxWidth: number, measure: (line: string) => number): string[] {
-  const out: string[] = []
-  for (const paragraph of raw.split('\n')) {
-    out.push(...wrapParagraph(paragraph, maxWidth, measure))
+  return wrapTextWithParagraphs(raw, maxWidth, measure).map((line) => line.text)
+}
+
+/**
+ * Wrap a block and report which paragraph each line came from, so paragraph
+ * layout (indent, spacing) can be applied without re-deriving the boundaries
+ * from the text.
+ */
+export function wrapTextWithParagraphs(
+  raw: string,
+  maxWidth: number,
+  measure: (line: string) => number
+): Array<{ text: string; paragraph: number }> {
+  const out: Array<{ text: string; paragraph: number }> = []
+  const paragraphs = raw.split('\n')
+  for (let p = 0; p < paragraphs.length; p++) {
+    for (const line of wrapParagraph(paragraphs[p], maxWidth, measure)) {
+      out.push({ text: line, paragraph: p })
+    }
   }
   return out
 }

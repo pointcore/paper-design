@@ -79,6 +79,38 @@
         </div>
         <div v-if="threadHint" class="ai-desc">{{ threadHint }}</div>
         <div class="prop-row">
+          <span class="prop-label-sm" title="First-line indent, paragraph spacing">Para</span>
+          <el-input-number
+            v-model="indentValue"
+            :min="0"
+            :max="200"
+            :precision="1"
+            size="small"
+            controls-position="right"
+            title="First-line indent"
+            @change="onParagraphChange"
+          />
+          <el-input-number
+            v-model="spaceBeforeValue"
+            :min="0"
+            :max="10"
+            size="small"
+            controls-position="right"
+            title="Space before, in lines"
+            @change="onParagraphChange"
+          />
+          <el-input-number
+            v-model="spaceAfterValue"
+            :min="0"
+            :max="10"
+            size="small"
+            controls-position="right"
+            title="Space after, in lines"
+            @change="onParagraphChange"
+          />
+        </div>
+        <div class="ai-desc">Para: first-line indent, then space before / after in lines.</div>
+        <div class="prop-row">
           <el-button size="small" class="grid-btn" title="Thread the selected area frames left-to-right" @click="onThreadFrames">Thread</el-button>
           <el-button size="small" class="icon-btn" title="Select previous frame" @click="onThreadNav('prev')">←</el-button>
           <el-button size="small" class="icon-btn" title="Select next frame" @click="onThreadNav('next')">→</el-button>
@@ -153,6 +185,9 @@ const otFrac = ref(false)
 const isAreaSelected = ref(false)
 const frameW = ref(0)
 const frameH = ref(0)
+const indentValue = ref(0)
+const spaceBeforeValue = ref(0)
+const spaceAfterValue = ref(0)
 const hasOverflow = ref(false)
 const overflowHint = ref('')
 const threadHint = ref('')
@@ -171,6 +206,11 @@ function textController() {
       resizeAreaItem: (item: any, w: number, h: number) => boolean
       flowOverflowToNewFrame: (item: any) => boolean
       effectiveLeading: () => number
+      paragraphSettings: (item: any) => import('../../editor/text/paragraphs').ParagraphSettings
+      setParagraphSettings: (
+        item: any,
+        settings: import('../../editor/text/paragraphs').ParagraphSettings
+      ) => boolean
     } | null
   } catch {
     return null
@@ -253,8 +293,12 @@ function syncAreaFromSelection() {
   if (!isArea) return
   const info = tc.areaInfo(single)
   if (!info) return
-  frameW.value = Math.round(info.frame.width * 10) / 10
-  frameH.value = Math.round(info.frame.height * 10) / 10
+    frameW.value = Math.round(info.frame.width * 10) / 10
+    frameH.value = Math.round(info.frame.height * 10) / 10
+    const paragraphs = tc.paragraphSettings(single)
+    indentValue.value = Math.round(paragraphs.firstLineIndent * 10) / 10
+    spaceBeforeValue.value = paragraphs.spaceBefore
+    spaceAfterValue.value = paragraphs.spaceAfter
   const over = tc.areaOverflow(single)
   hasOverflow.value = over.overflowChars > 0
   overflowHint.value = hasOverflow.value
@@ -676,8 +720,36 @@ function onTrackingChange(val: number | undefined) {
   syncAreaFromSelection()
 }
 
-function onFrameSizeChange() {
-  const tc = textController()
+  /**
+   * Apply the three paragraph fields to the selected frame.
+   *
+   * One history entry per change, and the re-layout happens inside the
+   * controller so the panel never has to re-implement the indent/spacing
+   * rules that ./text/paragraphs.ts owns.
+   */
+  function onParagraphChange() {
+    const tc = textController()
+    const e = getEngine()
+    if (!tc || !e) return
+    const item = tc.selectedAreaItem() as paper.PointText | null
+    if (!item) return
+    const applied = tc.setParagraphSettings(item, {
+      firstLineIndent: Number(indentValue.value) || 0,
+      spaceBefore: Math.round(Number(spaceBeforeValue.value) || 0),
+      spaceAfter: Math.round(Number(spaceAfterValue.value) || 0),
+    })
+    if (!applied) {
+      syncAreaFromSelection()
+      return
+    }
+    e.clearSelection()
+    item.selected = true
+    e.syncSelectionToStore()
+    e.pushHistory('Paragraph Settings')
+    syncAreaFromSelection()
+  }
+
+  function onFrameSizeChange() {  const tc = textController()
   const e = getEngine()
   if (!tc || !e) return
   const item = tc.selectedAreaItem() as paper.PointText | null

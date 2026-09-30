@@ -19,7 +19,13 @@ import { EditorEngine } from '../engine'
 import { SnapService } from '../snap/snap-service'
 import { applyToolCursor } from '../cursors'
 import { cssTextAlignFor, normalizeAlign, paperJustificationFor } from './text-align'
-import { wrapText } from './line-break'
+import { wrapParagraph, wrapText } from './line-break'
+import {
+  defaultParagraphSettings,
+  layoutParagraphs,
+  normalizeParagraphSettings,
+  type ParagraphSettings,
+} from './paragraphs'
 import { isPrimaryButton } from '../gestures'
 
 /** Text creation / editing mode, resolved from the active text tool. */
@@ -443,7 +449,10 @@ export class TextController {
       return
     }
     const item = this.editingItem
-    const content = this.wrapLines(raw, frame.width).join('\n')
+    // Paragraph settings live on the item; a new frame starts at the
+    // defaults, an existing one keeps whatever it was laid out with.
+    const settings = item ? this.paragraphSettings(item) : defaultParagraphSettings()
+    const { content } = this.layoutFrame(raw, frame.width, settings)
 
     if (item && item.parent) {
       item.visible = true
@@ -464,6 +473,7 @@ export class TextController {
         textMode: 'area',
         raw,
         frame: { ...frame },
+        paragraphs: settings,
       }, 'Add Area Text')
     }
   }
@@ -525,7 +535,12 @@ export class TextController {
   private createTextItem(
     content: string,
     point: paper.Point,
-    data: { textMode: TextKind; raw: string; frame?: TextFrame },
+    data: {
+      textMode: TextKind
+      raw: string
+      frame?: TextFrame
+      paragraphs?: ParagraphSettings
+    },
     historyLabel: string,
     push = true
   ): paper.PointText {
@@ -558,6 +573,10 @@ export class TextController {
     text.data.align = align
     text.data.openType = { ...charStyle.openType }
     if (data.frame) text.data.frame = { ...data.frame }
+    // Stored on every text item, not just frames: the Text panel shows the
+    // same three fields whatever the mode, and a frame saved without the
+    // field must still read back as the defaults.
+    text.data.paragraphs = normalizeParagraphSettings(data.paragraphs)
     engine.getActiveLayer().addChild(text)
 
     if (push) {
@@ -831,15 +850,53 @@ export class TextController {
     return { frame, raw }
   }
 
+  /**
+   * Paragraph settings stored on a text item, with the defaults filled in.
+   * Read through here rather than off `item.data` at each call site: a frame
+   * saved before paragraph settings existed has no field at all, and a
+   * hand-edited project may have a nonsense one.
+   */
+  paragraphSettings(item: paper.PointText): ParagraphSettings {
+    return normalizeParagraphSettings((item.data as any)?.paragraphs)
+  }
+
+  /**
+   * Store paragraph settings on a text item and re-lay it out, so a panel
+   * edit is visible immediately. Returns false when the item is gone.
+   */
+  setParagraphSettings(item: paper.PointText, settings: ParagraphSettings): boolean {
+    const engine = this.engine
+    if (!engine || !item.parent) return false
+    const clean = normalizeParagraphSettings(settings)
+    ;(item.data as any).paragraphs = clean
+    const info = this.areaInfo(item)
+    if (info) {
+      const laid = this.layoutFrame(info.raw, info.frame.width, clean)
+      item.content = laid.content
+      // The measured line count includes the indent and the blank spacer
+      // lines, so the overflow readout stays honest.
+      ;(item.data as any).laidLines = laid.lineCount
+    }
+    engine.scope.view.update()
+    return true
+  }
+
   /** How many wrapped lines fit vs exist (overflow = threaded candidate). */
   areaOverflow(item: paper.PointText): { lines: number; fits: number; overflowChars: number } {
     const info = this.areaInfo(item)
     if (!info) return { lines: 0, fits: 0, overflowChars: 0 }
-    const lines = this.wrapLines(info.raw, Math.max(info.frame.width, MIN_FRAME_SPAN))
+    // Counted after paragraph layout: the indent and the blank spacer lines
+    // occupy the frame just like any other line.
+    const laid = this.layoutFrame(
+      info.raw,
+      Math.max(info.frame.width, MIN_FRAME_SPAN),
+      this.paragraphSettings(item)
+    )
+    const lines = laid.content === '' ? [] : laid.content.split('\n')
     const leading = this.effectiveLeading()
     const fits = Math.max(1, Math.floor(info.frame.height / (leading || 1)))
     if (lines.length <= fits) return { lines: lines.length, fits, overflowChars: 0 }
-    const overflowChars = lines.slice(fits).join('\n').length
+    const overflowChars = lines.slice(fits).join('').length
     return { lines: lines.length, fits, overflowChars }
   }
 
@@ -855,7 +912,10 @@ export class TextController {
     const info = this.areaInfo(item)
     if (!info) return false
     const frame: TextFrame = { ...info.frame, width, height }
-    item.content = this.wrapLines(info.raw, width).join('\n')
+    // layoutFrame reserves the indent out of the width, so the first line of
+    // every paragraph still fits the frame after the spaces go in front of it.
+    const { content } = this.layoutFrame(info.raw, width, this.paragraphSettings(item))
+    item.content = content
     item.point = this.frameAnchor(frame)
     ;(item.data as any).frame = { ...frame }
     engine.scope.view.update()
@@ -873,12 +933,24 @@ export class TextController {
     if (!engine || !item.parent) return false
     const info = this.areaInfo(item)
     if (!info) return false
-    const lines = this.wrapLines(info.raw, Math.max(info.frame.width, MIN_FRAME_SPAN))
+    // The overflow has to be counted after paragraph layout: blank spacer
+    // lines and the indent occupy the frame like any other line, and a
+    // paragraph that does not fit in this frame at all is the common case.
+    const settings = this.paragraphSettings(item)
+    const width = Math.max(info.frame.width, MIN_FRAME_SPAN)
+    const laid = this.layoutFrame(info.raw, width, settings)
+    const lines = laid.content === '' ? [] : laid.content.split('\n')
     const leading = this.effectiveLeading()
     const fits = Math.max(1, Math.floor(info.frame.height / (leading || 1)))
     if (lines.length <= fits) return false
-    const kept = lines.slice(0, fits).join('\n')
-    const overflowRaw = lines.slice(fits).join('\n')
+    // A cut that lands on an indent is meaningless: the spaces belong to the
+    // paragraph, so drop them with the line rather than starting the next
+    // frame on whitespace.
+    const kept = lines.slice(0, fits).map((line) => line.replace(/^ +/, '')).join('\n')
+    const overflowRaw = lines
+      .slice(fits)
+      .map((line) => line.replace(/^ +/, ''))
+      .join('\n')
     // Wrapped lines already fit the frame width, so re-wrapping them is
     // stable: keep the visible prefix as the new raw (explicit breaks kept).
     item.content = kept
@@ -890,12 +962,14 @@ export class TextController {
       width: info.frame.width,
       height: info.frame.height,
     }
-    const overflowContent = this.wrapLines(overflowRaw, nextFrame.width).join('\n')
-    // Links must land before the history snapshot, or undo loses them.
-    const created = this.createTextItem(overflowContent, this.frameAnchor(nextFrame), {
+    // The continuation frame re-applies the same paragraph settings, so an
+    // indented document stays indented across the thread.
+    const overflow = this.layoutFrame(overflowRaw, nextFrame.width, settings)
+    const created = this.createTextItem(overflow.content, this.frameAnchor(nextFrame), {
       textMode: 'area',
       raw: overflowRaw,
       frame: { ...nextFrame },
+      paragraphs: settings,
     }, 'Thread Text', false)
     ;(created.data as any).threadPrev = (item.data as any)?.id ?? ''
     ;(item.data as any).threadNext = (created.data as any)?.id ?? ''
@@ -912,6 +986,35 @@ export class TextController {
    */
   private wrapLines(raw: string, maxWidth: number): string[] {
     return wrapText(raw, maxWidth, (line) => this.measureLineWidth(line))
+  }
+
+  /**
+   * Wrap and then apply the item's paragraph settings: first-line indent and
+   * the vertical spacing. Returns the content string plus how many lines it
+   * occupies, because spacer lines and the indent change the count the frame
+   * has to fit.
+   *
+   * The indent is reserved out of the frame before wrapping rather than
+   * appended afterwards: a first line that would run past the frame edge has
+   * to be re-wrapped narrower, and padding it after the fact would overflow.
+   */
+  private layoutFrame(
+    raw: string,
+    maxWidth: number,
+    settings: ParagraphSettings
+  ): { content: string; lineCount: number } {
+    const measure = (line: string) => this.measureLineWidth(line)
+    const indent = normalizeParagraphSettings(settings).firstLineIndent
+    const out: Array<{ text: string; paragraph: number }> = []
+    raw.split('\n').forEach((paragraph, index) => {
+      let lines = wrapParagraph(paragraph, maxWidth, measure)
+      if (indent > 0 && lines.length > 0 && measure(lines[0]) + indent > maxWidth) {
+        lines = wrapParagraph(paragraph, Math.max(1, maxWidth - indent), measure)
+      }
+      for (const text of lines) out.push({ text, paragraph: index })
+    })
+    const laid = layoutParagraphs(out, settings, measure)
+    return { content: laid.map((line) => line.text).join('\n'), lineCount: laid.length }
   }
 
   /** Canvas font string matching the current character style. */
