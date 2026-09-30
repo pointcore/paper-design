@@ -19,6 +19,7 @@ import { EditorEngine } from '../engine'
 import { SnapService } from '../snap/snap-service'
 import { applyToolCursor } from '../cursors'
 import { cssTextAlignFor, normalizeAlign, paperJustificationFor } from './text-align'
+import { wrapText } from './line-break'
 import { isPrimaryButton } from '../gestures'
 
 /** Text creation / editing mode, resolved from the active text tool. */
@@ -442,7 +443,7 @@ export class TextController {
       return
     }
     const item = this.editingItem
-    const content = this.wrapText(raw, frame.width).join('\n')
+    const content = this.wrapLines(raw, frame.width).join('\n')
 
     if (item && item.parent) {
       item.visible = true
@@ -834,7 +835,7 @@ export class TextController {
   areaOverflow(item: paper.PointText): { lines: number; fits: number; overflowChars: number } {
     const info = this.areaInfo(item)
     if (!info) return { lines: 0, fits: 0, overflowChars: 0 }
-    const lines = this.wrapText(info.raw, Math.max(info.frame.width, MIN_FRAME_SPAN))
+    const lines = this.wrapLines(info.raw, Math.max(info.frame.width, MIN_FRAME_SPAN))
     const leading = this.effectiveLeading()
     const fits = Math.max(1, Math.floor(info.frame.height / (leading || 1)))
     if (lines.length <= fits) return { lines: lines.length, fits, overflowChars: 0 }
@@ -854,7 +855,7 @@ export class TextController {
     const info = this.areaInfo(item)
     if (!info) return false
     const frame: TextFrame = { ...info.frame, width, height }
-    item.content = this.wrapText(info.raw, width).join('\n')
+    item.content = this.wrapLines(info.raw, width).join('\n')
     item.point = this.frameAnchor(frame)
     ;(item.data as any).frame = { ...frame }
     engine.scope.view.update()
@@ -872,7 +873,7 @@ export class TextController {
     if (!engine || !item.parent) return false
     const info = this.areaInfo(item)
     if (!info) return false
-    const lines = this.wrapText(info.raw, Math.max(info.frame.width, MIN_FRAME_SPAN))
+    const lines = this.wrapLines(info.raw, Math.max(info.frame.width, MIN_FRAME_SPAN))
     const leading = this.effectiveLeading()
     const fits = Math.max(1, Math.floor(info.frame.height / (leading || 1)))
     if (lines.length <= fits) return false
@@ -889,7 +890,7 @@ export class TextController {
       width: info.frame.width,
       height: info.frame.height,
     }
-    const overflowContent = this.wrapText(overflowRaw, nextFrame.width).join('\n')
+    const overflowContent = this.wrapLines(overflowRaw, nextFrame.width).join('\n')
     // Links must land before the history snapshot, or undo loses them.
     const created = this.createTextItem(overflowContent, this.frameAnchor(nextFrame), {
       textMode: 'area',
@@ -903,40 +904,14 @@ export class TextController {
     return true
   }
 
-  /** Wrap raw text (explicit newlines kept) into frame-width lines. */
-  private wrapText(raw: string, maxWidth: number): string[] {
-    const out: string[] = []
-    for (const paragraph of raw.split('\n')) {
-      out.push(...this.wrapParagraph(paragraph, maxWidth))
-    }
-    return out
-  }
-
   /**
-   * Greedy single-paragraph wrap: breaks at the last space when possible
-   * (CJK text without spaces breaks per character) and drops the space
-   * that caused the break.
+   * Wrap raw text (explicit newlines kept) into frame-width lines.
+   *
+   * The breaking rules live in ./line-break so they can be unit tested
+   * without a canvas; this only supplies the measurement probe.
    */
-  private wrapParagraph(paragraph: string, maxWidth: number): string[] {
-    const lines: string[] = []
-    let line = ''
-    let breakAt = -1
-    for (const ch of paragraph) {
-      if (this.measureLineWidth(line + ch) <= maxWidth || line.length === 0) {
-        line += ch
-        if (ch === ' ' || ch === '\t') breakAt = line.length
-      } else if (breakAt > 0) {
-        lines.push(line.slice(0, breakAt).replace(/\s+$/, ''))
-        line = line.slice(breakAt).replace(/^\s+/, '') + ch
-        breakAt = -1
-      } else {
-        lines.push(line)
-        line = ch === ' ' ? '' : ch
-        breakAt = -1
-      }
-    }
-    lines.push(line)
-    return lines
+  private wrapLines(raw: string, maxWidth: number): string[] {
+    return wrapText(raw, maxWidth, (line) => this.measureLineWidth(line))
   }
 
   /** Canvas font string matching the current character style. */
