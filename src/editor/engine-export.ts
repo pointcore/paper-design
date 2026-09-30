@@ -11,6 +11,7 @@ import type paper from 'paper'
 import type { EditorEngine } from './engine'
 import type { RasterExportOptions } from './types'
 import { unitedBoundsOf } from './engine-arrange'
+import { buildPrinterMarks } from './printer-marks'
 import { encodeTiff } from './tiff'
 
 /** Serialize unlocked selected user items into a standalone SVG string. */
@@ -268,7 +269,7 @@ function withCapturedView<T>(
 export function exportBoardVectorSVG(
   e: EditorEngine,
   board: { x: number; y: number; width: number; height: number },
-  opts?: { bleed?: number; marks?: boolean }
+  opts?: { bleed?: number; marks?: boolean | 'print'; slug?: string; spotNames?: string[] }
 ): SVGSVGElement | null {
   if (!board || !(board.width > 0) || !(board.height > 0)) return null
   if (!Number.isFinite(board.x) || !Number.isFinite(board.y)) return null
@@ -307,7 +308,11 @@ export function exportBoardVectorSVG(
     sheet.setAttribute('fill', '#ffffff')
     root.insertBefore(sheet, root.firstChild)
     if (opts?.marks && bleed > 0) {
-      appendCropMarks(root, ns, board, bleed)
+      appendPrinterMarks(root, ns, board, bleed, {
+        full: opts.marks === 'print',
+        slug: opts.slug,
+        spotNames: opts.spotNames,
+      })
     }
     // No mask post-processing: an opacity mask is a paper clip mask, and paper
     // exports it as an SVG <clipPath> that the artwork points at — the same
@@ -327,8 +332,8 @@ export function exportBoardVectorSVG(
 
 /**
  * Hairline crop marks at the trim corners (drawn inside the bleed box,
- * flush to the page edges). Imposition stays one-up: every board is its
- * own PDF page.
+ * flush with the page edges). Imposition stays one-up: every board is
+ * its own PDF page.
  */
 function appendCropMarks(
   root: SVGSVGElement,
@@ -367,6 +372,60 @@ function appendCropMarks(
     line.setAttribute('x2', fmt(bx))
     line.setAttribute('y2', fmt(by))
     group.appendChild(line)
+  }
+  root.appendChild(group)
+}
+
+/**
+ * Printer marks around the trim box, in the bleed box.
+ *
+ * `marks: true` is the screen-facing set (crop marks at the trim corners);
+ * `'print'` is the full prepress set — crop marks plus registration targets, a
+ * color bar and a slug line — which is what goes to a press.
+ */
+function appendPrinterMarks(
+  root: SVGSVGElement,
+  ns: string,
+  trim: { x: number; y: number; width: number; height: number },
+  bleed: number,
+  opts?: { full?: boolean; slug?: string; spotNames?: string[] }
+): void {
+  const fmt = (n: number): string => String(Math.round(n * 100) / 100)
+  if (!opts?.full) {
+    appendCropMarks(root, ns, trim, bleed)
+    return
+  }
+  const marks = buildPrinterMarks({ trim, bleed, slug: opts.slug, spotNames: opts.spotNames })
+  const group = document.createElementNS(ns, 'g')
+  group.setAttribute('data-printer-marks', 'true')
+  for (const line of marks.lines) {
+    const el = document.createElementNS(ns, 'line')
+    el.setAttribute('x1', fmt(line.x1))
+    el.setAttribute('y1', fmt(line.y1))
+    el.setAttribute('x2', fmt(line.x2))
+    el.setAttribute('y2', fmt(line.y2))
+    el.setAttribute('stroke', '#000000')
+    el.setAttribute('stroke-width', fmt(line.width ?? 0.5))
+    group.appendChild(el)
+  }
+  for (const patch of marks.patches) {
+    const el = document.createElementNS(ns, 'rect')
+    el.setAttribute('x', fmt(patch.x))
+    el.setAttribute('y', fmt(patch.y))
+    el.setAttribute('width', fmt(patch.size))
+    el.setAttribute('height', fmt(patch.size))
+    el.setAttribute('fill', patch.fill)
+    group.appendChild(el)
+  }
+  for (const text of marks.texts) {
+    const el = document.createElementNS(ns, 'text')
+    el.setAttribute('x', fmt(text.x))
+    el.setAttribute('y', fmt(text.y))
+    el.setAttribute('font-family', 'sans-serif')
+    el.setAttribute('font-size', fmt(text.size))
+    el.setAttribute('fill', '#000000')
+    el.textContent = text.text
+    group.appendChild(el)
   }
   root.appendChild(group)
 }

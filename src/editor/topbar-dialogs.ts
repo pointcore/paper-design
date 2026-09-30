@@ -16,16 +16,22 @@ export function preflightKindLabel(kind: string): string {
     case 'gamut': return 'Gamut'
     case 'tac': return 'Ink'
     case 'small': return 'Type'
-    case 'hairline': return 'Stroke'
-    case 'dpi': return 'DPI'
-    default: return 'Layer'
+      case 'hairline': return 'Stroke'
+      case 'dpi': return 'DPI'
+      case 'spot': return 'Spot'
+      case 'transparency': return 'Alpha'
+      case 'font': return 'Font'
+      default: return 'Layer'
+    }
   }
-}
 
 /** Severity tag for a preflight issue kind. */
 export function preflightSeverity(kind: string): 'danger' | 'warning' | 'info' {
   if (kind === 'overflow' || kind === 'dpi' || kind === 'tac') return 'danger'
   if (kind === 'gamut' || kind === 'hairline' || kind === 'small') return 'warning'
+  // A spot ink, live transparency or a referenced font is a conversation with
+  // the printer, not a defect in the file: worth saying, not worth alarming.
+  if (kind === 'spot' || kind === 'transparency' || kind === 'font') return 'info'
   return 'info'
 }
 

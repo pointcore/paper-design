@@ -49,6 +49,7 @@ import * as mesh from './engine-mesh'
 import * as blend from './engine-blend'
 import * as edit from './engine-edit'
 import * as preflight from './engine-preflight'
+import type { PreflightIssue } from './engine-preflight'
 import type { TraceOptions } from './trace'
 
 /** Identifier stamped into every saved project file. */
@@ -2319,10 +2320,10 @@ export class EditorEngine {
   /** See engine-export.ts. */
   exportBoardVectorSVG(
     board: { x: number; y: number; width: number; height: number },
-    opts?: { bleed?: number; marks?: boolean }
+    opts?: { bleed?: number; marks?: boolean | 'print'; slug?: string; spotNames?: string[] }
   ): SVGSVGElement | null {
-    return exporter.exportBoardVectorSVG(this, board, opts)
-  }
+      return exporter.exportBoardVectorSVG(this, board, opts)
+    }
 
   /** See engine-export.ts. */
   computeNUpLayout(
@@ -3173,9 +3174,9 @@ export class EditorEngine {
 
   /** One preflight finding (print-readiness check). */
   /** See engine-preflight.ts. */
-  preflight(): Array<{ kind: 'overflow' | 'gamut' | 'tac' | 'small' | 'hairline' | 'dpi' | 'empty-layer'; message: string; itemId: string }> {
-    return preflight.preflight(this)
-  }
+  preflight(): PreflightIssue[] {
+      return preflight.preflight(this)
+    }
 
   /** See engine-appearance.ts. */
   adjustColors(dh: number, ds: number, dl: number): number {

@@ -11,10 +11,21 @@ import type paper from 'paper'
 import type { EditorEngine } from './engine'
 import { isClipMask } from './paper-types'
 import { colorToCSS, isOutOfCmykGamut, parseCssColor, rgbToCmyk } from './color'
+import { collectSeparations } from './separations'
 
 /** One preflight finding (print-readiness check). */
 export interface PreflightIssue {
-  kind: 'overflow' | 'gamut' | 'tac' | 'small' | 'hairline' | 'dpi' | 'empty-layer'
+  kind:
+    | 'overflow'
+    | 'gamut'
+    | 'tac'
+    | 'small'
+    | 'hairline'
+    | 'dpi'
+    | 'empty-layer'
+    | 'spot'
+    | 'transparency'
+    | 'font'
   message: string
   itemId: string
 }
@@ -126,5 +137,64 @@ export function preflight(e: EditorEngine): PreflightIssue[] {
     }
     for (const child of layer.children) walk(child as paper.Item)
   }
+  out.push(...printFindings(e))
   return out.slice(0, 50)
+}
+
+/**
+ * Findings that only matter once the file is going to a press.
+ *
+ * The per-item checks above are about how the artwork looks; these are about
+ * what the job needs. A spot ink means a separation the printer has to be
+ * told about, live transparency is something most presses want flattened, and
+ * a text family the PDF only references reflows if it is missing on the press
+ * machine. All three were invisible before: the export succeeded and the
+ * problem only turned up after the plates were made.
+ */
+function printFindings(e: EditorEngine): PreflightIssue[] {
+  const out: PreflightIssue[] = []
+  const scope = e.scope
+  const spots = collectSeparations(e)
+  for (const sep of spots) {
+    out.push({
+      kind: 'spot',
+      message: `Spot ink "${sep.spot}" on ${sep.items} ${sep.items === 1 ? 'object' : 'objects'} — the job needs a plate for it`,
+      itemId: '',
+    })
+  }
+  // One line for the whole document rather than one per object: transparency
+  // is flattened (or not) for the job, not per shape.
+  let translucent = 0
+  const fonts = new Set<string>()
+  const walk = (node: paper.Item) => {
+    const data = (node as any).data ?? {}
+    if (data.isChrome || data.isPreview || data.isGuide || data.isArtboard || data.annotation) return
+    if (data.isPatternTile || isClipMask(node)) return
+    if (Number((node as any).opacity ?? 1) < 1) translucent += 1
+    if (node instanceof scope.PointText) {
+      const family = (node as any).fontFamily
+      if (typeof family === 'string' && family) fonts.add(family)
+    }
+    const children = (node as any).children as paper.Item[] | undefined
+    if (children) for (const child of children) walk(child)
+  }
+  for (const layer of e.project.layers) {
+    if (!(layer.data as any)?.isUserLayer) continue
+    for (const child of layer.children) walk(child as paper.Item)
+  }
+  if (translucent > 0) {
+    out.push({
+      kind: 'transparency',
+      message: `${translucent} ${translucent === 1 ? 'object carries' : 'objects carry'} live transparency — most presses want it flattened`,
+      itemId: '',
+    })
+  }
+  for (const family of fonts) {
+    out.push({
+      kind: 'font',
+      message: `Text in "${family}" — embedded when registered, referenced otherwise (it reflows on a press that lacks it)`,
+      itemId: '',
+    })
+  }
+  return out
 }

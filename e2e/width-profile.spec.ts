@@ -32,6 +32,18 @@ async function seedStrokedLine(page: Page) {
   })
 }
 
+/**
+/** Wait for the canvas to finish painting, so a pixel read cannot race
+ * the repaint and report the previous frame. */
+async function nextPaint(page: Page) {
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      }),
+  )
+}
+
 /** The selection's paper item, read back as plain data. */
 async function selectedInfo(page: Page) {
   return page.evaluate(() => {
@@ -66,6 +78,7 @@ async function pickProfile(page: Page, label: string) {
   const option = page.locator('.el-select-dropdown__item', { hasText: label }).first()
   await option.waitFor({ state: 'visible' })
   await option.click()
+  await nextPaint(page)
   await page.waitForTimeout(120)
 }
 

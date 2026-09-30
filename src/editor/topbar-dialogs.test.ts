@@ -20,23 +20,28 @@ import {
 } from './topbar-dialogs'
 
 describe('preflightKindLabel / preflightSeverity', () => {
-  it('labels every engine issue kind', () => {
-    expect(preflightKindLabel('overflow')).toBe('Overflow')
-    expect(preflightKindLabel('gamut')).toBe('Gamut')
-    expect(preflightKindLabel('tac')).toBe('Ink')
-    expect(preflightKindLabel('small')).toBe('Type')
-    expect(preflightKindLabel('hairline')).toBe('Stroke')
-    expect(preflightKindLabel('dpi')).toBe('DPI')
-    expect(preflightKindLabel('empty-layer')).toBe('Layer')
-    expect(preflightKindLabel('whatever')).toBe('Layer')
-  })
+    it('labels every engine issue kind', () => {
+      expect(preflightKindLabel('overflow')).toBe('Overflow')
+      expect(preflightKindLabel('gamut')).toBe('Gamut')
+      expect(preflightKindLabel('tac')).toBe('Ink')
+      expect(preflightKindLabel('small')).toBe('Type')
+      expect(preflightKindLabel('hairline')).toBe('Stroke')
+      expect(preflightKindLabel('dpi')).toBe('DPI')
+      expect(preflightKindLabel('empty-layer')).toBe('Layer')
+      expect(preflightKindLabel('spot')).toBe('Spot')
+      expect(preflightKindLabel('transparency')).toBe('Alpha')
+      expect(preflightKindLabel('font')).toBe('Font')
+      expect(preflightKindLabel('whatever')).toBe('Layer')
+    })
 
-  it('grades severity with print blockers first', () => {
-    for (const k of ['overflow', 'dpi', 'tac']) expect(preflightSeverity(k)).toBe('danger')
-    for (const k of ['gamut', 'hairline', 'small']) expect(preflightSeverity(k)).toBe('warning')
-    expect(preflightSeverity('empty-layer')).toBe('info')
-    expect(preflightSeverity('whatever')).toBe('info')
-  })
+    it('grades severity with print blockers first', () => {
+      for (const k of ['overflow', 'dpi', 'tac']) expect(preflightSeverity(k)).toBe('danger')
+      for (const k of ['gamut', 'hairline', 'small']) expect(preflightSeverity(k)).toBe('warning')
+      // Job requirements rather than defects: worth saying, not worth alarming.
+      for (const k of ['spot', 'transparency', 'font']) expect(preflightSeverity(k)).toBe('info')
+      expect(preflightSeverity('empty-layer')).toBe('info')
+      expect(preflightSeverity('whatever')).toBe('info')
+    })
 })
 
 describe('page presets', () => {

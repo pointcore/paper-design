@@ -38,8 +38,26 @@ async function seedMaskedRect(page: Page) {
   })
 }
 
+/**
+ * Wait for the canvas to finish painting.
+ *
+ * `view.update()` only marks the canvas dirty; the pixels a following
+ * `getImageData` reads are from whichever frame has actually been drawn, so a
+ * read that races the repaint sees the *previous* state and reports a
+ * regression that is not there.
+ */
+async function nextPaint(page: Page) {
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      }),
+  )
+}
+
 /** The live canvas pixel at a document offset from the view centre. */
 async function pixelNearCenter(page: Page, dx: number, dy: number) {
+  await nextPaint(page)
   return page.evaluate(
     ({ x, y }) => {
       const E = window.__engine__

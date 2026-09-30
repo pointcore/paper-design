@@ -25,6 +25,7 @@
           <el-dropdown-item command="exportPdf">Export PDF (Raster)</el-dropdown-item>
           <el-dropdown-item command="exportBoardsPdf">Export All Boards PDF (Raster)</el-dropdown-item>
           <el-dropdown-item command="exportVectorPdf">Export PDF (Vector)</el-dropdown-item>
+      <el-dropdown-item command="exportPrintPdf">Export Print PDF (marks + preflight)</el-dropdown-item>
           <el-dropdown-item command="exportBoardsVectorPdf">Export All Boards PDF (Vector)</el-dropdown-item>
           <el-dropdown-item command="exportSeparations" divided>Export Spot Separations...</el-dropdown-item>
           <el-dropdown-item command="import">Import SVG...</el-dropdown-item>
@@ -112,6 +113,7 @@
         </div>
       </div>
     </AppDialog>
+
 
     <!-- Spot Separations Dialog (one plate per ink, ZIP of grayscale TIFFs) -->
     <AppDialog
@@ -667,6 +669,9 @@ async function onFileCmd(cmd: string) {
     case 'exportVectorPdf':
       void onExportVectorPdf()
       break
+    case 'exportPrintPdf':
+      void onExportPrintPdf()
+      break
     case 'exportBoardsVectorPdf':
       void onExportBoardsVectorPdf()
       break
@@ -1099,6 +1104,71 @@ async function onExportBoardsPdf() {  const e = engineRef?.value
   } finally {
     store.setActiveArtboard(previousActive)
     e.refreshArtboards()
+  }
+}
+
+/**
+ * Export the active artboard as a print PDF: full prepress marks (crop,
+ * registration targets, color bar, slug line) and a preflight report.
+ *
+ * The report is shown before the file is written rather than after: a warning
+ * about a 72 dpi bitmap is worth acting on while the document is still open.
+ * The marks and the report are what a press actually asks for; the vector PDF
+ * without them is the plain "Export Vector PDF" item next to it.
+ */
+async function onExportPrintPdf() {
+  const e = engineRef?.value
+  if (!e) return
+  const board = store.activeArtboard ?? store.artboards[0]
+  if (!board || board.width < 1 || board.height < 1) {
+    store.setStatusMessage('Nothing to export')
+    return
+  }
+  const bleed = Number(store.bleed) || 0
+  if (bleed <= 0) {
+    store.setStatusMessage('Set a bleed first: printer marks live outside the trim')
+    return
+  }
+  // The same preflight the View menu shows, so an export can never report a
+  // cleaner file than the panel the user already looked at.
+  const issues = e.preflight()
+  const spots = issues
+    .filter((i) => i.kind === 'spot')
+    .map((i) => i.message.match(/Spot ink "([^"]+)"/)?.[1] ?? '')
+    .filter(Boolean)
+  const slug = 'export-print.pdf'
+  try {
+    const svg = e.exportBoardVectorSVG(board, {
+      bleed,
+      marks: 'print',
+      slug,
+      spotNames: spots,
+    })
+    if (!svg) {
+      store.setStatusMessage('PDF export failed')
+      return
+    }
+    const pageWidth = board.width + bleed * 2
+    const pageHeight = board.height + bleed * 2
+    const { jsPDF } = await import('jspdf')
+    const { svg2pdf } = await import('svg2pdf.js')
+    const doc = new jsPDF({
+      orientation: pageWidth >= pageHeight ? 'landscape' : 'portrait',
+      unit: 'pt',
+      format: [pageWidth, pageHeight],
+      compress: true,
+    })
+    await e.applyFontsToPdf(doc)
+    await svg2pdf(svg, doc, { x: 0, y: 0, width: pageWidth, height: pageHeight })
+    doc.save(slug)
+    const flagged = issues.filter((i) => i.kind === 'dpi' || i.kind === 'overflow' || i.kind === 'tac').length
+    store.setStatusMessage(
+      issues.length === 0
+        ? 'Print PDF exported (marks + color bar), preflight clean'
+        : `Print PDF exported — ${issues.length} preflight ${issues.length === 1 ? 'finding' : 'findings'}${flagged ? `, ${flagged} to fix` : ''} (View > Preflight)`,
+    )
+  } catch (err) {
+    store.setStatusMessage('Print PDF failed, use PDF (Raster)')
   }
 }
 
