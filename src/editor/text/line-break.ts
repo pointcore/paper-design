@@ -118,6 +118,56 @@ function legalBreakAt(text: string, index: number, nextChar: string): number {
 }
 
 /**
+ * Break one paragraph into lines, reporting where each line ends.
+ *
+ * `end` is the offset in `paragraph` at which the *next* line starts, so the
+ * ends tile the paragraph exactly: the break whitespace belongs to the line
+ * before it, which is what a threaded reflow needs to find where frame two
+ * picks the text up. `wrapParagraph` is this without the offsets.
+ */
+export function wrapParagraphWithOffsets(
+  paragraph: string,
+  maxWidth: number,
+  measure: (line: string) => number
+): Array<{ text: string; end: number }> {
+  const lines: Array<{ text: string; end: number }> = []
+  let line = ''
+  // Offset in `paragraph` where the line being built starts.
+  let base = 0
+  let breakAt = -1
+  for (const ch of paragraph) {
+    if (measure(line + ch) <= maxWidth || line.length === 0) {
+      line += ch
+      if (ch === ' ' || ch === '\t') breakAt = line.length
+    } else if (breakAt > 0) {
+      // Break at the last space; the head of the next line is whatever
+      // follows it, since leading spaces are dropped.
+      const head = line.slice(breakAt).replace(/^\s+/, '')[0] ?? ch
+      const cut = legalBreakAt(line, breakAt, head)
+      const shown = line.slice(0, cut).replace(/\s+$/, '')
+      const rest = line.slice(cut)
+      const stripped = rest.replace(/^\s+/, '')
+      lines.push({ text: shown, end: base + cut + (rest.length - stripped.length) })
+      base += cut + (rest.length - stripped.length)
+      line = stripped + ch
+      breakAt = -1
+    } else {
+      // No space to break at: cut between characters, still respecting both
+      // prohibition rules. A cut that lands on a space drops it, as the
+      // space branch does, so "hello world" is two lines rather than
+      // "hello" and " world".
+      const cut = legalBreakAt(line, line.length, ch)
+      lines.push({ text: line.slice(0, cut), end: base + cut })
+      base += cut
+      line = ch === ' ' ? '' : line.slice(cut) + ch
+      breakAt = -1
+    }
+  }
+  lines.push({ text: line, end: paragraph.length })
+  return lines
+}
+
+/**
  * Break one paragraph into lines no wider than `maxWidth`.
  *
  * `measure` returns the advance width of a candidate line in document units
@@ -132,34 +182,7 @@ export function wrapParagraph(
   maxWidth: number,
   measure: (line: string) => number
 ): string[] {
-  const lines: string[] = []
-  let line = ''
-  let breakAt = -1
-  for (const ch of paragraph) {
-    if (measure(line + ch) <= maxWidth || line.length === 0) {
-      line += ch
-      if (ch === ' ' || ch === '\t') breakAt = line.length
-    } else if (breakAt > 0) {
-      // Break at the last space; the head of the next line is whatever
-      // follows it, since leading spaces are dropped.
-      const head = line.slice(breakAt).replace(/^\s+/, '')[0] ?? ch
-      const cut = legalBreakAt(line, breakAt, head)
-      lines.push(line.slice(0, cut).replace(/\s+$/, ''))
-      line = line.slice(cut).replace(/^\s+/, '') + ch
-      breakAt = -1
-    } else {
-      // No space to break at: cut between characters, still respecting both
-      // prohibition rules. A cut that lands on a space drops it, as the
-      // space branch does, so "hello world" is two lines rather than
-      // "hello" and " world".
-      const cut = legalBreakAt(line, line.length, ch)
-      lines.push(line.slice(0, cut))
-      line = ch === ' ' ? '' : line.slice(cut) + ch
-      breakAt = -1
-    }
-  }
-  lines.push(line)
-  return lines
+  return wrapParagraphWithOffsets(paragraph, maxWidth, measure).map((line) => line.text)
 }
 
 /**

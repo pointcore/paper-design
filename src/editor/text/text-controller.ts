@@ -26,6 +26,7 @@ import {
   normalizeParagraphSettings,
   type ParagraphSettings,
 } from './paragraphs'
+import { flowTextThroughFrames, spliceThreadedText, type FlowWindow } from './thread-flow'
 import { isPrimaryButton } from '../gestures'
 
 /** Text creation / editing mode, resolved from the active text tool. */
@@ -452,8 +453,22 @@ export class TextController {
     // Paragraph settings live on the item; a new frame starts at the
     // defaults, an existing one keeps whatever it was laid out with.
     const settings = item ? this.paragraphSettings(item) : defaultParagraphSettings()
-    const { content } = this.layoutFrame(raw, frame.width, settings)
 
+    if (item && item.parent) {
+      if (this.isThreaded(item)) {
+        // One text, several frames: the edit is spliced into the frame that
+        // owns the text and the whole chain re-flows from there.
+        if (raw.length === 0) {
+          this.unthreadItem(item)
+        } else if (this.commitThreadedText(item, raw)) {
+          engine.pushHistory('Edit Text')
+        }
+        this.editingItem = null
+        return
+      }
+    }
+
+    // A frame in the middle of nothing: wrap the text for this frame alone.
     if (item && item.parent) {
       item.visible = true
       if (raw.length === 0) {
@@ -461,7 +476,7 @@ export class TextController {
         engine.clearSelection()
         engine.pushHistory('Delete Text')
       } else if (raw !== this.originalContent) {
-        item.content = content
+        item.content = this.layoutFrame(raw, frame.width, settings).content
         item.point = this.frameAnchor(frame)
         ;(item.data as any).raw = raw
         ;(item.data as any).frame = { ...frame }
@@ -469,13 +484,50 @@ export class TextController {
         engine.pushHistory('Edit Text')
       }
     } else if (!item && raw.length > 0) {
-      this.createTextItem(content, this.frameAnchor(frame), {
+      this.createTextItem(this.layoutFrame(raw, frame.width, settings).content, this.frameAnchor(frame), {
         textMode: 'area',
         raw,
         frame: { ...frame },
         paragraphs: settings,
       }, 'Add Area Text')
     }
+  }
+
+  /**
+   * Remove one frame from a thread, re-flowing the rest.
+   *
+   * Emptying a continuation frame is how a thread gets shorter: the text it
+   * showed goes back to the frames before it, and the empty frame goes away.
+   */
+  private unthreadItem(item: paper.PointText): void {
+    const engine = this.engine
+    if (!engine) return
+    const root = this.threadRoot(item)
+    const frames = this.threadFrames(root)
+    const index = frames.indexOf(item)
+    if (index <= 0) {
+      // The first frame is the text: emptying it empties the thread.
+      root.data = { ...(root.data as any), raw: '' }
+      for (const frame of frames) {
+        if (frame === root || !frame.parent) continue
+        ;(frame.data as any).threadPrev = ''
+        ;(frame.data as any).threadNext = ''
+        frame.remove()
+      }
+      ;(root.data as any).threadNext = ''
+      root.remove()
+      engine.clearSelection()
+      engine.pushHistory('Delete Text')
+      return
+    }
+    // Link the neighbours together and drop the emptied frame.
+    const prev = frames[index - 1]
+    const next = frames[index + 1] ?? null
+    ;(prev.data as any).threadNext = next ? String((next.data as any)?.id ?? '') : ''
+    if (next) (next.data as any).threadPrev = String((prev.data as any)?.id ?? '')
+    item.remove()
+    this.reflowThread(root)
+    engine.pushHistory('Unthread Text')
   }
 
   /** Commit a path-text session (lay glyphs along the attached path). */
@@ -901,8 +953,112 @@ export class TextController {
   }
 
   /**
-   * Resize an area frame and re-wrap its raw content in place.
-   * Returns false when the item is gone or the size is invalid.
+   * The frames of a thread, in flow order, starting from `item`.
+   *
+   * `threadNext` / `threadPrev` ids persist in Save/Open, so a thread survives
+   * a round-trip; the walk is bounded and cycle-guarded because the ids are
+   * document data and a hand-edited file (or a bug) could point a frame at
+   * itself.
+   */
+  threadFrames(item: paper.PointText): paper.PointText[] {
+    const engine = this.engine
+    if (!engine || !item.parent) return [item]
+    const chain: paper.PointText[] = [item]
+    const seen = new Set<string>([String((item.data as any)?.id ?? '')])
+    let cursor = item
+    // 64 frames is far past any real document and keeps a corrupt chain from
+    // hanging the editor.
+    for (let hops = 0; hops < 64; hops++) {
+      const nextId = (cursor.data as any)?.threadNext
+      if (typeof nextId !== 'string' || !nextId || seen.has(nextId)) break
+      const next = engine.getItemById(nextId)
+      if (!(next instanceof engine.scope.PointText) || !next.parent) break
+      chain.push(next as paper.PointText)
+      seen.add(nextId)
+      cursor = next as paper.PointText
+    }
+    return chain
+  }
+
+  /**
+   * The first frame of the thread an item belongs to.
+   *
+   * A thread is one text spread over several frames, and the text lives in the
+   * first frame; everything downstream is a window onto it. Walking back is
+   * what lets a frame in the middle ask "who owns this text?".
+   */
+  threadRoot(item: paper.PointText): paper.PointText {
+    const engine = this.engine
+    if (!engine || !item.parent) return item
+    const seen = new Set<string>([String((item.data as any)?.id ?? '')])
+    let cursor = item
+    for (let hops = 0; hops < 64; hops++) {
+      const prevId = (cursor.data as any)?.threadPrev
+      if (typeof prevId !== 'string' || !prevId || seen.has(prevId)) break
+      const prev = engine.getItemById(prevId)
+      if (!(prev instanceof engine.scope.PointText) || !prev.parent) break
+      seen.add(prevId)
+      cursor = prev as paper.PointText
+    }
+    return cursor
+  }
+
+  /** The author-visible text of a thread, which the first frame owns. */
+  threadText(root: paper.PointText): string {
+    const info = this.areaInfo(root)
+    return info?.raw ?? ''
+  }
+
+  /**
+   * Re-derive every frame of a thread from its text and the frame boxes.
+   *
+   * This is the two-way part: resizing, or editing, anywhere in the chain
+   * re-flows all of it, because the frames hold a character range rather than
+   * a copy of the text. Returns the per-frame windows, or an empty array when
+   * the chain is gone.
+   */
+  reflowThread(root: paper.PointText): FlowWindow[] {
+    const engine = this.engine
+    if (!engine || !root.parent) return []
+    const frames = this.threadFrames(root)
+    const raw = this.threadText(root)
+    const boxes = frames.map((frame) => {
+      const info = this.areaInfo(frame)
+      const width = Math.max(info?.frame.width ?? MIN_FRAME_SPAN, MIN_FRAME_SPAN)
+      const height = Math.max(info?.frame.height ?? MIN_FRAME_SPAN, MIN_FRAME_SPAN)
+      return { width, height }
+    })
+    const settings = this.paragraphSettings(frames[0])
+    const windows = flowTextThroughFrames(raw, boxes, {
+      leading: this.effectiveLeading(),
+      measure: (line) => this.measureLineWidth(line),
+      settings,
+      minSpan: MIN_FRAME_SPAN,
+    })
+    for (let i = 0; i < frames.length; i++) {
+      const frame = frames[i]
+      const window = windows[i]
+      if (!frame.parent || !window) continue
+      if (frame.content !== window.content) frame.content = window.content
+      // `raw` stays the author's text on the frame that owns it; the
+      // continuation frames carry their window instead, so a stale copy can
+      // never be mistaken for the source.
+      if (i === 0) (frame.data as any).raw = raw
+      else (frame.data as any).raw = raw.slice(window.start, window.end)
+      ;(frame.data as any).threadStart = window.start
+      ;(frame.data as any).threadEnd = window.end
+      ;(frame.data as any).laidLines = window.lines
+    }
+    engine.scope.view.update()
+    return windows
+  }
+
+  /**
+   * Resize an area frame and re-wrap its text.
+   *
+   * When the frame is part of a thread the whole chain re-flows, which is the
+   * difference from the one-way version: a taller *second* frame pulls text
+   * back out of the first one instead of leaving both frames as they were.
    */
   resizeAreaItem(item: paper.PointText, width: number, height: number): boolean {
     const engine = this.engine
@@ -914,19 +1070,66 @@ export class TextController {
     const frame: TextFrame = { ...info.frame, width, height }
     // layoutFrame reserves the indent out of the width, so the first line of
     // every paragraph still fits the frame after the spaces go in front of it.
-    const { content } = this.layoutFrame(info.raw, width, this.paragraphSettings(item))
+    const { content } = this.layoutFrame(this.threadText(this.threadRoot(item)), width, this.paragraphSettings(item))
     item.content = content
     item.point = this.frameAnchor(frame)
     ;(item.data as any).frame = { ...frame }
+    if (this.isThreaded(item)) {
+      this.reflowThread(this.threadRoot(item))
+    } else {
+      ;(item.data as any).raw = this.threadText(item)
+    }
     engine.scope.view.update()
     return true
   }
 
+  /** Whether an item is one of the frames in a multi-frame thread. */
+  isThreaded(item: paper.PointText): boolean {
+    return !!(
+      (item.data as any)?.threadNext ||
+      (item.data as any)?.threadPrev ||
+      this.threadFrames(item).length > 1
+    )
+  }
+
   /**
-   * Flow an area item's overflow into a new linked frame placed to its
-   * right (one-way v1: `threadNext`/`threadPrev` ids persist in Save/Open;
-   * live reflow across frames is out of scope). Returns false with nothing
-   * to flow.
+   * Commit an edit made in one frame of a thread.
+   *
+   * The frames share one text, so an edit in frame two is spliced into the
+   * root at exactly the range frame two owns and the chain re-flows. Editing
+   * the root replaces the whole text, as usual.
+   */
+  private commitThreadedText(item: paper.PointText, raw: string): boolean {
+    const engine = this.engine
+    if (!engine || !item.parent) return false
+    const root = this.threadRoot(item)
+    if (root === item) {
+      root.data = { ...(root.data as any), raw }
+      this.reflowThread(root)
+      return true
+    }
+    const start = Number((item.data as any)?.threadStart)
+    const previous = typeof (item.data as any)?.raw === 'string' ? ((item.data as any).raw as string) : ''
+    const whole = this.threadText(root)
+    const from = Number.isFinite(start) ? start : whole.length
+    root.data = {
+      ...(root.data as any),
+      raw: spliceThreadedText(whole, from, from + previous.length, raw),
+    }
+    this.reflowThread(root)
+    return true
+  }
+
+  /**
+   * Flow an area item's overflow into a new linked frame placed to its right.
+   *
+   * The new frame is linked in both directions and the chain re-flows, so the
+   * first frame keeps the author's *whole* text and only shows what fits. The
+   * old version truncated the first frame's text to the lines it kept, so the
+   * two frames were independent afterwards and a resize could not move text
+   * between them.
+   *
+   * Returns false when there is nothing to flow.
    */
   flowOverflowToNewFrame(item: paper.PointText): boolean {
     const engine = this.engine
@@ -936,25 +1139,14 @@ export class TextController {
     // The overflow has to be counted after paragraph layout: blank spacer
     // lines and the indent occupy the frame like any other line, and a
     // paragraph that does not fit in this frame at all is the common case.
-    const settings = this.paragraphSettings(item)
+    const root = this.threadRoot(item)
+    const settings = this.paragraphSettings(root)
     const width = Math.max(info.frame.width, MIN_FRAME_SPAN)
-    const laid = this.layoutFrame(info.raw, width, settings)
+    const laid = this.layoutFrame(this.threadText(root), width, settings)
     const lines = laid.content === '' ? [] : laid.content.split('\n')
     const leading = this.effectiveLeading()
     const fits = Math.max(1, Math.floor(info.frame.height / (leading || 1)))
     if (lines.length <= fits) return false
-    // A cut that lands on an indent is meaningless: the spaces belong to the
-    // paragraph, so drop them with the line rather than starting the next
-    // frame on whitespace.
-    const kept = lines.slice(0, fits).map((line) => line.replace(/^ +/, '')).join('\n')
-    const overflowRaw = lines
-      .slice(fits)
-      .map((line) => line.replace(/^ +/, ''))
-      .join('\n')
-    // Wrapped lines already fit the frame width, so re-wrapping them is
-    // stable: keep the visible prefix as the new raw (explicit breaks kept).
-    item.content = kept
-    ;(item.data as any).raw = kept
     const gap = 16
     const nextFrame: TextFrame = {
       x: info.frame.x + info.frame.width + gap,
@@ -962,18 +1154,22 @@ export class TextController {
       width: info.frame.width,
       height: info.frame.height,
     }
-    // The continuation frame re-applies the same paragraph settings, so an
-    // indented document stays indented across the thread.
-    const overflow = this.layoutFrame(overflowRaw, nextFrame.width, settings)
-    const created = this.createTextItem(overflow.content, this.frameAnchor(nextFrame), {
+    // An empty continuation, linked to the frame it continues: the text comes
+    // from the reflow, not from a copy made here.
+    const created = this.createTextItem('', this.frameAnchor(nextFrame), {
       textMode: 'area',
-      raw: overflowRaw,
+      raw: '',
       frame: { ...nextFrame },
       paragraphs: settings,
     }, 'Thread Text', false)
     ;(created.data as any).threadPrev = (item.data as any)?.id ?? ''
+    // The chain grows after the frame that was threaded, not after the root:
+    // linking on the root would replace the link to an existing continuation
+    // and strand it.
     ;(item.data as any).threadNext = (created.data as any)?.id ?? ''
-    engine.selectItem(item)
+    // The whole text stays on the root; the reflow hands each frame its slice.
+    this.reflowThread(root)
+    engine.selectItem(root)
     engine.pushHistory('Thread Text')
     return true
   }
