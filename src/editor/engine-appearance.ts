@@ -103,14 +103,52 @@ export function getAppearanceFromItem(e: EditorEngine, item: paper.Item): Appear
   }
 }
 
-/** Store appearance on an item and apply the bottom-most fill/stroke to Paper. */
+/**
+ * Paper's name for a CSS blend mode. `source-over` is paper's `normal`, and
+ * passing the CSS name through would leave the item on the default anyway.
+ */
+export function paperBlendMode(mode: string | undefined): string {
+  if (!mode || mode === 'source-over' || mode === 'normal') return 'normal'
+  return mode
+}
+
+/**
+ * Whether two alphas are the same paint, to within a rounding step.
+ */
+export function sameAlpha(a: number, b: number): boolean {
+  return Math.abs((Number.isFinite(a) ? a : 1) - (Number.isFinite(b) ? b : 1)) < 1e-6
+}
+
+/**
+ * Store appearance on an item and apply the top-most visible fill and stroke
+ * to Paper.js.
+ *
+ * Top, not bottom: the generated paint passes stand in for everything below
+ * (see engine-appearance-passes.ts), and a fully opaque top paint has to hide
+ * them. A lower pass is only visible where the top one is transparent, absent
+ * or blended — which is exactly when it should show.
+ *
+ * The alpha here is the *item* opacity, not `fillOpacity` / `strokeOpacity`,
+ * and that is not a style choice: paper's canvas renderer ignores
+ * fillOpacity entirely (a red fill with fillOpacity 0.5 paints solid), while
+ * item opacity composites correctly. Since the SVG exporter writes the same
+ * `opacity` attribute, one mechanism covers both outputs.
+ *
+ * The top fill and the top stroke can therefore only share the item when they
+ * want the same alpha. When they do not, the stroke is pushed down into a
+ * pass (see `wantsSeparateStrokePass`) rather than being painted at the
+ * fill's alpha.
+ */
 export function setAppearanceOnItem(e: EditorEngine, item: paper.Item, appearance: AppearanceState) {
   const data = (item.data as any) ?? {}
   data.appearance = appearance
   item.data = data
-  // Apply bottom-most visible fill and stroke to the Paper.js item.
   const fill = appearance.fills.filter((f) => f.visible).pop()
   const stroke = appearance.strokes.filter((s) => s.visible).pop()
+  const appearanceAlpha = Number.isFinite(appearance.opacity) ? appearance.opacity : 1
+  const fillAlpha = fill ? fillAlphaOf(fill) : appearanceAlpha
+  const strokeAlpha = stroke ? strokeAlphaOf(stroke) : appearanceAlpha
+  const separateStroke = !!stroke && !sameAlpha(appearanceAlpha * fillAlpha, appearanceAlpha * strokeAlpha)
   const paperStyle: any = {}
   if (fill) {
     if (fill.gradient) {
@@ -125,7 +163,7 @@ export function setAppearanceOnItem(e: EditorEngine, item: paper.Item, appearanc
   } else {
     paperStyle.fillColor = null
   }
-  if (stroke && stroke.visible) {
+  if (stroke && stroke.visible && !separateStroke) {
     paperStyle.strokeColor = paperColorFor(e.scope, stroke.color)
     paperStyle.strokeWidth = stroke.strokeWidth
     paperStyle.strokeCap = stroke.lineCap
@@ -136,9 +174,33 @@ export function setAppearanceOnItem(e: EditorEngine, item: paper.Item, appearanc
   } else {
     paperStyle.strokeColor = null
   }
-  paperStyle.opacity = appearance.opacity
-  paperStyle.blendMode = appearance.blendMode
+  paperStyle.opacity = appearanceAlpha * fillAlpha
+  paperStyle.blendMode = paperBlendMode(appearance.blendMode)
   item.set(paperStyle)
+  ;(item.data as any).appearanceStrokePushedDown = separateStroke
+}
+
+/** The alpha a fill entry contributes, defaults to opaque. */
+export function fillAlphaOf(fill: AppearanceFill): number {
+  return Number.isFinite(fill.opacity) ? fill.opacity : 1
+}
+
+/** The alpha a stroke entry contributes, defaults to opaque. */
+export function strokeAlphaOf(stroke: AppearanceStroke): number {
+  return Number.isFinite(stroke.opacity) ? stroke.opacity : 1
+}
+
+/**
+ * True when the top stroke has to become a pass of its own, because the
+ * master can only carry one alpha and the fill and the stroke disagree.
+ */
+export function wantsSeparateStrokePass(appearance: AppearanceState): boolean {
+  const fill = appearance.fills.filter((f) => f.visible).pop()
+  const stroke = appearance.strokes.filter((s) => s.visible).pop()
+  if (!stroke) return false
+  const appearanceAlpha = Number.isFinite(appearance.opacity) ? appearance.opacity : 1
+  const fillAlpha = fill ? fillAlphaOf(fill) : appearanceAlpha
+  return !sameAlpha(appearanceAlpha * fillAlpha, appearanceAlpha * strokeAlphaOf(stroke))
 }
 
 export function gradientFillForItem(e: EditorEngine, item: paper.Item, style: StyleState): paper.Color | null {

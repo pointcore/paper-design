@@ -714,7 +714,12 @@ export function getUserItems(e: EditorEngine): paper.Item[] {
   for (const layer of e.project.layers) {
     if ((layer.data as any)?.isUserLayer && layer.visible) {
       layer.children.forEach((child: any) => {
-        if (child.visible && !child.data?.isPreview) items.push(child)
+        // Appearance passes are generated paint, not objects: they must not
+        // count as artwork for bounds, alignment, the navigator or exports'
+        // "is there anything here" checks.
+        if (child.visible && !child.data?.isPreview && !child.data?.isAppearancePass) {
+          items.push(child)
+        }
       })
     }
   }

@@ -24,6 +24,7 @@ import * as pathfinder from './engine-pathfinder'
 import * as join from './engine-join'
 import * as compound from './engine-compound'
 import * as appearance from './engine-appearance'
+import * as appearancePasses from './engine-appearance-passes'
 import * as symbols from './engine-symbols'
 import * as view from './engine-view'
 import * as select from './engine-select'
@@ -101,6 +102,9 @@ export class EditorEngine {
     this.scope = new paper.PaperScope()
     this.scope.setup(canvas)
     this.project = this.scope.project
+    // Before the first paint: stacked items need their paint passes standing
+    // before anything is drawn, and the hook is what keeps them in step.
+    appearancePasses.installAppearancePassHook(this)
 
     this.setupProject()
     this.initLayers()
@@ -1217,6 +1221,20 @@ export class EditorEngine {
   /** See engine-appearance.ts. */
   setAppearanceOnItem(item: paper.Item, appearanceState: AppearanceState) {
     appearance.setAppearanceOnItem(this, item, appearanceState)
+    // The stack just changed shape: rebuild the passes now rather than at the
+    // next paint, so a caller that inspects the tree right after sees the
+    // passes that belong to the new stack.
+    appearancePasses.syncAppearancePasses(this)
+  }
+
+  /** See engine-appearance-passes.ts. */
+  syncAppearancePasses(): void {
+    appearancePasses.syncAppearancePasses(this)
+  }
+
+  /** See engine-appearance-passes.ts. */
+  appearancePassCount(): number {
+    return appearancePasses.appearancePassCount(this)
   }
 
   /** See engine-appearance.ts. */

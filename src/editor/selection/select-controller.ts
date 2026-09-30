@@ -2899,13 +2899,17 @@ export class SelectController {
       segments: false,
       tolerance: 3 / scope.view.zoom,
     })
-    for (const hit of hits) {
-      const item = hit.item
-      const data = (item.data as any) ?? {}
-      if (data.isChrome || data.isPreview || data.isGuide || data.isArtboard) continue
-      if ((item as any).locked) continue
-      return hit as paper.HitResult
-    }
+      for (const hit of hits) {
+        const item = hit.item
+        const data = (item.data as any) ?? {}
+        if (data.isChrome || data.isPreview || data.isGuide || data.isArtboard) continue
+        // Appearance passes are locked and carry no id, so they fall out here
+        // too; the guard is explicit because a click landing on a pass must
+        // select the master underneath, not the generated clone.
+        if (data.isAppearancePass) continue
+        if ((item as any).locked) continue
+        return hit as paper.HitResult
+      }
     return null
   }
 

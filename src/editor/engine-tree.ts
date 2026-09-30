@@ -121,6 +121,9 @@ function appendTreeNodes(
   const data = (item.data as any) ?? {}
   if (data.isChrome || data.isPreview || data.isGuide || data.annotation) return
   if (data.isPatternTile) return
+  // Generated appearance passes are paint, not objects: the object tree shows
+  // the master and its stack in the Appearance panel, never one row per pass.
+  if (data.isAppearancePass) return
   if (item instanceof scope.Group && !data.id) {
     appendGroupChildren(e, item, layerId, parentId, depth, out)
     return

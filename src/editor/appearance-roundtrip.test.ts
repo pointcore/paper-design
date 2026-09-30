@@ -12,11 +12,13 @@
  *   into `<mask>` elements (engine applySvgMasks); mesh gradients export
  *   as tessellated gradient triangles.
  *
- * Canvas rendering itself is approximate (Paper.js has no native
- * multi-fill stack, luminance mask, or mesh primitive): only the
- * bottom-most visible fill/stroke paints live, the mask preview is a
- * semi-transparent clone, and the mesh is a triangle tessellation.
- * These tests lock the persistence contract, not pixel fidelity.
+ * Canvas rendering: the multi-fill / multi-stroke stack is now real — the top
+ * entry paints the item and every entry below it becomes a generated paint
+ * pass (engine-appearance-passes.ts, covered pixel-level by
+ * e2e/multi-appearance.spec.ts). The mask preview is still a
+ * semi-transparent clone and the mesh is still a triangle tessellation, so
+ * those two remain approximate. These tests lock the persistence contract;
+ * the stack's rendering is asserted in the acceptance spec.
  */
 import { describe, expect, it } from 'vitest'
 import type { AppearanceState, OpacityMaskState, MeshGradientState } from './types'
@@ -26,7 +28,7 @@ function saveReopen<T>(state: T): T {
   return JSON.parse(JSON.stringify(state)) as T
 }
 
-/** Mirror of engine setAppearanceOnItem: bottom-most visible layer wins. */
+/** Mirror of engine setAppearanceOnItem: the top-most visible layer wins. */
 function bottomVisible<T extends { visible: boolean }>(layers: T[]): T | undefined {
   return layers.filter((l) => l.visible).pop()
 }
@@ -65,14 +67,16 @@ describe('appearance save/reopen round-trip', () => {
     expect(reopened.strokes[1].dashOffset).toBe(1)
   })
 
-  it('bottom-most visible layer is what the canvas paints', () => {
-    const a = makeAppearance()
-    // f3 is hidden so f2 paints; s2 paints.
-    expect(bottomVisible(a.fills)?.id).toBe('f2')
-    expect(bottomVisible(a.strokes)?.id).toBe('s2')
-    const reopened = saveReopen(a)
-    expect(bottomVisible(reopened.fills)?.id).toBe('f2')
-  })
+  it('the top-most visible layer is what the item itself paints', () => {
+      const a = makeAppearance()
+      // f3 is hidden so f2 paints; s2 paints. The entries below become
+      // generated paint passes (engine-appearance-passes.ts), so the item
+      // carries the top of each stack and the rest is rendered underneath.
+      expect(bottomVisible(a.fills)?.id).toBe('f2')
+      expect(bottomVisible(a.strokes)?.id).toBe('s2')
+      const reopened = saveReopen(a)
+      expect(bottomVisible(reopened.fills)?.id).toBe('f2')
+    })
 
   it('item-level opacity/blend survive the round-trip', () => {
     const reopened = saveReopen(makeAppearance())
