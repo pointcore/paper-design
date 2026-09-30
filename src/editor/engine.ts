@@ -3099,6 +3099,16 @@ export class EditorEngine {
     appearance.swapFillStroke(this)
   }
 
+  /** See engine-appearance.ts. */
+  collectSelectionColors(): string[] {
+    return appearance.collectSelectionColors(this)
+  }
+
+  /** See engine-appearance.ts. */
+  applyColorMap(mapping: Map<string, string>): number {
+    return appearance.applyColorMap(this, mapping)
+  }
+
   /** See engine-pathops.ts. */
   addArrowheads(start: boolean, end: boolean, length: number): number {
     return pathops.addArrowheads(this, start, end, length)

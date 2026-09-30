@@ -40,6 +40,7 @@
           <el-dropdown-item command="cleanUp">Clean Up...</el-dropdown-item>
           <el-dropdown-item command="arrowheads" :disabled="!store.hasSelection">Add Arrowheads...</el-dropdown-item>
           <el-dropdown-item command="adjustColors" :disabled="!store.hasSelection">Adjust Colors...</el-dropdown-item>
+          <el-dropdown-item command="recolorArtwork" :disabled="!store.hasSelection">Recolor Artwork...</el-dropdown-item>
           <el-dropdown-item command="setDefaults" :disabled="!store.hasSelection">Set Style Defaults</el-dropdown-item>
           <el-dropdown-item command="clearAppearance" :disabled="!store.hasSelection">Clear Appearance</el-dropdown-item>
           <el-dropdown-item command="rasterize" :disabled="!store.hasSelection">Rasterize Selection (2x)</el-dropdown-item>
@@ -459,6 +460,61 @@
       </div>
     </AppDialog>
 
+    <!-- Recolor Artwork Dialog (group the selection's colors, map to a theme) -->
+    <AppDialog
+      v-model="recolorArtworkVisible"
+      title="Recolor Artwork"
+      :width="420"
+      confirm-text="Apply"
+      cancel-text="Close"
+      @confirm="onRecolorArtworkConfirm"
+      @cancel="recolorArtworkVisible = false"
+    >
+      <div class="settings-body app-settings">
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Theme</span>
+            <span class="setting-desc">Colors are grouped by hue, then remapped onto the palette</span>
+          </div>
+          <el-select v-model="recolorArtworkForm.theme" size="small" style="width: 150px">
+            <el-option v-for="t in RECOLOR_THEMES" :key="t.id" :value="t.id" :label="t.label" />
+          </el-select>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Color groups</span>
+            <span class="setting-desc">How many design decisions the artwork is read as having</span>
+          </div>
+          <el-slider
+            v-model="recolorArtworkForm.groups"
+            :min="2"
+            :max="8"
+            size="small"
+            style="width: 180px"
+          />
+        </div>
+        <div class="recolor-preview">
+          <div v-if="!recolorArtworkGroups.length" class="recolor-empty">No solid fills or strokes in the selection</div>
+          <div v-for="(group, i) in recolorArtworkGroups" :key="i" class="recolor-row">
+            <span class="recolor-sources">
+              <i
+                v-for="paint in group.colors"
+                :key="paint.css"
+                class="recolor-chip"
+                :style="{ background: paint.css }"
+                :title="paint.css"
+              />
+            </span>
+            <span class="recolor-arrow">→</span>
+            <i
+              class="recolor-chip recolor-target"
+              :style="{ background: recolorArtworkMapping.get(paintKeyOf(group)) ?? 'transparent' }"
+            />
+          </div>
+        </div>
+      </div>
+    </AppDialog>
+
     <!-- Adjust Image Dialog (bitmap-effects lite, destructive) -->
     <AppDialog
       v-model="imageVisible"
@@ -533,6 +589,7 @@ import AppDialog from '../ui/AppDialog.vue'
 import { useEditorStore } from '../../editor/store'
 import type { EditorEngine } from '../../editor/engine'
 import { downloadHref, readFileAsDataURL } from './download'
+import { previewRecolor, RECOLOR_THEMES } from '../../editor/recolor'
 import type { EnvelopePreset } from '../../editor/types'
 
 const store = useEditorStore()
@@ -748,6 +805,52 @@ function onInvertNow() {
   if (e.invertPaints() === 0) {
     store.setStatusMessage('Invert needs painted artwork selected')
   }
+}
+
+const recolorArtworkVisible = ref(false)
+const recolorArtworkForm = reactive({ theme: 'cool', groups: 5 })
+
+/** The theme the picker currently names, for the preview. */
+const recolorArtworkTheme = computed(
+  () => RECOLOR_THEMES.find((t) => t.id === recolorArtworkForm.theme) ?? RECOLOR_THEMES[0]
+)
+
+/**
+ * Live preview of the recolor. Reading the selection's colors is cheap (one
+ * walk) and only happens when the theme, the group count or the selection
+ * itself changes, so this does not run per pixel.
+ */
+const recolorArtworkPreview = computed(() => {
+  const e = engineRef?.value
+  const colors = e ? e.collectSelectionColors() : []
+  return previewRecolor(colors, recolorArtworkTheme.value, Number(recolorArtworkForm.groups) || 5)
+})
+const recolorArtworkGroups = computed(() => recolorArtworkPreview.value.groups)
+const recolorArtworkMapping = computed(() => recolorArtworkPreview.value.mapping)
+
+/** The mapping is keyed by the group's representative, lower-cased. */
+function paintKeyOf(group: { representative: string }): string {
+  return group.representative.toLowerCase()
+}
+
+function onRecolorArtworkConfirm() {
+  const e = engineRef?.value
+  if (!e) {
+    recolorArtworkVisible.value = false
+    return
+  }
+  const { mapping } = recolorArtworkPreview.value
+  if (mapping.size === 0) {
+    store.setStatusMessage('Recolor Artwork needs solid fills or strokes in the selection')
+    return
+  }
+  const n = e.applyColorMap(mapping)
+  if (n === 0) {
+    store.setStatusMessage('Recolor Artwork changed nothing')
+    return
+  }
+  store.setStatusMessage(`Recolored ${n} object${n === 1 ? '' : 's'} with the ${recolorArtworkTheme.value.label} theme`)
+  recolorArtworkVisible.value = false
 }
 
 const imageVisible = ref(false)
@@ -1046,6 +1149,9 @@ function onObjectCmd(cmd: string) {
     case 'adjustColors':
       recolorVisible.value = true
       break
+    case 'recolorArtwork':
+      recolorArtworkVisible.value = true
+      break
     case 'closePath':
       if (e.setPathsClosed(true) === 0) {
         store.setStatusMessage('No open paths to close')
@@ -1167,5 +1273,51 @@ function onObjectCmd(cmd: string) {
 .menu-label:hover {
   background: #3a3a3a;
   color: #fff;
+}
+
+/* Recolor Artwork preview: one row per color group, sources on the left,
+   the theme color it will become on the right. */
+.recolor-preview {
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid #3d3d3d;
+  border-radius: 4px;
+  background: #1e1e1e;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.recolor-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+}
+.recolor-sources {
+  display: inline-flex;
+  gap: 3px;
+  flex: 1;
+  flex-wrap: wrap;
+}
+.recolor-chip {
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  border: 1px solid #555;
+  display: inline-block;
+}
+.recolor-target {
+  width: 26px;
+  height: 26px;
+  border-color: #888;
+}
+.recolor-arrow {
+  color: #888;
+  font-size: 12px;
+}
+.recolor-empty {
+  color: #777;
+  font-size: 12px;
+  text-align: center;
+  padding: 6px 0;
 }
 </style>

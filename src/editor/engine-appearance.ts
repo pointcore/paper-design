@@ -463,6 +463,107 @@ export function invertPaints(e: EditorEngine): number {
 }
 
 /**
+ * Collect the solid fill and stroke colors of the unlocked selection, with
+ * gradients and patterns skipped (they have no single color to remap).
+ * Groups are walked, so recoloring a selected group reaches its leaves.
+ */
+export function collectSelectionColors(e: EditorEngine): string[] {
+  const out: string[] = []
+  const collect = (leaf: paper.Item) => {
+    const anyLeaf = leaf as any
+    for (const key of ['fillColor', 'strokeColor'] as const) {
+      const paint = anyLeaf[key]
+      if (!paint || paint.gradient) continue
+      const css = colorToCSS(paint)
+      if (css) out.push(css)
+    }
+  }
+  for (const item of e.getSelection()) {
+    if ((item as any).locked) continue
+    const children = (item as any).children as paper.Item[] | undefined
+    if (children && item instanceof e.scope.Group) {
+      const walk = (node: paper.Item) => {
+        if ((node as any).locked) return
+        if (node instanceof e.scope.Path || node instanceof e.scope.CompoundPath || node instanceof e.scope.PointText) {
+          collect(node)
+        } else {
+          const kids = (node as any).children as paper.Item[] | undefined
+          if (kids) for (const k of kids) walk(k)
+        }
+      }
+      for (const child of children) walk(child)
+    } else {
+      const leaf = firstLeaf(e, item)
+      if (leaf) collect(leaf)
+    }
+  }
+  return out
+}
+
+/**
+ * Repaint the selection's solid fills and strokes through a color map
+ * (old CSS -> new CSS), the write half of Recolor Artwork.
+ *
+ * The map is matched case-insensitively because CSS colors arrive from
+ * paper.js normalized to lowercase in some paths and verbatim in others.
+ * Returns leaves repainted; one history entry.
+ */
+export function applyColorMap(e: EditorEngine, mapping: Map<string, string>): number {
+  if (mapping.size === 0) return 0
+  const lookup = new Map<string, string>()
+  for (const [from, to] of mapping) lookup.set(from.toLowerCase(), to)
+  const scope = e.scope
+  let changed = 0
+  const repaint = (leaf: paper.Item) => {
+    const anyLeaf = leaf as any
+    let touched = false
+    for (const key of ['fillColor', 'strokeColor'] as const) {
+      const paint = anyLeaf[key]
+      if (!paint || paint.gradient) continue
+      const css = colorToCSS(paint)
+      if (!css) continue
+      const to = lookup.get(css.toLowerCase())
+      if (!to) continue
+      try {
+        anyLeaf[key] = new scope.Color(to)
+        touched = true
+      } catch {
+        continue
+      }
+    }
+    if (touched) {
+      changed++
+      e.refreshItemGradient(leaf)
+    }
+  }
+  for (const item of e.getSelection()) {
+    if ((item as any).locked) continue
+    const children = (item as any).children as paper.Item[] | undefined
+    if (children && item instanceof scope.Group) {
+      const walk = (node: paper.Item) => {
+        if ((node as any).locked) return
+        if (node instanceof scope.Path || node instanceof scope.CompoundPath || node instanceof scope.PointText) {
+          repaint(node)
+        } else {
+          const kids = (node as any).children as paper.Item[] | undefined
+          if (kids) for (const k of kids) walk(k)
+        }
+      }
+      for (const child of children) walk(child)
+    } else {
+      const leaf = firstLeaf(e, item)
+      if (leaf) repaint(leaf)
+    }
+  }
+  if (changed > 0) {
+    e.reflowTextsForItems(e.getSelection())
+    e.pushHistory('Recolor Artwork')
+    e.scope.view.update()
+  }
+  return changed
+}
+
+/**
  * Swap fill and stroke paints on the defaults and every unlocked selected
  * item (AI Shift+X parity, same per-item semantics the color bar always
  * had). One history entry when art changes.
