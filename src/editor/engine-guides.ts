@@ -12,6 +12,9 @@
 import type paper from 'paper'
 import type { EditorEngine } from './engine'
 import type { GuideOrientation } from './types'
+import { endpoints as guideEndpoints, normalizeGuideAngle, type GuideGeometry } from './guides/guide-geometry'
+
+export type { GuideGeometry }
 
 /** Whether an item is a guide line. */
 export function isGuide(e: EditorEngine, item: paper.Item): boolean {
@@ -32,84 +35,136 @@ export function getGuides(e: EditorEngine): paper.Path[] {
 /** Guide orientation of a guide item, or null if it is not a guide. */
 export function getGuideOrientation(e: EditorEngine, item: paper.Item): GuideOrientation | null {
   if (!isGuide(e, item)) return null
-  return (item.data as any)?.guideOrientation as GuideOrientation
+  const raw = (item.data as any)?.guideOrientation
+  if (raw === 'vertical' || raw === 'horizontal' || raw === 'diagonal') return raw
+  // Anything unrecognised (including a hand-edited project) is a horizontal
+  // guide, which is what an absent orientation used to mean.
+  return 'horizontal'
 }
 
-/** Document coordinate along the guide's free axis. */
-export function getGuidePosition(e: EditorEngine, item: paper.Item): number {
-  const orientation = getGuideOrientation(e, item)
-  if (!orientation) return 0
-  const segs = (item as paper.Path).segments
-  if (!segs || segs.length === 0) return 0
-  if (orientation === 'vertical') {
-    return segs[0].point.x
+/**
+ * Read a guide's placement off the paper item.
+ *
+ * The anchor lives in the item data rather than being read back from the
+ * segments: a diagonal guide is rebuilt from (x, y, angle) on every move, and
+ * rounding the anchor out of two endpoints loses the sub-pixel position the
+ * drag was aiming at.
+ *
+ * Guides saved before the diagonal work stored their coordinate only in the
+ * segment points, so a missing data field falls back to reading the segment.
+ * Without that a project from the previous version would open with every
+ * guide at the origin.
+ */
+export function getGuideGeometry(e: EditorEngine, item: paper.Item): GuideGeometry | null {
+  if (!isGuide(e, item)) return null
+  const data = (item.data as any) ?? {}
+  const orientation = getGuideOrientation(e, item) ?? 'horizontal'
+  let position = Number(data.guidePosition)
+  let cross = Number(data.guideCross)
+  if (!Number.isFinite(position)) {
+    const seg = (item as paper.Path).segments?.[0] as paper.Segment | undefined
+    const point = seg?.point
+    position = orientation === 'horizontal' ? Number(point?.y) : Number(point?.x)
   }
-  return segs[0].point.y
+  if (!Number.isFinite(cross)) cross = 0
+  return {
+    orientation,
+    position: Number.isFinite(position) ? position : 0,
+    cross,
+    angle: Number.isFinite(Number(data.guideAngle)) ? Number(data.guideAngle) : 0,
+  }
 }
 
-/** Move a guide to a new document position along its free axis. */
-export function moveGuide(e: EditorEngine, item: paper.Item, position: number) {
+/** Write a guide's placement to the item data and redraw its endpoints. */
+export function setGuideGeometry(
+  e: EditorEngine,
+  item: paper.Item,
+  geometry: GuideGeometry
+): void {
   if (!isGuide(e, item) || !(item instanceof e.scope.Path)) return
   const path = item as paper.Path
-  const orientation = getGuideOrientation(e, item)
-  const s0 = path.segments[0]
-  const s1 = path.segments[path.segments.length - 1]
-  if (!s0 || !s1) return
+  const angle = geometry.orientation === 'diagonal' ? normalizeGuideAngle(geometry.angle) : 0
+  const data = (item.data as any) ?? (item.data = {})
+  data.guideOrientation = geometry.orientation
+  data.guidePosition = geometry.position
+  data.guideCross = geometry.orientation === 'diagonal' ? geometry.cross : 0
+  data.guideAngle = angle
 
   const layer = e.getGuideLayer()
   const wasLocked = layer ? layer.locked : false
   if (layer) layer.locked = false
   try {
-    if (orientation === 'horizontal') {
-      // Horizontal guide: line is (a, y) - (b, y); update y.
-      ;(s0 as any).point.y = position
-      ;(s1 as any).point.y = position
-    } else if (orientation === 'vertical') {
-      // Vertical guide: line is (x, a) - (x, b); update x.
-      ;(s0 as any).point.x = position
-      ;(s1 as any).point.x = position
-    }
+    const [a, b] = guideEndpoints({ ...geometry, angle })
+    const s0 = path.segments[0]
+    const s1 = path.segments[path.segments.length - 1]
+    if (!s0 || !s1) return
+    // The segment points are mutated in place: replacing them would rebuild
+    // the path's geometry and lose the item's identity in the guide layer.
+    ;(s0 as any).point.x = a.x
+    ;(s0 as any).point.y = a.y
+    ;(s1 as any).point.x = b.x
+    ;(s1 as any).point.y = b.y
   } finally {
     if (layer) layer.locked = wasLocked
-    e.scope.view.update()
   }
+}
+
+/**
+ * Document coordinate along the guide's free axis: the anchor x for a
+ * vertical guide, the anchor y for a horizontal one. A diagonal guide has
+ * no single free axis, so this reports its anchor x — callers that care
+ * about diagonals use getGuideGeometry.
+ */
+export function getGuidePosition(e: EditorEngine, item: paper.Item): number {
+  return getGuideGeometry(e, item)?.position ?? 0
+}
+
+/** Move a guide to a new document position along its free axis. */
+export function moveGuide(e: EditorEngine, item: paper.Item, position: number) {
+  const geometry = getGuideGeometry(e, item)
+  if (!geometry) return
+  setGuideGeometry(e, item, { ...geometry, position })
+  e.scope.view.update()
 }
 
 /**
  * Create a guide line on the guide layer.
  * Vertical guides sit at a document X and run vertically;
- * horizontal guides sit at a document Y and run horizontally.
+ * horizontal guides sit at a document Y and run horizontally;
+ * a diagonal guide runs at `options.angle` degrees through (position, y).
  * Guides span a huge document range so they stay visible through
  * pan/zoom operations.
  */
 export function createGuide(
   e: EditorEngine,
   position: number,
-  orientation: GuideOrientation
+  orientation: GuideOrientation,
+  options?: { angle?: number; y?: number }
 ): paper.Path | null {
   const scope = e.scope
   const layer = e.getGuideLayer()
   if (!layer) return null
 
-  const span = 1e6 // document units on each side
-  const p1 = new scope.Point(-span, position)
-  const p2 = new scope.Point(span, position)
-  if (orientation === 'vertical') {
-    p1.x = position
-    p1.y = -span
-    p2.x = position
-    p2.y = span
+  const geometry: GuideGeometry = {
+    orientation,
+    position,
+    cross: orientation === 'diagonal' ? (options?.y ?? position) : 0,
+    angle: orientation === 'diagonal' ? normalizeGuideAngle(options?.angle ?? 0) : 0,
   }
+  const [p1, p2] = guideEndpoints(geometry)
 
-  const line = new scope.Path.Line(p1, p2) as paper.Path
+  const line = new scope.Path.Line(
+    new scope.Point(p1.x, p1.y),
+    new scope.Point(p2.x, p2.y)
+  ) as paper.Path
   line.data.isGuide = true
   line.data.guideId = e.genId()
-  line.data.guideOrientation = orientation
   line.strokeColor = new scope.Color('#00bcd4') // cyan
   line.strokeWidth = 1 / e.zoom
   line.strokeCap = 'butt'
   line.locked = false
   line.data.isUserLayer = false
+  setGuideGeometry(e, line, geometry)
 
   // Unlock temporarily so we can add to the locked guide layer
   layer.locked = false
@@ -137,20 +192,35 @@ export function deleteGuide(e: EditorEngine, guide: paper.Path) {
 }
 
 /** Every guide as plain data (id / orientation / position), top-first. */
-export function listGuides(e: EditorEngine): Array<{ id: string; orientation: GuideOrientation; position: number }> {
+export function listGuides(e: EditorEngine): Array<{
+  id: string
+  orientation: GuideOrientation
+  position: number
+  cross: number
+  angle: number
+}> {
   const layer = e.getGuideLayer()
   if (!layer) return []
-  const out: Array<{ id: string; orientation: GuideOrientation; position: number }> = []
+  const out: Array<{
+    id: string
+    orientation: GuideOrientation
+    position: number
+    cross: number
+    angle: number
+  }> = []
   for (const child of layer.children) {
     const data = (child as any).data ?? {}
     if (!data.isGuide) continue
-    const orientation = (data.guideOrientation === 'vertical' ? 'vertical' : 'horizontal') as GuideOrientation
-    const segs = (child as paper.Path).segments
-    const p = segs.length > 0 ? (segs[0] as any).point : null
-    if (!p) continue
-    const position = orientation === 'vertical' ? Number(p.x) : Number(p.y)
-    if (!Number.isFinite(position)) continue
-    out.push({ id: String(data.guideId ?? ''), orientation, position: Math.round(position * 10) / 10 })
+    const geometry = getGuideGeometry(e, child as paper.Item)
+    if (!geometry) continue
+    if (!Number.isFinite(geometry.position)) continue
+    out.push({
+      id: String(data.guideId ?? ''),
+      orientation: geometry.orientation,
+      position: Math.round(geometry.position * 10) / 10,
+      cross: Math.round(geometry.cross * 10) / 10,
+      angle: Math.round(geometry.angle * 100) / 100,
+    })
   }
   return out.reverse()
 }
@@ -158,20 +228,49 @@ export function listGuides(e: EditorEngine): Array<{ id: string; orientation: Gu
 /** Move a guide by id; false when the id is unknown. Callers record history. */
 export function moveGuideById(e: EditorEngine, id: string, position: number): boolean {
   if (!id || !Number.isFinite(position)) return false
-  const layer = e.getGuideLayer()
-  if (!layer) return false
-  const guide = layer.children.find((c) => String((c as any).data?.guideId ?? '') === id)
+  const guide = findGuideById(e, id)
   if (!guide) return false
-  moveGuide(e, guide as paper.Item, position)
+  moveGuide(e, guide, position)
   return true
+}
+
+/**
+ * Patch a guide's placement by id: any subset of the anchor coordinates and
+ * the angle. The Guides dialog edits all three independently, and a diagonal
+ * guide needs its angle to survive a move.
+ */
+export function updateGuideById(
+  e: EditorEngine,
+  id: string,
+  patch: { position?: number; cross?: number; angle?: number }
+): boolean {
+  if (!id) return false
+  const guide = findGuideById(e, id)
+  if (!guide) return false
+  const geometry = getGuideGeometry(e, guide)
+  if (!geometry) return false
+  const next: GuideGeometry = {
+    orientation: geometry.orientation,
+    position: Number.isFinite(patch.position) ? (patch.position as number) : geometry.position,
+    cross: Number.isFinite(patch.cross) ? (patch.cross as number) : geometry.cross,
+    angle: Number.isFinite(patch.angle) ? (patch.angle as number) : geometry.angle,
+  }
+  setGuideGeometry(e, guide, next)
+  e.scope.view.update()
+  return true
+}
+
+/** The guide item with this id, or null. */
+function findGuideById(e: EditorEngine, id: string): paper.Item | null {
+  const layer = e.getGuideLayer()
+  if (!layer) return null
+  return layer.children.find((c) => String((c as any).data?.guideId ?? '') === id) ?? null
 }
 
 /** Delete a guide by id; false when the id is unknown. Callers record history. */
 export function deleteGuideById(e: EditorEngine, id: string): boolean {
   if (!id) return false
-  const layer = e.getGuideLayer()
-  if (!layer) return false
-  const guide = layer.children.find((c) => String((c as any).data?.guideId ?? '') === id)
+  const guide = findGuideById(e, id)
   if (!guide || !(guide instanceof e.scope.Path)) return false
   deleteGuide(e, guide as paper.Path)
   return true

@@ -31,6 +31,7 @@ import {
   type TransformHandle,
 } from './frame-geometry'
 import { GuideController } from '../guides/guide-controller'
+import { slide as guideSlide } from '../guides/guide-geometry'
 import {
   advanceScaledFrame,
   rotateDragStep,
@@ -87,7 +88,10 @@ export class SelectController {
   private grabSegmentIndex = -1
   private grabIsIn = false
   private grabGuide: paper.Path | null = null
-  private guideOriginalPos = 0
+  /** Guide anchor when the drag started, so "did it move" is answerable. */
+  private guideOriginalPos = { x: 0, y: 0 }
+  /** Pointer position when the guide drag started: a diagonal slides along its normal. */
+  private guideDragStart = { x: 0, y: 0 }
   // Path currently grabbed for anchor / handle editing (identity-safe, the
   // front-most selected path may differ from the grabbed one).
   private grabPath: paper.Path | null = null
@@ -372,7 +376,8 @@ export class SelectController {
     this.dragStartFrame = null
     this.removeMarquee()
     this.grabGuide = null
-    this.guideOriginalPos = 0
+    this.guideOriginalPos = { x: 0, y: 0 }
+    this.guideDragStart = { x: 0, y: 0 }
     this.grabPath = null
     this.dragStartPoint = null
     this.anchorMarquee = false
@@ -559,9 +564,13 @@ export class SelectController {
           // AI Alt+drag: duplicate the guide and drag the copy, leaving the
           // original in place. Its own history entry keeps it undoable.
           if (event.modifiers.alt && !event.modifiers.shift) {
-            const orientation = engine.getGuideOrientation(guideHit)
-            const position = engine.getGuidePosition(guideHit)
-            const copy = orientation ? engine.createGuide(position, orientation) : null
+            const geometry = engine.getGuideGeometry(guideHit)
+            const copy = geometry
+              ? engine.createGuide(geometry.position, geometry.orientation, {
+                  angle: geometry.angle,
+                  y: geometry.cross,
+                })
+              : null
             if (copy) {
               guideHit = copy
               engine.pushHistory('Add Guide')
@@ -576,10 +585,14 @@ export class SelectController {
           this.grab = 'guide'
           this.isDragging = true
           this.dragStart = { x: event.point.x, y: event.point.y }
-          this.guideOriginalPos = engine.getGuidePosition(guideHit)
-          // Axis cue: vertical guides slide horizontally and vice versa.
+          const grabbed = engine.getGuideGeometry(guideHit)
+          this.guideOriginalPos = { x: grabbed?.position ?? 0, y: grabbed?.cross ?? 0 }
+          this.guideDragStart = { x: event.point.x, y: event.point.y }
+          // Axis cue: vertical guides slide horizontally and vice versa; a
+          // diagonal has no single axis, so it gets the move cursor.
           const orientation = engine.getGuideOrientation(guideHit)
-          engine.canvas.style.cursor = orientation === 'vertical' ? 'ew-resize' : orientation === 'horizontal' ? 'ns-resize' : 'move'
+          engine.canvas.style.cursor =
+            orientation === 'vertical' ? 'ew-resize' : orientation === 'horizontal' ? 'ns-resize' : 'move'
           this.refreshChrome()
           engine.scope.view.update()
           return
@@ -3040,16 +3053,21 @@ export class SelectController {
       return
     }
 
-    const orientation = engine.getGuideOrientation(this.grabGuide)
-    if (!orientation) return
-    let position = orientation === 'horizontal' ? point.y : point.x
+    const geometry = engine.getGuideGeometry(this.grabGuide)
+    if (!geometry) return
+    // A diagonal guide slides along its own normal and a ruler guide along its
+    // free axis; the geometry module owns both so the gesture reads the same
+    // here as it does in the unit tests.
+    const dragged = guideSlide(geometry, this.guideDragStart, { x: point.x, y: point.y })
     // AI parity: with grid snapping on, guides land on grid crossings
     // while dragged, not on the raw pointer.
     const snap = engine.store.snap
     if (snap.enable && snap.grid && snap.gridSize > 0) {
-      position = Math.round(position / snap.gridSize) * snap.gridSize
+      const onGrid = (v: number) => Math.round(v / snap.gridSize) * snap.gridSize
+      dragged.position = onGrid(dragged.position)
+      if (dragged.orientation === 'diagonal') dragged.cross = onGrid(dragged.cross)
     }
-    engine.moveGuide(this.grabGuide, position)
+    engine.setGuideGeometry(this.grabGuide, dragged)
     engine.scope.view.update()
   }
 
@@ -3062,13 +3080,17 @@ export class SelectController {
   private finishGuideDrag(event: paper.ToolEvent) {
     const engine = this.engine
     if (!engine || !this.grabGuide) return
-    // Determine if the guide was moved from its original position.
-    const orientation = engine.getGuideOrientation(this.grabGuide)
-    const curPos = orientation ? engine.getGuidePosition(this.grabGuide) : 0
+    // Determine if the guide was moved from its original position. A diagonal
+    // guide has two anchor coordinates, so both are compared.
+    const geometry = engine.getGuideGeometry(this.grabGuide)
+    const moved =
+      !!geometry &&
+      (Math.abs(geometry.position - this.guideOriginalPos.x) > 1e-6 ||
+        Math.abs(geometry.cross - this.guideOriginalPos.y) > 1e-6)
 
     this.isDragging = false
     this.grabGuide = null
-    if (Math.abs(curPos - this.guideOriginalPos) > 1e-6) {
+    if (moved) {
       engine.pushHistory('Move Guide')
     }
     engine.scope.view.update()

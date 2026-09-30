@@ -9,6 +9,7 @@
  * Because the layer is locked, all mutations temporarily unlock it.
  */
 import { EditorEngine } from '../engine'
+import { distance as guideDistance } from './guide-geometry'
 
 export class GuideController {
   engine: EditorEngine | null = null
@@ -50,6 +51,10 @@ export class GuideController {
   /**
    * Return the guide item near the given document point, or null.
    * Tolerance is converted from screen px to document units using current zoom.
+   *
+   * The test is the perpendicular distance to the guide, so a diagonal guide
+   * is grabbed the same way a ruler guide is: by how close the pointer is to
+   * the line, not by how close it is to the anchor.
    */
   hitTest(point: paper.Point): paper.Path | null {
     const engine = this.engine
@@ -60,13 +65,9 @@ export class GuideController {
 
     for (const guide of guides) {
       if (!guide.visible) continue
-      const orientation = engine.getGuideOrientation(guide)
-      if (!orientation) continue
-      const pos = engine.getGuidePosition(guide)
-      const dist = orientation === 'horizontal'
-        ? Math.abs(point.y - pos)
-        : Math.abs(point.x - pos)
-      if (dist <= tol) return guide
+      const geometry = engine.getGuideGeometry(guide)
+      if (!geometry) continue
+      if (guideDistance(geometry, { x: point.x, y: point.y }) <= tol) return guide
     }
     return null
   }

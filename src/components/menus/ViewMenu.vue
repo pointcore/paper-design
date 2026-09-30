@@ -209,9 +209,35 @@
         <div v-if="guideRows.length === 0" class="setting-desc">No guides yet — drag one out from a ruler.</div>
         <div v-for="g in guideRows" :key="g.id" class="setting-row">
           <div class="setting-label">
-            <span class="setting-name">{{ g.orientation === 'vertical' ? 'Vertical X' : 'Horizontal Y' }}</span>
+            <span class="setting-name">{{ guideLabel(g) }}</span>
+            <span v-if="g.orientation === 'diagonal'" class="setting-desc">anchor X / Y / angle</span>
           </div>
-          <el-input-number :model-value="g.position" :precision="1" size="small" style="width: 130px" @change="(v: number | undefined) => onGuidePosition(g.id, v)" />
+          <el-input-number
+            :model-value="guidePrimary(g)"
+            :precision="1"
+            size="small"
+            style="width: 96px"
+            @change="(v: number | undefined) => onGuidePatch(g.id, { position: v })"
+          />
+          <el-input-number
+            v-if="g.orientation === 'diagonal'"
+            :model-value="g.cross"
+            :precision="1"
+            size="small"
+            style="width: 96px"
+            @change="(v: number | undefined) => onGuidePatch(g.id, { cross: v })"
+          />
+          <el-input-number
+            v-if="g.orientation === 'diagonal'"
+            :model-value="displayGuideAngle(g.angle)"
+            :precision="1"
+            :step="5"
+            :min="-90"
+            :max="90"
+            size="small"
+            style="width: 96px"
+            @change="(v: number | undefined) => onGuidePatch(g.id, { angle: v })"
+          />
           <el-button size="small" title="Delete guide" @click="onGuideDelete(g.id)">×</el-button>
         </div>
         <div v-if="guideRows.length > 0" class="setting-row">
@@ -227,6 +253,14 @@
           </div>
           <el-button size="small" :disabled="!store.hasSelection" @click="onGuideAtSelection('horizontal')">H</el-button>
           <el-button size="small" :disabled="!store.hasSelection" @click="onGuideAtSelection('vertical')">V</el-button>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Diagonal</span>
+            <span class="setting-desc">Angle through the active board's center</span>
+          </div>
+          <el-input-number v-model="diagonalAngle" :precision="1" :step="5" :min="-90" :max="90" size="small" style="width: 100px" />
+          <el-button size="small" @click="onAddDiagonalGuide">Add</el-button>
         </div>
         <div class="setting-row">
           <div class="setting-label">
@@ -287,6 +321,7 @@ import {
   preflightSeverity,
 } from '../../editor/topbar-dialogs'
 import type { RulerUnit } from '../../editor/types'
+import { displayGuideAngle } from '../../editor/guides/guide-geometry'
 
 const store = useEditorStore()
 const engineRef = inject<Ref<EditorEngine | null>>('engine')
@@ -323,13 +358,60 @@ function openGuidesDialog() {
   guidesTick.value++
   guidesVisible.value = true
 }
-function onGuidePosition(id: string, v: number | undefined) {
+function guideLabel(g: { orientation: string }): string {
+  if (g.orientation === 'vertical') return 'Vertical X'
+  if (g.orientation === 'diagonal') return 'Diagonal'
+  return 'Horizontal Y'
+}
+
+/**
+ * The coordinate a guide's first field edits. Horizontal guides store their
+ * y in `position` and carry no `cross`, so the field has to read from there.
+ */
+function guidePrimary(g: { orientation: string; position: number; cross: number }): number {
+  return g.orientation === 'horizontal' ? g.cross || g.position : g.position
+}
+
+const diagonalAngle = ref(45)
+
+/** Add a diagonal guide at the given angle through the active board's center. */
+function onAddDiagonalGuide() {
   const e = engineRef?.value
-  if (!e || v === undefined || !Number.isFinite(v)) {
+  if (!e) return
+  if (store.view.guidesLocked) {
+    store.setStatusMessage('Guides are locked')
+    return
+  }
+  const board =
+    store.artboards.find((b) => b.id === store.activeArtboardId) ?? store.artboards[0]
+  const x = board ? board.x + board.width / 2 : store.pageSize.width / 2
+  const y = board ? board.y + board.height / 2 : store.pageSize.height / 2
+  const guide = e.createGuide(x, 'diagonal', { angle: Number(diagonalAngle.value) || 0, y })
+  if (!guide) {
+    store.setStatusMessage('Could not add the guide')
+    return
+  }
+  e.pushHistory('Add Guide')
+  guidesTick.value++
+}
+
+function onGuidePatch(
+  id: string,
+  patch: { position?: number; cross?: number; angle?: number }
+) {
+  const e = engineRef?.value
+  if (!e) {
     guidesTick.value++
     return
   }
-  if (e.moveGuideById(id, v)) {
+  const clean = Object.fromEntries(
+    Object.entries(patch).filter(([, v]) => typeof v === 'number' && Number.isFinite(v as number))
+  ) as { position?: number; cross?: number; angle?: number }
+  if (Object.keys(clean).length === 0) {
+    guidesTick.value++
+    return
+  }
+  if (e.updateGuideById(id, clean)) {
     e.pushHistory('Move Guide')
   } else {
     store.setStatusMessage('Guide not found')

@@ -703,8 +703,30 @@ export class EditorEngine {
   }
 
   /** See engine-guides.ts. */
-  createGuide(position: number, orientation: GuideOrientation): paper.Path | null {
-    return guides.createGuide(this, position, orientation)
+  getGuideGeometry(item: paper.Item): guides.GuideGeometry | null {
+    return guides.getGuideGeometry(this, item)
+  }
+
+  /** See engine-guides.ts. */
+  setGuideGeometry(item: paper.Item, geometry: guides.GuideGeometry) {
+    guides.setGuideGeometry(this, item, geometry)
+  }
+
+  /** See engine-guides.ts. */
+  updateGuideById(
+    id: string,
+    patch: { position?: number; cross?: number; angle?: number }
+  ): boolean {
+    return guides.updateGuideById(this, id, patch)
+  }
+
+  /** See engine-guides.ts. */
+  createGuide(
+    position: number,
+    orientation: GuideOrientation,
+    options?: { angle?: number; y?: number }
+  ): paper.Path | null {
+    return guides.createGuide(this, position, orientation, options)
   }
 
   /** See engine-guides.ts. */
@@ -713,7 +735,13 @@ export class EditorEngine {
   }
 
   /** See engine-guides.ts. */
-  listGuides(): Array<{ id: string; orientation: GuideOrientation; position: number }> {
+  listGuides(): Array<{
+    id: string
+    orientation: GuideOrientation
+    position: number
+    cross: number
+    angle: number
+  }> {
     return guides.listGuides(this)
   }
 

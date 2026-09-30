@@ -19,6 +19,7 @@
  * are added/removed/moved/resized.
  */
 import type { EditorEngine } from '../engine'
+import { project as guideProject } from '../guides/guide-geometry'
 
 /** Bounds correction plus temporary guide segments for one drag step. */
 export interface SmartCorrection {
@@ -269,22 +270,31 @@ export class SnapService {
     let best = raw.clone()
     let bestDist = tol
 
-    // Ruler guide lines (single axis each).
+    // Ruler guide lines. An axis-aligned guide pulls the point onto its own
+    // coordinate; a diagonal one pulls it onto the closest point of the line.
     if (snap.guides && engine.store.view.showGuides) {
       for (const guide of engine.getGuides()) {
-        const orientation = engine.getGuideOrientation(guide)
-        if (orientation === 'vertical') {
-          const gx = engine.getGuidePosition(guide)
-          const dist = Math.abs(raw.x - gx)
+        const geometry = engine.getGuideGeometry(guide)
+        if (!geometry) continue
+        if (geometry.orientation === 'diagonal') {
+          const target = guideProject(geometry, { x: raw.x, y: raw.y })
+          const dist = Math.hypot(target.x - raw.x, target.y - raw.y)
           if (dist <= bestDist) {
-            best = new scope.Point(gx, raw.y)
+            best = new scope.Point(target.x, target.y)
             bestDist = dist
           }
-        } else if (orientation === 'horizontal') {
-          const gy = engine.getGuidePosition(guide)
-          const dist = Math.abs(raw.y - gy)
+          continue
+        }
+        if (geometry.orientation === 'vertical') {
+          const dist = Math.abs(raw.x - geometry.position)
           if (dist <= bestDist) {
-            best = new scope.Point(raw.x, gy)
+            best = new scope.Point(geometry.position, raw.y)
+            bestDist = dist
+          }
+        } else {
+          const dist = Math.abs(raw.y - geometry.position)
+          if (dist <= bestDist) {
+            best = new scope.Point(raw.x, geometry.position)
             bestDist = dist
           }
         }
